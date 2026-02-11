@@ -29,6 +29,7 @@ def cli(ctx, config_path):
 @click.option("-i", "--input-dir", default=None, help="输入目录")
 @click.option("-o", "--output-dir", default=None, help="输出目录")
 @click.option("-f", "--format", "formats", multiple=True, help="导出格式: csv/xlsx/docx/pdf/db")
+@click.option("--split-options/--merge-options", default=True, help="选项拆分为独立列 / 合并为单列")
 @click.option("--dedup/--no-dedup", default=True, help="是否去重")
 @click.option("--strategy", default=None, type=click.Choice(["content", "strict"]))
 @click.option("--db-url", default=None, help="数据库连接字符串")
@@ -39,7 +40,7 @@ def cli(ctx, config_path):
 @click.option("--max-rate", default=100, type=int, help="最高正确率")
 @click.option("--stats/--no-stats", default=True, help="是否显示统计")
 @click.pass_context
-def export(ctx, input_dir, output_dir, formats, dedup, strategy,
+def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
            db_url, filter_modes, filter_units, keyword, min_rate, max_rate, stats):
     """加载、去重、过滤、导出题目"""
     cfg = ctx.obj["config"]
@@ -106,7 +107,7 @@ def export(ctx, input_dir, output_dir, formats, dedup, strategy,
             extra_kwargs = {}
             if fmt == "db" and db_url:
                 extra_kwargs["db_url"] = db_url
-            exporter.export(questions, base_name, **extra_kwargs)
+            exporter.export(questions, base_name, split_options=split_options, **extra_kwargs)
         except KeyError as e:
             click.echo(f"[ERROR] {e}")
         except Exception as e:
