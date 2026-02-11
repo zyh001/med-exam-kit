@@ -8,7 +8,7 @@ from med_exam_toolkit.parsers.base import BaseParser
 class AhuyikaoParser(BaseParser):
 
     def can_handle(self, raw: dict) -> bool:
-        return raw.get("pkg", "") == "ahuyikao.com"
+        return raw.get("pkg", "") == "com.ahuxueshu"
 
     def parse(self, raw: dict) -> Question:
         mode = raw.get("mode", "")

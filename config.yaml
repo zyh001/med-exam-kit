@@ -10,7 +10,7 @@ dedup_strategy: "strict"
 # 解析器映射：pkg 字段 -> 解析器名称
 # 新增 app 时只需在此添加映射，并实现对应 parser
 parser_map:
-  "ahuyikao.com": "ahuyikao"
+  "com.ahuxueshu": "ahuyikao"
   "com.yikaobang.yixue": "yikaobang"
 
 # 导出配置
