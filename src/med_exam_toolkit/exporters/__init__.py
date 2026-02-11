@@ -21,4 +21,4 @@ def get_exporter(name: str) -> BaseExporter:
 
 
 def discover():
-    from . import csv_exporter, xlsx_exporter, docx_exporter, pdf_exporter, db_exporter  # noqa: F401
+    from . import csv_exporter, xlsx_exporter, docx_exporter, pdf_exporter, db_exporter, json_exporter  # noqa: F401
