@@ -1,0 +1,25 @@
+# 输入目录（存放爬虫产出的 JSON 文件）
+input_dir: "./data/raw"
+
+# 输出目录
+output_dir: "./data/output"
+
+# 去重策略: content（按题干内容）| strict（内容+选项+答案）
+dedup_strategy: "strict"
+
+# 解析器映射：pkg 字段 -> 解析器名称
+# 新增 app 时只需在此添加映射，并实现对应 parser
+parser_map:
+  "ahuyikao.com": "ahuyikao"
+  "com.yikaobang.yixue": "yikaobang"
+
+# 导出配置
+export:
+  formats:
+    - "xlsx"
+    # - "docx"
+    # - "pdf"
+    # - "csv"
+  # 数据库导出（可选）
+  # database:
+  #   url: "sqlite:///data/output/questions.db"
