@@ -21,7 +21,7 @@ def summarize(questions: list[Question]) -> dict:
         for sq in q.sub_questions:
             if sq.rate:
                 try:
-                    rate_val = int(sq.rate.replace("%", "").strip())
+                    rate_val = float(sq.rate.replace("%", "").strip())
                     if rate_val < 50:
                         low_rate_questions.append({
                             "text": sq.text[:60],
@@ -40,7 +40,7 @@ def summarize(questions: list[Question]) -> dict:
         "by_pkg": dict(by_pkg.most_common()),
         "by_cls": dict(by_cls.most_common()),
         "low_rate_count": len(low_rate_questions),
-        "low_rate_top10": sorted(low_rate_questions, key=lambda x: x["rate"])[:10],
+        "low_rate_top10": sorted(low_rate_questions, key=lambda x: float(x["rate"].replace("%", "").strip()),)[:10],
     }
 
 
