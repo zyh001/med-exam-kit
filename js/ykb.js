@@ -217,7 +217,10 @@ function get_answer() {
     for (var i = 0; i < els.length; i++) {
         var text = els[i].text();
         if (text != null && text.trim() !== "") {
-            return text.replace("答案：", "").trim();
+            text = text.replace("答案：", "").trim();
+            var m = text.match(/正确答案\s*([A-Z]+)/);
+            if (m) return m[1];
+            return text;
         }
     }
     return null;
