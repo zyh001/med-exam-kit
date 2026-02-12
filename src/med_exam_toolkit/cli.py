@@ -49,7 +49,7 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
     output_dir = output_dir or cfg.get("output_dir", "./data/output")
     strategy = strategy or cfg.get("dedup_strategy", "strict")
     parser_map = cfg.get("parser_map", {
-        "ahuyikao.com": "ahuyikao",
+        "com.ahuxueshu": "ahuyikao",
         "com.yikaobang.yixue": "yikaobang",
     })
 
@@ -124,7 +124,7 @@ def info(ctx, input_dir):
     cfg = ctx.obj["config"]
     input_dir = input_dir or cfg.get("input_dir", "./data/raw")
     parser_map = cfg.get("parser_map", {
-        "ahuyikao.com": "ahuyikao",
+        "com.ahuxueshu": "ahuyikao",
         "com.yikaobang.yixue": "yikaobang",
     })
 
