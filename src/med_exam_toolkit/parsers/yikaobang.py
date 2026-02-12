@@ -37,10 +37,10 @@ class YikaobangParser(BaseParser):
                 ))
 
         elif "A3" in mode or "A4" in mode:
-            q.stem = raw.get("stem", "")
+            q.stem = raw.get("test", "")
             for sq in raw.get("sub_questions", []):
                 q.sub_questions.append(SubQuestion(
-                    text=sq.get("test", ""),
+                    text=sq.get("sub_test", ""),
                     options=sq.get("option", []),
                     answer=sq.get("answer", ""),
                     rate=sq.get("rate", ""),
