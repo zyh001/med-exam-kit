@@ -99,18 +99,6 @@ function getVisibleFrame() {
         var frame = qlistviews[i].parent();
         if (frame == null) continue;
 
-        // 向上查找，直到找到包含 typeStr 的容器（即 PageFrame）
-        var current = frame;
-        for (var level = 0; level < 8; level++) {
-            var ts = current.find(id("com.yikaobang.yixue:id/typeStr"));
-            if (ts.length > 0) {
-                frame = current;
-                break;
-            }
-            if (current.parent() == null) break;
-            current = current.parent();
-        }
-
         var bounds = frame.bounds();
         var centerX = (bounds.left + bounds.right) / 2;
         candidates.push({
@@ -140,38 +128,44 @@ function get_cls() {
     return el.text();
 }
 
-function get_unit(frame) {
-    if (frame) {
-        var elements = frame.find(id("com.yikaobang.yixue:id/questiondetails_tv_title"));
-        for (var i = 0; i < elements.length; i++) {
-            var text = elements[i].text();
+
+function get_unit() {
+    var els = id("com.yikaobang.yixue:id/questiondetails_tv_title").find();
+    for (var i = 0; i < els.length; i++) {
+        var b = els[i].bounds();
+        var cx = (b.left + b.right) / 2;
+        var h = b.bottom - b.top;
+        // 过滤掉高度为0的幽灵元素，且在屏幕内
+        if (cx >= 0 && cx < device.width && h > 10) {
+            var text = els[i].text();
             if (text != null && text.trim() !== "") return text;
         }
     }
-    // 全局兜底
-    var el = id("questiondetails_tv_title").findOne(500);
-    return el != null ? el.text() : null;
+    return null;
 }
 
-function get_numb(frame) {
-    if (frame) {
-        var elements = frame.find(id("com.yikaobang.yixue:id/pagenumtv"));
-        for (var i = 0; i < elements.length; i++) {
-            var text = elements[i].text();
-            if (text != null && text.trim() !== "") return text.replace(/\s/g, "");
+function get_numb() {
+    var els = id("com.yikaobang.yixue:id/pagenumtv").find();
+    for (var i = 0; i < els.length; i++) {
+        var b = els[i].bounds();
+        var cx = (b.left + b.right) / 2;
+        if (cx >= 0 && cx < device.width) {
+            return els[i].text().replace(/\s/g, "");
         }
     }
-    var el = id("pagenumtv").findOne(3000);
-    return el != null ? el.text().replace(/\s/g, "") : null;
+    return null;
 }
 
 // ==================== frame 内元素提取 ====================
 
-function get_mode(frame) {
-    var elements = frame.find(id("com.yikaobang.yixue:id/typeStr"));
-    for (var i = 0; i < elements.length; i++) {
-        var text = elements[i].text();
-        if (text != null && text.trim() !== "") return text;
+function get_mode() {
+    var els = id("com.yikaobang.yixue:id/typeStr").find();
+    for (var i = 0; i < els.length; i++) {
+        var b = els[i].bounds();
+        var cx = (b.left + b.right) / 2;
+        if (cx >= 0 && cx < device.width) {
+            return els[i].text();
+        }
     }
     return null;
 }
@@ -243,42 +237,84 @@ function get_discuss(frame) {
     return "";
 }
 
+function get_accuracy(frame) {
+    var els = frame.find(id("com.yikaobang.yixue:id/questiondetails_tv_statistics"));
+    for (var i = 0; i < els.length; i++) {
+        var text = els[i].text();
+        if (text) {
+            // 取第一个"正确率xx.x%"（全部考生的），忽略后面本人的
+            var m = text.match(/正确率(\d+\.?\d*)%/);
+            if (m) return m[1] + "%";
+        }
+    }
+    return "";
+}
+
 // ==================== 题型检测 ====================
 
 /**
  * 判断当前 frame 是否为多子题类型（A3/A4 或 案例分析）
  * 依据：frame 内存在 tv_column_name（"第1问"、"第2问"...）
  */
-function isMultiSubQuestion(frame) {
-    var tabs = frame.find(id("com.yikaobang.yixue:id/tv_column_name"));
-    return tabs.length > 0;
+function isMultiSubQuestion() {
+    var tabs = id("com.yikaobang.yixue:id/tv_column_name").find();
+    for (var i = 0; i < tabs.length; i++) {
+        var b = tabs[i].bounds();
+        // 只要有一个 tab 完全在屏幕内就算多子题
+        if (b.left >= 0 && b.right <= device.width && (b.bottom - b.top) > 10) {
+            return true;
+        }
+    }
+    return false;
 }
 
 /**
  * 获取子题 Tab 列表，按 X 坐标排序
  * 返回: [{text: "第1问", x: 118}, {text: "第2问", x: 350}, ...]
  */
-function getSubTabs(frame) {
-    var tabs = frame.find(id("com.yikaobang.yixue:id/tv_column_name"));
-    var tabList = [];
+function getSubTabs() {
+    var tabs = id("com.yikaobang.yixue:id/tv_column_name").find();
+    var result = [];
     for (var i = 0; i < tabs.length; i++) {
-        tabList.push({
-            text: tabs[i].text(),
-            x: tabs[i].bounds().centerX(),
-            y: tabs[i].bounds().centerY(),
-            element: tabs[i]
-        });
+        var b = tabs[i].bounds();
+        var cx = (b.left + b.right) / 2;
+        // 只取屏幕内的 tab
+        if (cx >= 0 && cx < device.width && (b.bottom - b.top) > 10) {
+            result.push({
+                text: tabs[i].text(),
+                element: tabs[i],
+                x: cx,
+                y: (b.top + b.bottom) / 2
+            });
+        }
     }
-    tabList.sort(function(a, b) { return a.x - b.x; });
-    return tabList;
+    // 按 x 坐标排序（第1问在左，第2问在右...）
+    result.sort(function(a, b) { return a.x - b.x; });
+    return result;
+}
+
+/**
+ * 获取 A3/A4 的共享题干（在 Tab 上方的 titletv）
+ */
+function getSharedStem() {
+    var els = id("com.yikaobang.yixue:id/titletv").find();
+    for (var i = 0; i < els.length; i++) {
+        var b = els[i].bounds();
+        var cx = (b.left + b.right) / 2;
+        // 共享题干在屏幕内，且 y 位置在 Tab 上方（大约 y < 1050）
+        if (cx >= 0 && cx < device.width && b.bottom < 1050) {
+            return els[i].text();
+        }
+    }
+    return null;
 }
 
 // ==================== A1/A2 拉取 ====================
 
 function fetchA1A2() {
     var frame = getVisibleFrame();
-    var numb = get_numb(frame);
-    var unit = get_unit(frame);
+    var numb = get_numb();
+    var unit = get_unit();
 
     if (frame == null) {
         console.log("未找到可见 frame");
@@ -290,6 +326,7 @@ function fetchA1A2() {
 
     var titles = get_all_titletv(frame);
     var testText = titles.length > 0 ? titles[0].text : null;
+    var accuracy = get_accuracy(frame);
 
     var test = {
         name: timestamp,
@@ -297,10 +334,11 @@ function fetchA1A2() {
         cls: get_cls(),
         numb: get_numb(),
         unit: get_unit(),
-        mode: get_mode(frame),
+        mode: get_mode(),
         test: testText,
         option: get_option(frame),
         answer: get_answer(frame),
+        rate: accuracy,
         point: get_point(frame),
         discuss: get_discuss(frame)
     };
@@ -328,8 +366,8 @@ function fetchA1A2() {
  */
 function fetchMultiSub() {
     var frame = getVisibleFrame();
-    var numb = get_numb(frame);
-    var unit = get_unit(frame);
+    var numb = get_numb();
+    var unit = get_unit();
 
     if (frame == null) {
         console.log("未找到可见 frame");
@@ -343,19 +381,16 @@ function fetchMultiSub() {
     var cls = get_cls();
     var numb = get_numb();
     var unit = get_unit();
-    var mode = get_mode(frame);
+    var mode = get_mode();
 
     // 2. 共享题干（第 1 个 titletv）
-    var titles = get_all_titletv(frame);
-    var stem = "";
-    if (titles.length > 0) {
-        stem = titles[0].text;
-    }
+    var stem = getSharedStem() || "";
+
     console.log("  [" + mode + "] " + numb);
     console.log("  共享题干: " + stem.substring(0, 60) + "...");
 
     // 3. 获取子题 Tab
-    var tabList = getSubTabs(frame);
+    var tabList = getSubTabs();
     console.log("  子题数: " + tabList.length);
 
     if (tabList.length === 0) {
@@ -384,7 +419,7 @@ function fetchMultiSub() {
         }
 
         // 重新获取 Tab 列表（防止引用失效）
-        tabList = getSubTabs(frame);
+        tabList = getSubTabs();
 
         // 提取子题题干（第 2 个 titletv）
         var subTitles = get_all_titletv(frame);
@@ -412,6 +447,7 @@ function fetchMultiSub() {
             option: options,
             answer: answer,
             point: point,
+            rate: get_accuracy(frame),
             discuss: discuss
         });
     }
@@ -681,7 +717,6 @@ function main() {
     var maxFail = 5;
     var savedCount = 0;
     var stuckCount = 0;
-
 
     for (var i = 0; i < 10000; i++) {
         console.log("\n---------- 第 " + (i + 1) + " 轮 | 已保存: " + savedCount + " ----------");
