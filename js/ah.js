@@ -1,6 +1,7 @@
 // ==================== 配置区 ====================
 var APP_NAME = "阿虎医考";
 var PKG_NAME = "com.ahuxueshu";
+var OUTPUT_DIR = "/sdcard/tests/";
 var SKIP_MODES = [];  // ★ 清空：A1/A2、A3/A4、B1 均已适配
 var record;
 var lastNumb = "";
@@ -654,7 +655,7 @@ function fetchB1() {
 // ==================== 核心逻辑函数 ====================
 
 function savejson(test) {
-    let name = "/sdcard/tests/" + test.name + ".json";
+    var name = OUTPUT_DIR + test.name + ".json";
     record = test;
     lastNumb = test.numb;
     var jsonData = JSON.stringify(test, null, 2);
@@ -773,8 +774,7 @@ function checkMode() {
 // ==================== 主循环 ====================
 
 function swipeNext() {
-    console.log("左滑 → 下一题");
-    swipe(1000, 1200, 200, 1200, 300);
+    swipe(1000, 1200, 200, 1200, 250);
     sleep(800);
 }
 
@@ -1029,9 +1029,8 @@ function main() {
 }
 
 // ==================== 入口 ====================
-
-files.createWithDirs("/sdcard/tests/placeholder");
-files.remove("/sdcard/tests/placeholder");
+files.createWithDirs(OUTPUT_DIR + "placeholder");
+files.remove(OUTPUT_DIR + "placeholder");
 
 console.log("启动App: " + APP_NAME);
 app.launchApp(APP_NAME);
