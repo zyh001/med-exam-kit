@@ -1,47 +1,60 @@
 // ==================== 配置区 ====================
 var APP_NAME = "医考帮";
 var PKG_NAME = "com.yikaobang.yixue";
+var OUTPUT_DIR = "/sdcard/tests/";
 var record = null;
 var lastNumb = "";
 var lastUnit = "";
+var currentChapter = "";
 
-// ==================== 工具函数 ====================
+// ==================== 核心过滤函数 ====================
 
 /**
- * 在屏幕中下部向下滚动（加载子题的答案/考点/解析）
+ * 在当前页面查找指定 ID 的元素
+ * 仅过滤 X 轴：排除左右相邻页面的元素
+ * Y 轴不限制：屏幕下方未显示的考点、解析等也能获取到
  */
-function scrollContentDown() {
-    var x = Math.floor(device.width / 2);
-    var startY = Math.floor(device.height * 0.82);
-    var endY = Math.floor(device.height * 0.42);
-    swipe(x, startY, x, endY, 400);
-    sleep(400);
+function findOnScreen(idStr) {
+    var els = id(idStr).find();
+    var result = [];
+    for (var i = 0; i < els.length; i++) {
+        var b = els[i].bounds();
+        if (b.left >= 0 && b.left < b.right && b.right <= device.width) {
+            result.push(els[i]);
+        }
+    }
+    return result;
 }
 
 /**
- * 在屏幕中下部向上滚动（回到 Tab 区域）
+ * 获取屏幕内 Tab 的 Y 坐标范围
  */
-function scrollContentUp() {
-    var x = Math.floor(device.width / 2);
-    var startY = Math.floor(device.height * 0.42);
-    var endY = Math.floor(device.height * 0.82);
-    swipe(x, startY, x, endY, 400);
-    sleep(400);
+function getTabYRange() {
+    var tabs = findOnScreen("com.yikaobang.yixue:id/tv_column_name");
+    if (tabs.length === 0) return null;
+    var top = tabs[0].bounds().top;
+    var bottom = tabs[0].bounds().bottom;
+    for (var i = 1; i < tabs.length; i++) {
+        var b = tabs[i].bounds();
+        if (b.top < top) top = b.top;
+        if (b.bottom > bottom) bottom = b.bottom;
+    }
+    return { top: top, bottom: bottom };
 }
 
-/**
- * 滚动加载子题全部内容，然后滚回顶部
- */
-function scrollToLoadContent() {
-    // 向下滚 2 次，确保答案/考点/解析加载
-    scrollContentDown();
-    scrollContentDown();
-    // 滚回顶部，确保 Tab 可点击
-    scrollContentUp();
-    scrollContentUp();
-    scrollContentUp(); // 多滚一次确保回到顶部
+// ==================== 滑动操作 ====================
+
+function swipeNextSub() {
+    swipe(1000, 2200, 200, 2200, 150);
     sleep(300);
 }
+
+function swipeNextMain() {
+    swipe(1000, 600, 200, 600, 250);
+    sleep(300);
+}
+
+// ==================== 工具函数 ====================
 
 function hasNullValue(obj) {
     if (obj === null || obj === undefined) return true;
@@ -57,21 +70,15 @@ function hasNullValue(obj) {
     return false;
 }
 
-/**
- * A3/A4 和案例分析的校验（允许 point/discuss 为空字符串）
- */
 function validateMultiSub(test) {
     if (test == null) return false;
     if (!test.cls || !test.numb || !test.mode || !test.test) return false;
     if (!test.sub_questions || test.sub_questions.length === 0) return false;
-
     for (var i = 0; i < test.sub_questions.length; i++) {
         var sq = test.sub_questions[i];
-        if (!sq.sub_numb) return false;
-        if (!sq.sub_test) return false;
+        if (!sq.sub_numb || !sq.sub_test) return false;
         if (!sq.option || sq.option.length === 0) return false;
         if (!sq.answer) return false;
-        // point 和 discuss 允许为空字符串
     }
     return true;
 }
@@ -88,35 +95,7 @@ function getFormattedTimestamp() {
     return y + "-" + mo + "-" + d + "-" + h + "-" + mi + "-" + s + "-" + ms;
 }
 
-// ==================== 核心：获取当前可见页面的容器 ====================
-
-function getVisibleFrame() {
-    var qlistviews = id("com.yikaobang.yixue:id/qlistview").find();
-    if (qlistviews.length === 0) return null;
-
-    var candidates = [];
-    for (var i = 0; i < qlistviews.length; i++) {
-        var frame = qlistviews[i].parent();
-        if (frame == null) continue;
-
-        var bounds = frame.bounds();
-        var centerX = (bounds.left + bounds.right) / 2;
-        candidates.push({
-            element: frame,
-            centerX: centerX,
-            dist: Math.abs(centerX - device.width / 2)
-        });
-    }
-
-    if (candidates.length === 0) return null;
-    candidates.sort(function(a, b) { return a.dist - b.dist; });
-
-    var best = candidates[0];
-    if (best.dist > device.width) return null;
-    return best.element;
-}
-
-// ==================== 全局元素提取（不在 frame 内） ====================
+// ==================== 全局元素提取（屏幕坐标过滤） ====================
 
 function get_cls() {
     var el = id("com.yikaobang.yixue:id/include_title_center").findOne(5000);
@@ -128,42 +107,69 @@ function get_cls() {
     return el.text();
 }
 
-
 function get_unit() {
-    var els = id("com.yikaobang.yixue:id/questiondetails_tv_title").find();
+    var els = findOnScreen("com.yikaobang.yixue:id/questiondetails_tv_title");
     for (var i = 0; i < els.length; i++) {
-        var b = els[i].bounds();
-        var cx = (b.left + b.right) / 2;
-        var h = b.bottom - b.top;
-        // 过滤掉高度为0的幽灵元素，且在屏幕内
-        if (cx >= 0 && cx < device.width && h > 10) {
-            var text = els[i].text();
-            if (text != null && text.trim() !== "") return text;
-        }
+        var text = els[i].text();
+        if (text != null && text.trim() !== "") return text;
     }
     return null;
 }
 
 function get_numb() {
-    var els = id("com.yikaobang.yixue:id/pagenumtv").find();
-    for (var i = 0; i < els.length; i++) {
-        var b = els[i].bounds();
-        var cx = (b.left + b.right) / 2;
-        if (cx >= 0 && cx < device.width) {
-            return els[i].text().replace(/\s/g, "");
-        }
+    var els = findOnScreen("com.yikaobang.yixue:id/pagenumtv");
+    if (els.length > 0) {
+        return els[0].text().replace(/\s/g, "");
     }
     return null;
 }
 
-// ==================== frame 内元素提取 ====================
-
 function get_mode() {
-    var els = id("com.yikaobang.yixue:id/typeStr").find();
+    var els = findOnScreen("com.yikaobang.yixue:id/typeStr");
+    if (els.length > 0) {
+        return els[0].text();
+    }
+    return null;
+}
+
+function isMultiSubQuestion() {
+    var tabs = findOnScreen("com.yikaobang.yixue:id/tv_column_name");
+    return tabs.length > 0;
+}
+
+function getSubTabs() {
+    var tabs = findOnScreen("com.yikaobang.yixue:id/tv_column_name");
+    var result = [];
+    for (var i = 0; i < tabs.length; i++) {
+        var b = tabs[i].bounds();
+        result.push({
+            text: tabs[i].text(),
+            x: (b.left + b.right) / 2,
+            y: (b.top + b.bottom) / 2
+        });
+    }
+    result.sort(function(a, b) { return a.x - b.x; });
+    return result;
+}
+
+function updateChapter() {
+    var title = id("com.yikaobang.yixue:id/txt_actionbar_title").findOne(500);
+    if (title != null && title.text() !== "") {
+        currentChapter = title.text();
+    }
+}
+
+/**
+ * 获取共享题干（Tab 上方的 titletv）
+ */
+function getSharedStem() {
+    var tabRange = getTabYRange();
+    var dividerY = tabRange ? tabRange.top : 977;
+
+    var els = findOnScreen("com.yikaobang.yixue:id/titletv");
     for (var i = 0; i < els.length; i++) {
         var b = els[i].bounds();
-        var cx = (b.left + b.right) / 2;
-        if (cx >= 0 && cx < device.width) {
+        if (b.top < dividerY && els[i].text()) {
             return els[i].text();
         }
     }
@@ -171,33 +177,31 @@ function get_mode() {
 }
 
 /**
- * 获取 frame 内所有 titletv，按 Y 排序返回
- * A1/A2: 只有 1 个（题干）
- * A3/A4 & 案例分析: 有 2 个（第1个=共享题干，第2个=子题题干）
+ * 获取子题题干（Tab 下方的 titletv）
  */
-function get_all_titletv(frame) {
-    var elements = frame.find(id("com.yikaobang.yixue:id/titletv"));
-    var items = [];
-    for (var i = 0; i < elements.length; i++) {
-        var el = elements[i];
-        if (el != null && el.text() != null) {
-            items.push({
-                text: el.text(),
-                y: el.bounds().centerY()
-            });
+function getSubQuestionStem() {
+    var tabRange = getTabYRange();
+    var dividerY = tabRange ? tabRange.bottom : 1107;
+
+    var els = findOnScreen("com.yikaobang.yixue:id/titletv");
+    for (var i = 0; i < els.length; i++) {
+        var b = els[i].bounds();
+        if (b.top > dividerY && els[i].text()) {
+            return els[i].text();
         }
     }
-    items.sort(function(a, b) { return a.y - b.y; });
-    return items;
+    return null;
 }
 
-function get_option(frame) {
-    var elements = frame.find(id("com.yikaobang.yixue:id/QuestionOptions_item_tv_content"));
+/**
+ * 获取选项（屏幕内，按 Y 排序）
+ */
+function get_option() {
+    var els = findOnScreen("com.yikaobang.yixue:id/QuestionOptions_item_tv_content");
     var items = [];
-    for (var i = 0; i < elements.length; i++) {
-        var el = elements[i];
-        if (el != null && el.text() != null) {
-            items.push({ text: el.text(), y: el.bounds().centerY() });
+    for (var i = 0; i < els.length; i++) {
+        if (els[i].text()) {
+            items.push({ text: els[i].text(), y: els[i].bounds().centerY() });
         }
     }
     items.sort(function(a, b) { return a.y - b.y; });
@@ -208,10 +212,10 @@ function get_option(frame) {
     return options;
 }
 
-function get_answer(frame) {
-    var elements = frame.find(id("com.yikaobang.yixue:id/questiondetails_tv_Answer"));
-    for (var i = 0; i < elements.length; i++) {
-        var text = elements[i].text();
+function get_answer() {
+    var els = findOnScreen("com.yikaobang.yixue:id/questiondetails_tv_Answer");
+    for (var i = 0; i < els.length; i++) {
+        var text = els[i].text();
         if (text != null && text.trim() !== "") {
             return text.replace("答案：", "").trim();
         }
@@ -219,30 +223,29 @@ function get_answer(frame) {
     return null;
 }
 
-function get_point(frame) {
-    var elements = frame.find(id("com.yikaobang.yixue:id/questiondetails_tv_content_ques1"));
-    for (var i = 0; i < elements.length; i++) {
-        var text = elements[i].text();
+function get_point() {
+    var els = findOnScreen("com.yikaobang.yixue:id/questiondetails_tv_content_ques1");
+    for (var i = 0; i < els.length; i++) {
+        var text = els[i].text();
         if (text != null && text.trim() !== "") return text;
     }
     return "";
 }
 
-function get_discuss(frame) {
-    var elements = frame.find(id("com.yikaobang.yixue:id/questiondetails_tv_contents"));
-    for (var i = 0; i < elements.length; i++) {
-        var text = elements[i].text();
+function get_discuss() {
+    var els = findOnScreen("com.yikaobang.yixue:id/questiondetails_tv_contents");
+    for (var i = 0; i < els.length; i++) {
+        var text = els[i].text();
         if (text != null && text.trim() !== "") return text;
     }
     return "";
 }
 
-function get_accuracy(frame) {
-    var els = frame.find(id("com.yikaobang.yixue:id/questiondetails_tv_statistics"));
+function get_accuracy() {
+    var els = findOnScreen("com.yikaobang.yixue:id/questiondetails_tv_statistics");
     for (var i = 0; i < els.length; i++) {
         var text = els[i].text();
         if (text) {
-            // 取第一个"正确率xx.x%"（全部考生的），忽略后面本人的
             var m = text.match(/正确率(\d+\.?\d*)%/);
             if (m) return m[1] + "%";
         }
@@ -250,61 +253,15 @@ function get_accuracy(frame) {
     return "";
 }
 
-// ==================== 题型检测 ====================
-
 /**
- * 判断当前 frame 是否为多子题类型（A3/A4 或 案例分析）
- * 依据：frame 内存在 tv_column_name（"第1问"、"第2问"...）
+ * A1/A2 单题：titletv 只有一个（无 Tab），直接取
  */
-function isMultiSubQuestion() {
-    var tabs = id("com.yikaobang.yixue:id/tv_column_name").find();
-    for (var i = 0; i < tabs.length; i++) {
-        var b = tabs[i].bounds();
-        // 只要有一个 tab 完全在屏幕内就算多子题
-        if (b.left >= 0 && b.right <= device.width && (b.bottom - b.top) > 10) {
-            return true;
-        }
-    }
-    return false;
-}
-
-/**
- * 获取子题 Tab 列表，按 X 坐标排序
- * 返回: [{text: "第1问", x: 118}, {text: "第2问", x: 350}, ...]
- */
-function getSubTabs() {
-    var tabs = id("com.yikaobang.yixue:id/tv_column_name").find();
-    var result = [];
-    for (var i = 0; i < tabs.length; i++) {
-        var b = tabs[i].bounds();
-        var cx = (b.left + b.right) / 2;
-        // 只取屏幕内的 tab
-        if (cx >= 0 && cx < device.width && (b.bottom - b.top) > 10) {
-            result.push({
-                text: tabs[i].text(),
-                element: tabs[i],
-                x: cx,
-                y: (b.top + b.bottom) / 2
-            });
-        }
-    }
-    // 按 x 坐标排序（第1问在左，第2问在右...）
-    result.sort(function(a, b) { return a.x - b.x; });
-    return result;
-}
-
-/**
- * 获取 A3/A4 的共享题干（在 Tab 上方的 titletv）
- */
-function getSharedStem() {
-    var els = id("com.yikaobang.yixue:id/titletv").find();
-    for (var i = 0; i < els.length; i++) {
-        var b = els[i].bounds();
-        var cx = (b.left + b.right) / 2;
-        // 共享题干在屏幕内，且 y 位置在 Tab 上方（大约 y < 1050）
-        if (cx >= 0 && cx < device.width && b.bottom < 1050) {
-            return els[i].text();
-        }
+function getSingleStem() {
+    var els = findOnScreen("com.yikaobang.yixue:id/titletv");
+    if (els.length > 0) {
+        // 按 Y 排序，取第一个
+        els.sort(function(a, b) { return a.bounds().top - b.bounds().top; });
+        return els[0].text();
     }
     return null;
 }
@@ -312,35 +269,21 @@ function getSharedStem() {
 // ==================== A1/A2 拉取 ====================
 
 function fetchA1A2() {
-    var frame = getVisibleFrame();
-    var numb = get_numb();
-    var unit = get_unit();
-
-    if (frame == null) {
-        console.log("未找到可见 frame");
-        return null;
-    }
-
     console.log("========== 拉取 A1/A2 ==========");
-    var timestamp = getFormattedTimestamp();
-
-    var titles = get_all_titletv(frame);
-    var testText = titles.length > 0 ? titles[0].text : null;
-    var accuracy = get_accuracy(frame);
 
     var test = {
-        name: timestamp,
+        name: getFormattedTimestamp(),
         pkg: PKG_NAME,
         cls: get_cls(),
         numb: get_numb(),
         unit: get_unit(),
         mode: get_mode(),
-        test: testText,
-        option: get_option(frame),
-        answer: get_answer(frame),
-        rate: accuracy,
-        point: get_point(frame),
-        discuss: get_discuss(frame)
+        test: getSingleStem(),
+        option: get_option(),
+        answer: get_answer(),
+        rate: get_accuracy(),
+        point: get_point(),
+        discuss: get_discuss()
     };
 
     console.log("  [" + test.mode + "] " + test.numb);
@@ -353,108 +296,62 @@ function fetchA1A2() {
 
 // ==================== A3/A4 & 案例分析 拉取 ====================
 
-/**
- * 拉取多子题类型（A3/A4 型题 & 案例分析题）
- *
- * 流程：
- *   1. 提取共享题干（frame 内第 1 个 titletv）
- *   2. 获取所有子题 Tab（"第1问"、"第2问"...）
- *   3. 逐个点击 Tab，提取每个子题的：
- *      - 子题题干（frame 内第 2 个 titletv）
- *      - 选项、答案、考点、解析
- *   4. 组装为 sub_questions 数组
- */
 function fetchMultiSub() {
-    var frame = getVisibleFrame();
-    var numb = get_numb();
-    var unit = get_unit();
-
-    if (frame == null) {
-        console.log("未找到可见 frame");
-        return null;
-    }
-
     console.log("========== 拉取 A3/A4 或 案例分析 ==========");
-    var timestamp = getFormattedTimestamp();
 
-    // 1. 全局信息
     var cls = get_cls();
     var numb = get_numb();
     var unit = get_unit();
     var mode = get_mode();
-
-    // 2. 共享题干（第 1 个 titletv）
     var stem = getSharedStem() || "";
 
     console.log("  [" + mode + "] " + numb);
     console.log("  共享题干: " + stem.substring(0, 60) + "...");
 
-    // 3. 获取子题 Tab
     var tabList = getSubTabs();
-    console.log("  子题数: " + tabList.length);
+    var tabCount = tabList.length;
+    console.log("  子题数: " + tabCount);
 
-    if (tabList.length === 0) {
+    if (tabCount === 0) {
         console.log("  ✗ 未找到子题 Tab，回退到 A1/A2 模式");
         return fetchA1A2();
     }
 
-    // 4. 逐个点击 Tab，提取子题数据
     var subQuestions = [];
 
-    for (var t = 0; t < tabList.length; t++) {
-        console.log("  --- 切换到: " + tabList[t].text + " ---");
+    for (var t = 0; t < tabCount; t++) {
+        var tabName = (t < tabList.length) ? tabList[t].text : ("第" + (t + 1) + "问");
+        console.log("  --- " + tabName + " (" + (t + 1) + "/" + tabCount + ") ---");
 
-        // 点击 Tab
-        clickTab(tabList[t]);
-        sleep(800);
-
-        // 滚动加载全部内容，再滚回顶部
-        scrollToLoadContent();
-
-        // 重新获取 frame（滚动 + Tab 切换后 UI 树可能刷新）
-        frame = getVisibleFrame();
-        if (frame == null) {
-            console.log("  ✗ 切换后 frame 丢失，跳过 " + tabList[t].text);
-            continue;
+        if (t > 0) {
+            swipeNextSub();
         }
 
-        // 重新获取 Tab 列表（防止引用失效）
-        tabList = getSubTabs();
+        sleep(200);
 
-        // 提取子题题干（第 2 个 titletv）
-        var subTitles = get_all_titletv(frame);
-        var subTest = "";
-        if (subTitles.length >= 2) {
-            subTest = subTitles[1].text;
-        } else if (subTitles.length === 1) {
-            // 可能只有子题题干没有共享题干（极端情况）
-            subTest = subTitles[0].text;
-        }
-
-        // 提取选项、答案、考点、解析
-        var options = get_option(frame);
-        var answer = get_answer(frame);
-        var point = get_point(frame);
-        var discuss = get_discuss(frame);
+        var subTest = getSubQuestionStem() || "";
+        var options = get_option();
+        var answer = get_answer();
+        var point = get_point();
+        var discuss = get_discuss();
+        var accuracy = get_accuracy();
 
         console.log("    子题: " + subTest.substring(0, 50) + "...");
-        console.log("    选项数: " + options.length);
-        console.log("    答案: " + answer);
+        console.log("    选项数: " + options.length + " | 答案: " + answer + " | 正确率: " + accuracy);
 
         subQuestions.push({
-            sub_numb: tabList[t].text,
+            sub_numb: tabName,
             sub_test: subTest,
             option: options,
             answer: answer,
+            rate: accuracy,
             point: point,
-            rate: get_accuracy(frame),
             discuss: discuss
         });
     }
 
-    // 5. 组装最终 JSON
     var test = {
-        name: timestamp,
+        name: getFormattedTimestamp(),
         pkg: PKG_NAME,
         cls: cls,
         numb: numb,
@@ -464,48 +361,15 @@ function fetchMultiSub() {
         sub_questions: subQuestions
     };
 
-    console.log("  子题采集完成: " + subQuestions.length + "/" + tabList.length);
+    console.log("  子题采集完成: " + subQuestions.length + "/" + tabCount);
     return test;
 }
 
-/**
- * 点击子题 Tab
- * 优先用 element.click()，失败则用坐标点击
- */
-function clickTab(tab) {
-    try {
-        // 先尝试 element.click()
-        if (tab.element != null) {
-            tab.element.click();
-            return;
-        }
-    } catch (e) {
-        console.log("    Tab element.click 失败: " + e);
-    }
+// ==================== 统一入口 ====================
 
-    // 回退：坐标点击
-    if (tab.x && tab.y) {
-        click(tab.x, tab.y);
-    }
-}
-
-// ==================== 统一拉取入口 ====================
-
-/**
- * 自动检测题型并拉取
- * - A1/A2 型题 → fetchA1A2()
- * - A3/A4 型题 / 案例分析 → fetchMultiSub()
- */
 function fetchQuestion() {
-    var frame = getVisibleFrame();
-    if (frame == null) {
-        console.log("未找到可见 frame");
-        return null;
-    }
-
-    var mode = get_mode(frame);
-    var isMulti = isMultiSubQuestion(frame);
-
+    var mode = get_mode();
+    var isMulti = isMultiSubQuestion();
     console.log("  检测题型: " + mode + " | 多子题: " + isMulti);
 
     if (isMulti) {
@@ -515,27 +379,18 @@ function fetchQuestion() {
     }
 }
 
-// ==================== 统一校验 ====================
-
-/**
- * 根据题目结构选择校验方式
- */
 function validateQuestion(test) {
     if (test == null) return false;
-
-    // 多子题结构
     if (test.sub_questions !== undefined) {
         return validateMultiSub(test);
     }
-
-    // A1/A2 结构
     return !hasNullValue(test);
 }
 
 // ==================== 保存 ====================
 
 function savejson(test) {
-    var name = "/sdcard/tests/" + test.name + ".json";
+    var name = OUTPUT_DIR + test.name + ".json";
     record = test;
     lastNumb = test.numb;
     lastUnit = test.unit || "";
@@ -592,13 +447,11 @@ function sim_click(targetText) {
         target = textContains(targetText).findOne(250);
     }
     var targetBounds = target.parent().bounds();
-
     while (targetBounds.centerY() > device.height - 200) {
         swipe(700, 2000, 700, 1600, 1000);
         targetBounds = textContains(targetText).findOne().parent().bounds();
         sleep(500);
     }
-
     sleep(1000);
     click(targetBounds.centerX() / 2, targetBounds.centerY());
 }
@@ -607,7 +460,6 @@ function reset() {
     console.log("========== 开始重置 ==========");
     closeAd();
     forceStop();
-
     app.launchApp(APP_NAME);
 
     var waitCount = 0;
@@ -622,26 +474,14 @@ function reset() {
     sleep(3000);
     closeAd();
     sleep(1000);
-
-    try {
-        text("大三期末").findOne(3000).parent().parent().click();
-        console.log("点击横栏项目");
-    } catch (e) {
-        console.log("点击横栏失败: " + e);
-    }
-
-    sleep(5000);
     closeAd();
 
     if (record != null) {
         console.log("恢复到: " + record.cls + " > " + (record.unit || "") + " > " + record.numb);
-
         try { sim_click(record.cls); sleep(1000); closeAd(); }
         catch (e) { console.log("导航课程失败: " + e); }
-
         try { sim_click(record.unit); sleep(1000); closeAd(); }
         catch (e) { console.log("导航章节失败: " + e); }
-
         try {
             var currentNum = record.numb.split("/")[0];
             console.log("恢复到题号: " + currentNum);
@@ -656,50 +496,122 @@ function reset() {
 
 // ==================== 翻页与等待 ====================
 
-function swipeNext() {
-    swipe(1000, 1000, 200, 1000, 200);
-    sleep(600);
-}
-
 function waitForPage(timeout) {
     timeout = timeout || 5000;
     var start = Date.now();
     while (Date.now() - start < timeout) {
-        var frame = getVisibleFrame();
-        if (frame != null) {
-            var titles = frame.find(id("com.yikaobang.yixue:id/titletv"));
-            if (titles.length > 0) {
-                sleep(300);
-                return true;
-            }
+        var els = findOnScreen("com.yikaobang.yixue:id/titletv");
+        if (els.length > 0) {
+            sleep(200);
+            return true;
         }
-        sleep(300);
+        sleep(200);
     }
     return false;
 }
 
+/**
+ * 处理章节切换
+ * 场景1: 最后一题滑动后弹出"已经是最后一题，是否跳转下一章？"
+ * 场景2: 跳转后进入题目列表页，需要选背题模式并点击第1题
+ */
 function handleNextChapter() {
-    if (text("进入下一章").exists()) {
-        console.log("★ 检测到章节切换 ★");
-        text("进入下一章").findOne().click();
-        sleep(3000);
-
-        var firstQ = text("1").findOne(5000);
-        if (firstQ != null) {
-            firstQ.parent().click();
-            sleep(1000);
-        }
-
-        var newUnit = get_unit();
-        if (newUnit != null && newUnit === lastUnit) {
-            console.log("!!!章节脱节!!! 重置");
-            reset();
-        } else {
-            lastNumb = "";
-        }
-        return true;
+    // 场景1: 弹窗 "跳转下一章"
+    var jumpBtn = id("com.yikaobang.yixue:id/tv_next").findOne(500);
+    if (jumpBtn != null) {
+        updateChapter;
+        console.log("★ 当前章节结束: " + currentChapter + "，跳转下一章 ★");
+        jumpBtn.click();
+        sleep(2000);
+        return enterFromQuestionList();
     }
+
+    // 场景2: 已经在题目列表页（比如从其他地方进入）
+    if (id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+        console.log("★ 检测到题目列表页 ★");
+        return enterFromQuestionList();
+    }
+
     return false;
+}
+
+/**
+ * 从题目列表页进入：选背题模式 → 点第1题
+ */
+function enterFromQuestionList() {
+    // 点击"背题模式"
+    var labels = id("com.yikaobang.yixue:id/labeltext").find();
+    for (var i = 0; i < labels.length; i++) {
+        if (labels[i].text() === "背题模式") {
+            console.log("  点击背题模式");
+            labels[i].click();
+            sleep(1000);
+            break;
+        }
+    }
+
+    // 点击题号 "1"，用坐标点击更可靠
+    var retries = 3;
+    for (var r = 0; r < retries; r++) {
+        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+        for (var i = 0; i < items.length; i++) {
+            if (items[i].text() === "1") {
+                var b = items[i].bounds();
+                console.log("  点击第1题 (尝试" + (r + 1) + ")");
+                click(b.centerX(), b.centerY());
+                sleep(3000);
+
+                // 验证是否离开了列表页
+                if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+                    lastNumb = "";
+                    lastUnit = "";
+                    updateChapter();
+                    console.log("★ 已进入新章节: " + currentChapter + " ★");
+
+                    return true;
+                }
+                break;
+            }
+        }
+        sleep(1000);
+    }
+
+    console.log("  进入新章节失败，仍在列表页");
+    return false;
+}
+
+// ==================== 打印缺失字段 ====================
+
+function printMissing(json) {
+    if (json == null) {
+        console.log("    json = null");
+        return;
+    }
+    var keys = Object.keys(json);
+    for (var k = 0; k < keys.length; k++) {
+        var key = keys[k];
+        var val = json[key];
+        if (val === null || val === undefined) {
+            console.log("    缺失: " + key);
+        } else if (Array.isArray(val) && val.length === 0) {
+            console.log("    空数组: " + key);
+        }
+    }
+    if (json.sub_questions) {
+        for (var s = 0; s < json.sub_questions.length; s++) {
+            var sq = json.sub_questions[s];
+            var sqKeys = Object.keys(sq);
+            for (var k = 0; k < sqKeys.length; k++) {
+                var key = sqKeys[k];
+                var val = sq[key];
+                if (val === null || val === undefined) {
+                    console.log("    子题[" + s + "] 缺失: " + key);
+                } else if (Array.isArray(val) && val.length === 0) {
+                    console.log("    子题[" + s + "] 空数组: " + key);
+                }
+            }
+        }
+    }
 }
 
 // ==================== 主循环 ====================
@@ -707,7 +619,7 @@ function handleNextChapter() {
 function main() {
     console.log("========== 脚本启动 ==========");
     console.log("设备: " + device.width + "x" + device.height);
-    console.log("支持题型: A1/A2, A3/A4, 案例分析");
+    setScreenMetrics(1200, 2670)  //设置屏幕分辨率
 
     sleep(3000);
     closeAd();
@@ -719,59 +631,55 @@ function main() {
     var stuckCount = 0;
 
     for (var i = 0; i < 10000; i++) {
-        console.log("\n---------- 第 " + (i + 1) + " 轮 | 已保存: " + savedCount + " ----------");
+        updateChapter();
+        console.log("\n---------- 第 " + (i + 1) + " 轮 | " + currentChapter + " | 已保存: " + savedCount + " ----------");
 
-        // 1. 广告
         closeAd();
 
-        // 2. 背题模式异常
-        if (text("背题模式").exists()) {
-            console.log("检测到背题模式异常，重置");
-            reset();
-            continue;
+        if (id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+            console.log("检测到题目列表页，尝试进入");
+            if (enterFromQuestionList()) {
+                continue;
+            } else {
+                console.log("进入失败，重置");
+                reset();
+                continue;
+            }
         }
 
-        // 3. 章节切换
-        if (handleNextChapter()) {
-            continue;
-        }
+        if (handleNextChapter()) continue;
 
-        // 4. 等待页面
         if (!waitForPage(5000)) {
             console.log("页面未加载");
-            sleep(2000);
             closeAd();
-            if (!waitForPage(5000)) {
+            if (handleNextChapter()) continue;
+            if (!waitForPage(3000)) {
                 failCount++;
                 console.log("连续失败: " + failCount + "/" + maxFail);
                 if (failCount >= maxFail) {
                     reset();
                     failCount = 0;
                 }
-                swipeNext();
+                swipeNextMain();
                 continue;
             }
         }
 
-        // 5. 获取题号 + 章节用于去重
-        var frame = getVisibleFrame();
-        var currentNumb = get_numb(frame);
-        var currentUnit = get_unit(frame);
+        var currentNumb = get_numb();
+        var currentUnit = get_unit();
 
-        // 章节变化
         if (currentUnit != null && lastUnit !== "" && currentUnit !== lastUnit) {
             console.log("★ 章节切换: " + lastUnit + " → " + currentUnit);
             lastNumb = "";
         }
 
-        // 去重
         if (currentNumb != null && currentNumb === lastNumb
             && (currentUnit || "") === lastUnit) {
             stuckCount++;
             console.log("题号未变(" + currentNumb + ") 卡住: " + stuckCount);
 
             if (stuckCount >= 3) {
-                swipe(1050, 1000, 100, 1000, 150);
+                swipe(1050, 600, 100, 600, 150);
                 sleep(1500);
 
                 if (handleNextChapter()) {
@@ -788,31 +696,27 @@ function main() {
                     stuckCount = 0;
                 }
             } else {
-                swipeNext();
+                swipeNextMain();
             }
             continue;
         }
         stuckCount = 0;
 
-        // 6. 拉取数据（自动检测题型）
         var json = null;
         try {
             json = fetchQuestion();
         } catch (e) {
             console.log("拉取异常: " + e);
             failCount++;
-            swipeNext();
+            swipeNextMain();
             continue;
         }
 
-        // 7. 校验并保存
         if (!validateQuestion(json)) {
             console.log("  ✗ 数据不完整，重试...");
-
-            // 打印缺失信息
             printMissing(json);
-
             sleep(2000);
+
             try {
                 json = fetchQuestion();
             } catch (e) {
@@ -842,11 +746,8 @@ function main() {
             failCount = 0;
         }
 
-        // 8. 翻页
-        swipeNext();
-        sleep(300);
-
-        // 翻页后检查章节切换
+        swipeNextMain();
+        //sleep(300);
         handleNextChapter();
     }
 
@@ -854,47 +755,9 @@ function main() {
     console.log("共保存: " + savedCount);
 }
 
-/**
- * 打印缺失字段信息（调试用）
- */
-function printMissing(json) {
-    if (json == null) {
-        console.log("    json = null");
-        return;
-    }
-
-    var keys = Object.keys(json);
-    for (var k = 0; k < keys.length; k++) {
-        var key = keys[k];
-        var val = json[key];
-        if (val === null || val === undefined) {
-            console.log("    缺失: " + key);
-        } else if (Array.isArray(val) && val.length === 0) {
-            console.log("    空数组: " + key);
-        }
-    }
-
-    // 检查子题
-    if (json.sub_questions) {
-        for (var s = 0; s < json.sub_questions.length; s++) {
-            var sq = json.sub_questions[s];
-            var sqKeys = Object.keys(sq);
-            for (var k = 0; k < sqKeys.length; k++) {
-                var key = sqKeys[k];
-                var val = sq[key];
-                if (val === null || val === undefined) {
-                    console.log("    子题[" + s + "] 缺失: " + key);
-                } else if (Array.isArray(val) && val.length === 0) {
-                    console.log("    子题[" + s + "] 空数组: " + key);
-                }
-            }
-        }
-    }
-}
-
 // ==================== 入口 ====================
-files.createWithDirs("/sdcard/tests/placeholder");
-files.remove("/sdcard/tests/placeholder");
+files.createWithDirs(OUTPUT_DIR + "placeholder");
+files.remove(OUTPUT_DIR + "placeholder");
 
 console.log("启动: " + APP_NAME);
 app.launchApp(APP_NAME);
