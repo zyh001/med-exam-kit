@@ -36,7 +36,7 @@ class YikaobangParser(BaseParser):
                     point=sq.get("point", ""),
                 ))
 
-        elif "A3" in mode or "A4" in mode:
+        elif "A3" in mode or "A4" in mode or "案例" in mode:
             q.stem = raw.get("test", "")
             for sq in raw.get("sub_questions", []):
                 q.sub_questions.append(SubQuestion(
