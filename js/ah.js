@@ -862,7 +862,7 @@ function printMissingFields(json) {
 function main() {
     console.log("========== 脚本启动 ==========");
     console.log("设备宽度: " + device.width + " 高度: " + device.height);
-
+    setScreenMetrics(1200, 2670);   //设置分辨率，解决分辨率不同的问题
     sleep(3000);
     closeAd();
     checkMode();
