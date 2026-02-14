@@ -5,7 +5,7 @@ from med_exam_toolkit.models import Question
 
 
 def summarize(questions: list[Question], full: bool = False) -> dict:
-    """生成统计摘要, full=True 时不截断"""
+    """生成统计摘要, full=True 时章节/题库不截断"""
     by_mode = Counter()
     by_unit = Counter()
     by_pkg = Counter()
@@ -34,7 +34,6 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
                     pass
 
     unit_limit = None if full else 20
-    low_rate_limit = None if full else 10
 
     return {
         "total": len(questions),
@@ -44,10 +43,10 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
         "by_cls": dict(by_cls.most_common()),
         "unit_total": len(by_unit),
         "low_rate_count": len(low_rate_questions),
-        "low_rate_samples": sorted(
+        "low_rate_top10": sorted(
             low_rate_questions,
             key=lambda x: float(x["rate"].replace("%", "").strip()),
-        )[:low_rate_limit],
+        )[:10],
         "full": full,
     }
 
@@ -86,9 +85,7 @@ def print_summary(questions: list[Question], full: bool = False) -> None:
 
     if s["low_rate_count"]:
         print(f"\n⚠️  正确率 < 50% 的题目: {s['low_rate_count']} 道")
-        for item in s["low_rate_samples"]:
+        for item in s["low_rate_top10"]:
             print(f"  [{item['rate']}] {item['text']}...")
-        if not full and s["low_rate_count"] > 10:
-            print(f"  ... 仅显示前 10 道，使用 info 命令查看全部")
 
     print(f"{'='*50}\n")
