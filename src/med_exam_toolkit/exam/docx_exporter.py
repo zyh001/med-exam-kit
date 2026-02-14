@@ -94,7 +94,7 @@ class ExamDocxExporter:
         run.font.size = Pt(10)
         run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
-        doc.add_paragraph("━" * 45)
+        doc.add_paragraph("━" * 43)
 
     # ── 题目区 ──
     def _add_questions(self, doc: Document, questions: list[Question]):
