@@ -1,13 +1,15 @@
 from __future__ import annotations
 import click
 import yaml
+import sys
+import json as _json
 from pathlib import Path
 from med_exam_toolkit.loader import load_json_files
 from med_exam_toolkit.dedup import deduplicate
 from med_exam_toolkit.stats import print_summary
 from med_exam_toolkit.filters import FilterCriteria, apply_filters
 from med_exam_toolkit.exporters import discover as discover_exporters, get_exporter
-
+from med_exam_toolkit.exam import ExamConfig, ExamGenerator, ExamGenerationError, ExamDocxExporter
 
 def _load_config(config_path: str) -> dict:
     p = Path(config_path)
@@ -115,6 +117,84 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 
     click.echo(f"✅ 完成! 共 {len(questions)} 题")
 
+@cli.command()
+@click.option("-i", "--input-dir", default=None, help="JSON 文件目录")
+@click.option("-o", "--output", default="./data/output/exam", help="输出路径")
+@click.option("--title", default="模拟考试", help="试卷标题")
+@click.option("--subtitle", default="", help="副标题")
+@click.option("--unit", multiple=True, help="限定章节 (可多选)")
+@click.option("--mode", multiple=True, help="限定题型 (可多选)")
+@click.option("-n", "--count", default=50, type=int, help="总抽题数")
+@click.option("--per-mode", default="", help='按题型指定数量, JSON格式: \'{"A1型题":20,"A2型题":15}\'')
+@click.option("--seed", default=None, type=int, help="随机种子 (固定种子可复现)")
+@click.option("--show-answers/--hide-answers", default=False, help="题目中显示答案")
+@click.option("--answer-sheet/--no-answer-sheet", default=True, help="末尾附答案页")
+@click.option("--show-discuss/--no-discuss", default=False, help="答案页附解析")
+@click.option("--score", default=2.0, type=float, help="每题分值, 0=不显示")
+@click.option("--time-limit", default=120, type=int, help="考试时间(分钟)")
+@click.option("--dedup/--no-dedup", default=True, help="是否去重")
+@click.pass_context
+def generate(ctx, input_dir, output, title, subtitle, unit, mode, count,
+             per_mode, seed, show_answers, answer_sheet, show_discuss,
+             score, time_limit, dedup):
+    """自动组卷: 随机抽题 → 导出 Word 试卷"""
+
+    cfg = ctx.obj["config"]
+    input_dir = input_dir or cfg.get("input_dir", "./data/raw")
+    parser_map = cfg.get("parser_map", {
+        "com.ahuxueshu": "ahuyikao",
+        "com.yikaobang.yixue": "yikaobang",
+    })
+
+    # 加载题库
+    questions = load_json_files(input_dir, parser_map)
+    if not questions:
+        click.echo("题库为空，请检查输入目录。")
+        sys.exit(1)
+
+    if dedup:
+        questions = deduplicate(questions, "strict")
+
+    click.echo(f"题库加载完成: {len(questions)} 道题")
+
+    # 解析 per_mode
+    per_mode_dict = {}
+    if per_mode:
+        try:
+            per_mode_dict = _json.loads(per_mode)
+        except _json.JSONDecodeError:
+            click.echo(f"[ERROR] --per-mode 格式错误，需要 JSON: {per_mode}")
+            sys.exit(1)
+
+    # 组卷配置
+    exam_cfg = ExamConfig(
+        title=title,
+        subtitle=subtitle,
+        time_limit=time_limit,
+        units=list(unit),
+        modes=list(mode),
+        count=count,
+        per_mode=per_mode_dict,
+        seed=seed,
+        show_answers=show_answers,
+        answer_sheet=answer_sheet,
+        show_discuss=show_discuss,
+        score_per_question=score,
+    )
+
+    # 生成
+    try:
+        gen = ExamGenerator(questions, exam_cfg)
+        selected = gen.generate()
+        click.echo(gen.summary(selected))
+    except ExamGenerationError as e:
+        click.echo(f"[ERROR] {e}")
+        sys.exit(1)
+
+    # 导出
+    exporter = ExamDocxExporter(exam_cfg)
+    fp = exporter.export(selected, Path(output))
+    click.echo(f"✅ 试卷已生成: {fp}")
 
 @cli.command()
 @click.option("-i", "--input-dir", default=None, help="输入目录")
