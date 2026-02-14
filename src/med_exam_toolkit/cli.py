@@ -18,6 +18,35 @@ def _load_config(config_path: str) -> dict:
         return yaml.safe_load(p.read_text(encoding="utf-8")) or {}
     return {}
 
+def parse_per_mode(raw: str) -> dict[str, int]:
+    """解析 per-mode 参数, 支持 JSON 和简写格式"""
+    raw = raw.strip()
+
+    if raw.startswith("{"):
+        try:
+            return {k: int(v) for k, v in _json.loads(raw).items()}
+        except (_json.JSONDecodeError, ValueError):
+            pass
+
+    try:
+        result = {}
+        for pair in raw.split(","):
+            pair = pair.strip()
+            if not pair:
+                continue
+            key, val = pair.rsplit(":", 1)
+            result[key.strip()] = int(val.strip())
+        if result:
+            return result
+    except (ValueError, IndexError):
+        pass
+
+    raise click.BadParameter(
+        f"无法解析: {raw}\n"
+        f"支持格式:\n"
+        f'  JSON:  \'{{"A1型题": 30, "A2型题": 20}}\'\n'
+        f"  简写:  A1型题:30,A2型题:20"
+    )
 
 @click.group()
 @click.option("-c", "--config", "config_path", default="config.yaml", help="配置文件路径")
@@ -173,13 +202,9 @@ def generate(ctx, input_dir, output, title, subtitle, unit, mode, count,
     click.echo(f"题库加载完成: {len(questions)} 道题")
 
     # 解析 per_mode
-    per_mode_dict = {}
+    mode_dist = {}
     if per_mode:
-        try:
-            per_mode_dict = _json.loads(per_mode)
-        except _json.JSONDecodeError:
-            click.echo(f"[ERROR] --per-mode 格式错误，需要 JSON: {per_mode}")
-            sys.exit(1)
+        mode_dist = parse_per_mode(per_mode)
 
     # 组卷配置
     exam_cfg = ExamConfig(
@@ -189,7 +214,7 @@ def generate(ctx, input_dir, output, title, subtitle, unit, mode, count,
         units=list(unit),
         modes=list(mode),
         count=count,
-        per_mode=per_mode_dict,
+        per_mode=mode_dist,
         seed=seed,
         show_answers=show_answers,
         answer_sheet=answer_sheet,
@@ -269,8 +294,10 @@ def build(ctx, input_dir, output, password, strategy, rebuild):
 
 @cli.command()
 @click.option("-i", "--input-dir", default=None, help="输入目录")
+@click.option("--bank", default=None, type=click.Path(exists=True), help="从 .mqb 题库加载")
+@click.option("--password", default=None, help="题库密码")
 @click.pass_context
-def info(ctx, input_dir):
+def info(ctx, input_dir, bank, password):
     """仅查看统计信息，不导出"""
     cfg = ctx.obj["config"]
     input_dir = input_dir or cfg.get("input_dir", "./data/raw")
@@ -279,11 +306,17 @@ def info(ctx, input_dir):
         "com.yikaobang.yixue": "yikaobang",
     })
 
-    questions = load_json_files(input_dir, parser_map)
-    if questions:
-        questions = deduplicate(questions, "strict")
-        print_summary(questions, full=True)
+    if bank:
+        questions = load_bank(Path(bank), password)
+    else:
+        questions = load_json_files(input_dir, parser_map)
+        if questions:
+            questions = deduplicate(questions, "strict")
 
+    if questions:
+        print_summary(questions, full=True)
+    else:
+        click.echo("题库为空。")
 
 def main():
     cli()
