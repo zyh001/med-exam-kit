@@ -96,7 +96,7 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 
     # 4. 统计
     if stats:
-        print_summary(questions)
+        print_summary(questions, full=False)
 
     # 5. 导出
     discover_exporters()
@@ -211,7 +211,7 @@ def info(ctx, input_dir):
     questions = load_json_files(input_dir, parser_map)
     if questions:
         questions = deduplicate(questions, "strict")
-        print_summary(questions)
+        print_summary(questions, full=True)
 
 
 def main():
