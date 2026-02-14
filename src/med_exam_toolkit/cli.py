@@ -7,6 +7,7 @@ from pathlib import Path
 from med_exam_toolkit.loader import load_json_files
 from med_exam_toolkit.dedup import deduplicate
 from med_exam_toolkit.stats import print_summary
+from med_exam_toolkit.bank import save_bank, load_bank
 from med_exam_toolkit.filters import FilterCriteria, apply_filters
 from med_exam_toolkit.exporters import discover as discover_exporters, get_exporter
 from med_exam_toolkit.exam import ExamConfig, ExamGenerator, ExamGenerationError, ExamDocxExporter
@@ -41,9 +42,12 @@ def cli(ctx, config_path):
 @click.option("--min-rate", default=0, type=int, help="最低正确率")
 @click.option("--max-rate", default=100, type=int, help="最高正确率")
 @click.option("--stats/--no-stats", default=True, help="是否显示统计")
+@click.option("--bank", default=None, type=click.Path(exists=True), help="直接从 .mqb 题库加载")
+@click.option("--password", default=None, help="题库解密密码")
 @click.pass_context
 def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
-           db_url, filter_modes, filter_units, keyword, min_rate, max_rate, stats):
+           db_url, filter_modes, filter_units, keyword, min_rate, max_rate, stats
+           , bank, password):
     """加载、去重、过滤、导出题目"""
     cfg = ctx.obj["config"]
 
@@ -66,11 +70,18 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
     output_path = Path(output_dir)
 
     # 1. 加载
-    click.echo("📂 加载题目...")
-    questions = load_json_files(input_dir, parser_map)
-    if not questions:
-        click.echo("未找到任何题目，退出。")
-        return
+    if bank:
+        click.echo("📂 从题库缓存加载...")
+        questions = load_bank(Path(bank), password)
+    else:
+        click.echo("📂 加载题目...")
+        questions = load_json_files(input_dir, parser_map)
+        if not questions:
+            click.echo("未找到任何题目，退出。")
+            return
+        if dedup:
+            click.echo("🔍 去重中...")
+            questions = deduplicate(questions, strategy)
 
     # 2. 去重
     if dedup:
@@ -133,10 +144,12 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 @click.option("--score", default=2.0, type=float, help="每题分值, 0=不显示")
 @click.option("--time-limit", default=120, type=int, help="考试时间(分钟)")
 @click.option("--dedup/--no-dedup", default=True, help="是否去重")
+@click.option("--bank", default=None, type=click.Path(exists=True), help="从 .mqb 题库加载")
+@click.option("--password", default=None, help="题库解密密码")
 @click.pass_context
 def generate(ctx, input_dir, output, title, subtitle, unit, mode, count,
              per_mode, seed, show_answers, answer_sheet, show_discuss,
-             score, time_limit, dedup):
+             score, time_limit, dedup, bank, password):
     """自动组卷: 随机抽题 → 导出 Word 试卷"""
 
     cfg = ctx.obj["config"]
@@ -147,13 +160,15 @@ def generate(ctx, input_dir, output, title, subtitle, unit, mode, count,
     })
 
     # 加载题库
-    questions = load_json_files(input_dir, parser_map)
-    if not questions:
-        click.echo("题库为空，请检查输入目录。")
-        sys.exit(1)
-
-    if dedup:
-        questions = deduplicate(questions, "strict")
+    if bank:
+        questions = load_bank(Path(bank), password)
+    else:
+        questions = load_json_files(input_dir, parser_map)
+        if not questions:
+            click.echo("题库为空。")
+            sys.exit(1)
+        if dedup:
+            questions = deduplicate(questions, "strict")
 
     click.echo(f"题库加载完成: {len(questions)} 道题")
 
@@ -195,6 +210,62 @@ def generate(ctx, input_dir, output, title, subtitle, unit, mode, count,
     exporter = ExamDocxExporter(exam_cfg)
     fp = exporter.export(selected, Path(output))
     click.echo(f"✅ 试卷已生成: {fp}")
+
+@cli.command()
+@click.option("-i", "--input-dir", default=None, help="JSON 文件目录")
+@click.option("-o", "--output", default="./data/output/questions", help="输出路径 (.mqb)")
+@click.option("--password", default=None, help="加密密码 (留空则不加密)")
+@click.option("--strategy", default="strict", type=click.Choice(["content", "strict"]))
+@click.option("--rebuild", is_flag=True, help="强制重建, 忽略已有题库")
+@click.pass_context
+def build(ctx, input_dir, output, password, strategy, rebuild):
+    """构建题库缓存 (.mqb), 已有文件时自动追加去重"""
+    cfg = ctx.obj["config"]
+    input_dir = input_dir or cfg.get("input_dir", "./data/raw")
+    parser_map = cfg.get("parser_map", {
+        "com.ahuxueshu": "ahuyikao",
+        "com.yikaobang.yixue": "yikaobang",
+    })
+
+    bank_path = Path(output).with_suffix(".mqb")
+    existing = []
+
+    # 已有文件且非 rebuild → 加载已有题目
+    if bank_path.exists() and not rebuild:
+        click.echo(f"📦 发现已有题库: {bank_path.name}")
+        existing = load_bank(bank_path, password)
+        click.echo(f"   已有 {len(existing)} 题")
+
+    click.echo("📂 加载 JSON...")
+    new_questions = load_json_files(input_dir, parser_map)
+    if not new_questions and not existing:
+        click.echo("未找到题目。")
+        return
+
+    if existing:
+        click.echo(f"📥 发现 {len(new_questions)} 道待追加题目")
+        combined = existing + new_questions
+    else:
+        combined = new_questions
+
+    click.echo("🔍 去重中...")
+    combined = deduplicate(combined, strategy)
+
+    added = len(combined) - len(existing)
+
+    fp = save_bank(combined, bank_path, password)
+
+    click.echo(f"\n{'='*40}")
+    if existing:
+        click.echo(f"  原有: {len(existing)} 题")
+        click.echo(f"  新增: {added} 题")
+        click.echo(f"  重复跳过: {len(new_questions) - added} 题")
+    click.echo(f"  总计: {len(combined)} 题")
+    click.echo(f"  文件: {fp}")
+    click.echo(f"{'='*40}")
+
+    print_summary(combined, full=True)
+    click.echo("✅ 题库构建完成")
 
 @cli.command()
 @click.option("-i", "--input-dir", default=None, help="输入目录")

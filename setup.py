@@ -11,6 +11,7 @@ setup(
         "openpyxl>=3.0",
         "python-docx>=0.8",
         "reportlab>=3.6",
+        "cryptography>=41.0",
         "sqlalchemy>=2.0",
         "pyyaml>=6.0",
     ],
