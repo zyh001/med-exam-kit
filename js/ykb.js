@@ -771,22 +771,15 @@ function enterFromQuestionList() {
         }
     }
 
-    // 等待题目列表加载完成，题号 1 出现
+    // 等待题目列表加载完成，任意题号出现即可
     var maxWait = 10;  // 最多等待 10 秒
     for (var w = 0; w < maxWait; w++) {
         var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
-        var found = false;
-        for (var i = 0; i < items.length; i++) {
-            if (items[i].text() === "1") {
-                found = true;
-                break;
-            }
-        }
-        if (found) {
-            console.log("  题号 1 已出现");
+        if (items.length > 0) {
+            console.log("  题目列表已加载完成，共 " + items.length + " 个题号");
             break;
         }
-        console.log("  等待题号 1 出现... (" + (w + 1) + "/" + maxWait + ")");
+        console.log("  等待题目列表加载... (" + (w + 1) + "/" + maxWait + ")");
         sleep(1000);
     }
 
