@@ -51,6 +51,21 @@ YIKAOBANG_SAMPLE = {
     "discuss": "本题考查超声检查。"
 }
 
+YIKAOBANG_B_SINGLE = {
+    "name": "2026-02-19-21-11-36-410",
+    "pkg": "com.yikaobang.yixue",
+    "cls": "中医基础理论",
+    "numb": "79/119",
+    "unit": "绪论",
+    "mode": "B型题",
+    "test": '以下属于“证候”的是',
+    "option": ["A.痢疾", "B.角弓反张", "C.心脉痹阻", "D.恶寒发热", "E.脉象沉迟"],
+    "answer": "C",
+    "rate": "55.6%",
+    "point": "11版中医基础理论未明确说明。",
+    "discuss": "证候是慨括为一系列有相互关联的症状总称。"
+}
+
 
 def _write_samples(tmpdir: Path, samples: list[dict]):
     for i, s in enumerate(samples):
@@ -106,9 +121,29 @@ def test_fingerprint_consistency():
     assert compute_fingerprint(q1) == compute_fingerprint(q2)
 
 
+def test_yikaobang_single_b_type():
+    """Test that single-question B型题 generates non-empty fingerprint"""
+    discover()
+    from med_exam_toolkit.parsers import get_parser
+    parser = get_parser("yikaobang")
+    q = parser.parse(YIKAOBANG_B_SINGLE)
+
+    # Should have 1 sub_question
+    assert len(q.sub_questions) == 1
+    assert q.sub_questions[0].text == '以下属于“证候”的是'
+    assert q.sub_questions[0].answer == "C"
+    assert len(q.sub_questions[0].options) == 5
+
+    # Fingerprint should not be empty
+    fp = compute_fingerprint(q)
+    assert fp != "", f"Fingerprint should not be empty for single B型题, got: {fp}"
+    assert len(fp) == 16, f"Fingerprint should be 16 chars, got: {len(fp)}"
+
+
 if __name__ == "__main__":
     test_load_and_parse()
     test_dedup_removes_duplicates()
     test_dedup_keeps_different()
     test_fingerprint_consistency()
+    test_yikaobang_single_b_type()
     print("All tests passed!")

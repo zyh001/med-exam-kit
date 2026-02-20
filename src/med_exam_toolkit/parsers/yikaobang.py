@@ -22,7 +22,8 @@ class YikaobangParser(BaseParser):
             raw=raw,
         )
 
-        if "B" in mode and "型题" in mode:
+        if "B" in mode and "型题" in mode and "sub_questions" in raw:
+            # Multi-question B型题 with shared options
             q.shared_options = raw.get("shared_options", [])
             q.discuss = raw.get("discuss", "")
             for sq in raw.get("sub_questions", []):
