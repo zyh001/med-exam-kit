@@ -783,6 +783,45 @@ function enterFromQuestionList() {
         sleep(1000);
     }
 
+    // 向上滚动直到题号 1 出现
+    var scrollUpCount = 0;
+    var maxScrollUp = 50;  // 最多向上滚动 50 次
+    while (scrollUpCount < maxScrollUp) {
+        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+        var foundOne = false;
+        var minNum = 999999;
+
+        // 检查是否有题号 1，同时找出最小题号
+        for (var i = 0; i < items.length; i++) {
+            var num = parseInt(items[i].text());
+            if (!isNaN(num)) {
+                if (num === 1) {
+                    foundOne = true;
+                    break;
+                }
+                if (num < minNum) {
+                    minNum = num;
+                }
+            }
+        }
+
+        if (foundOne) {
+            console.log("  找到题号 1");
+            break;
+        }
+
+        // 如果最小题号大于 1，向上滚动
+        if (minNum > 1) {
+            console.log("  当前最小题号: " + minNum + "，向上滚动查找题号 1...");
+            swipe(700, 1800, 700, 2200, 1000);  // 向上滚动
+            sleep(1000);
+            scrollUpCount++;
+        } else {
+            console.log("  未找到题号 1，可能已到达列表顶部");
+            break;
+        }
+    }
+
     // 点击题号 "1"，用坐标点击更可靠
     var retries = 3;
     for (var r = 0; r < retries; r++) {
