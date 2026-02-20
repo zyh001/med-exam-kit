@@ -547,25 +547,58 @@ function findAndClickQuestion(targetNum) {
     var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
 
     for (var i = 0; i < items.length; i++) {
-        if (items[i].text() === targetNum) {
-            var bounds = items[i].bounds();
-
-            // 检查位置是否安全
-            if (!isPositionSafe(bounds)) {
-                console.log("  题号 " + targetNum + " 在屏幕底部 (Y=" + bounds.centerY() + ")，调整位置");
-                swipe(700, 2000, 700, 1600, 1000);
-                sleep(1500);
-                return {success: false, needScroll: false};
-            }
-
-            // 尝试点击
-            if (clickQuestionAndVerify(targetNum, bounds)) {
-                return {success: true, needScroll: false};
-            } else {
-                console.log("  点击后仍在列表页，继续滚动查找");
-                return {success: false, needScroll: true};
-            }
+        if (items[i].text() !== targetNum) {
+          continue
         }
+
+        var bounds = items[i].bounds();
+
+        // 检查位置是否安全
+        if (!isPositionSafe(bounds)) {
+            var oldY = bounds.centerY();
+            console.log("  题号 " + targetNum + " 在屏幕底部 (Y=" + oldY + ")，调整位置");
+            swipe(700, 2000, 700, 1600, 1000);
+            sleep(1500);
+
+            // 再次查找该题号，检查位置是否变化
+            var newItems = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+            for (var j = 0; j < newItems.length; j++) {
+                if (newItems[j].text() !== targetNum) {
+                  continue
+                }
+
+                var newBounds = newItems[j].bounds();
+                var newY = newBounds.centerY();
+
+                // 如果位置没变，说明已经到达底部，向上滚动再滚回
+                if (Math.abs(newY - oldY) < 10) {
+                    console.log("  位置未变 (Y=" + newY + ")，已到达列表底部，向上滚动后再滚回");
+                    swipe(700, 1800, 700, 2200, 1000);  // 向上滚动
+                    sleep(1000);
+                    swipe(700, 2200, 700, 1800, 1000);  // 滚回底部
+                    sleep(1000);
+                }
+
+                // 尝试点击
+                if (clickQuestionAndVerify(targetNum, newBounds)) {
+                    return {success: true, needScroll: false};
+                }
+
+                break;
+            }
+
+            return {success: false, needScroll: false};
+        }
+
+        // 尝试点击
+        if (clickQuestionAndVerify(targetNum, bounds)) {
+            return {success: true, needScroll: false};
+        } else {
+            console.log("  点击后仍在列表页，继续滚动查找");
+            return {success: false, needScroll: true};
+        }
+
+        break;
     }
 
     // 未找到题号，需要滚动
@@ -614,7 +647,7 @@ function scrollToQuestion(targetNum) {
             if (scrollCount % 10 === 0) {
                 console.log("  向下滚动中... (已滚动 " + scrollCount + " 次，当前最大题号: " + currentMaxNum + ")");
             }
-            swipe(700, 2000, 700, 1800, 500);
+            swipe(700, 2000, 700, 1800, 1000);
             sleep(1500);
         }
     }
