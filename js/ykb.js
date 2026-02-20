@@ -393,12 +393,12 @@ function validateQuestion(test) {
 // ==================== 保存 ====================
 
 function savejson(test) {
-    var name = OUTPUT_DIR + test.name + ".json";
+    var name = OUTPUT_DIR + test.cls + "/" + (test.unit || "") + "/" + test.name + ".json";
     record = test;
     lastNumb = test.numb;
     lastUnit = test.unit || "";
     var jsonData = JSON.stringify(test, null, 2);
-    files.create(name);
+    files.createWithDirs(name);
     files.write(name, jsonData);
     console.log("  ✔ 保存成功 " + test.numb);
     return jsonData;
@@ -497,6 +497,218 @@ function reset() {
     console.log("========== 重置完成 ==========");
 }
 
+/**
+ * 获取当前屏幕的最大题号
+ * @param {Array} items 题号元素列表
+ * @returns {number} 最大题号
+ */
+function getMaxQuestionNumber(items) {
+    var maxNum = 0;
+    for (var i = 0; i < items.length; i++) {
+        var num = parseInt(items[i].text());
+        if (!isNaN(num) && num > maxNum) {
+            maxNum = num;
+        }
+    }
+    return maxNum;
+}
+
+/**
+ * 检查题号位置是否在安全区域（不在屏幕底部）
+ * @param {Object} bounds 元素边界对象
+ * @returns {boolean} true 表示在安全区域
+ */
+function isPositionSafe(bounds) {
+    return bounds.centerY() <= device.height - 200;
+}
+
+/**
+ * 尝试点击题号并验证是否成功进入题目页
+ * @param {string} targetNum 目标题号
+ * @param {Object} bounds 元素边界对象
+ * @returns {boolean} true 表示成功进入题目页
+ */
+function clickQuestionAndVerify(targetNum, bounds) {
+    var x = bounds.centerX();
+    var y = bounds.centerY();
+    console.log("  找到题号 " + targetNum + "，点击坐标 (" + x + ", " + y + ")");
+    click(x, y);
+    sleep(3000);
+
+    return !id("com.yikaobang.yixue:id/questionList_item_tv").exists();
+}
+
+/**
+ * 在列表中查找并点击目标题号
+ * @param {string} targetNum 目标题号
+ * @returns {object} 查找结果 {success: boolean, needScroll: boolean}
+ */
+function findAndClickQuestion(targetNum) {
+    var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+
+    for (var i = 0; i < items.length; i++) {
+        if (items[i].text() !== targetNum) {
+          continue
+        }
+
+        var bounds = items[i].bounds();
+
+        // 检查位置是否安全
+        if (!isPositionSafe(bounds)) {
+            var oldY = bounds.centerY();
+            console.log("  题号 " + targetNum + " 在屏幕底部 (Y=" + oldY + ")，调整位置");
+            swipe(700, 2000, 700, 1600, 1000);
+            sleep(1500);
+
+            // 再次查找该题号，检查位置是否变化
+            var newItems = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+            for (var j = 0; j < newItems.length; j++) {
+                if (newItems[j].text() !== targetNum) {
+                  continue
+                }
+
+                var newBounds = newItems[j].bounds();
+                var newY = newBounds.centerY();
+
+                // 如果位置没变，说明已经到达底部，向上滚动再滚回
+                if (Math.abs(newY - oldY) < 10) {
+                    console.log("  位置未变 (Y=" + newY + ")，已到达列表底部，向上滚动后再滚回");
+                    swipe(700, 1800, 700, 2200, 1000);  // 向上滚动
+                    sleep(1000);
+                    swipe(700, 2200, 700, 1800, 1000);  // 滚回底部
+                    sleep(1000);
+                }
+
+                // 尝试点击
+                if (clickQuestionAndVerify(targetNum, newBounds)) {
+                    return {success: true, needScroll: false};
+                }
+
+                break;
+            }
+
+            return {success: false, needScroll: false};
+        }
+
+        // 尝试点击
+        if (clickQuestionAndVerify(targetNum, bounds)) {
+            return {success: true, needScroll: false};
+        } else {
+            console.log("  点击后仍在列表页，继续滚动查找");
+            return {success: false, needScroll: true};
+        }
+
+        break;
+    }
+
+    // 未找到题号，需要滚动
+    return {success: false, needScroll: true};
+}
+
+/**
+ * 滚动查找并点击目标题号
+ * @param {string} targetNum 目标题号
+ * @returns {boolean} true 表示成功
+ */
+function scrollToQuestion(targetNum) {
+    var scrollCount = 0;
+    var lastMaxNum = 0;
+    var stuckCount = 0;
+
+    while (true) {
+        var result = findAndClickQuestion(targetNum);
+
+        // 成功点击并进入题目页
+        if (result.success) {
+            console.log("========== 恢复完成，继续爬取 ==========");
+            return true;
+        }
+
+        // 需要滚动查找
+        if (result.needScroll) {
+            var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+            var currentMaxNum = getMaxQuestionNumber(items);
+
+            // 检查是否到达底部
+            if (currentMaxNum === lastMaxNum) {
+                stuckCount++;
+                if (stuckCount >= 3) {
+                    console.log("  恢复失败，已滚动到底部（最大题号: " + currentMaxNum + "），未找到题号 " + targetNum);
+                    console.log("  总共滚动: " + scrollCount + " 次");
+                    return false;
+                }
+            } else {
+                stuckCount = 0;
+                lastMaxNum = currentMaxNum;
+            }
+
+            // 执行滚动
+            scrollCount++;
+            if (scrollCount % 10 === 0) {
+                console.log("  向下滚动中... (已滚动 " + scrollCount + " 次，当前最大题号: " + currentMaxNum + ")");
+            }
+            swipe(700, 2000, 700, 1800, 1000);
+            sleep(1500);
+        }
+    }
+}
+
+/**
+ * 返回到题目列表页
+ * @returns {boolean} true 表示成功返回
+ */
+function returnToQuestionList() {
+    var backBtn = id("com.yikaobang.yixue:id/include_btn_left").findOne(3000);
+    if (!backBtn) {
+        console.log("  未找到返回按钮");
+        return false;
+    }
+
+    console.log("  点击返回按钮");
+    backBtn.click();
+    sleep(2000);
+
+    // 等待进入题目列表页
+    var waitCount = 0;
+    while (!id("com.yikaobang.yixue:id/questionList_item_tv").exists() && waitCount < 10) {
+        sleep(1000);
+        waitCount++;
+    }
+
+    return id("com.yikaobang.yixue:id/questionList_item_tv").exists();
+}
+
+/**
+ * 处理周期性返回：每 400 题返回列表页，释放内存后恢复
+ * @param {number} savedCount 当前已保存的题目数量
+ * @returns {boolean} true 表示成功恢复并继续，false 表示失败
+ */
+function handlePeriodicReturn(savedCount) {
+    console.log("========== 执行周期性返回 ==========");
+    console.log("当前已保存: " + savedCount + " 题");
+
+    // 步骤1: 返回到题目列表页
+    if (!returnToQuestionList()) {
+        return false;
+    }
+
+    // 步骤2: 等待释放内存
+    console.log("  等待 8 秒释放内存...");
+    sleep(8000);
+    closeAd();
+
+    // 步骤3: 恢复到上次的题号
+    if (!lastNumb || lastNumb === "") {
+        console.log("  没有记录上次题号，无法恢复");
+        return false;
+    }
+
+    var targetNum = lastNumb.split("/")[0];
+    console.log("  恢复到题号: " + targetNum);
+
+    return scrollToQuestion(targetNum);
+}
+
 // ==================== 翻页与等待 ====================
 
 function waitForPage(timeout) {
@@ -545,10 +757,67 @@ function enterFromQuestionList() {
     // 点击"背题模式"
     var labels = id("com.yikaobang.yixue:id/labeltext").find();
     for (var i = 0; i < labels.length; i++) {
+        if (labels[i].text() === "全部") {
+            console.log("  点击全部");
+            labels[i].click();
+            sleep(1000);
+        }
+
         if (labels[i].text() === "背题模式") {
             console.log("  点击背题模式");
             labels[i].click();
             sleep(1000);
+            break;
+        }
+    }
+
+    // 等待题目列表加载完成，任意题号出现即可
+    var maxWait = 10;  // 最多等待 10 秒
+    for (var w = 0; w < maxWait; w++) {
+        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+        if (items.length > 0) {
+            console.log("  题目列表已加载完成，共 " + items.length + " 个题号");
+            break;
+        }
+        console.log("  等待题目列表加载... (" + (w + 1) + "/" + maxWait + ")");
+        sleep(1000);
+    }
+
+    // 向上滚动直到题号 1 出现
+    var scrollUpCount = 0;
+    var maxScrollUp = 50;  // 最多向上滚动 50 次
+    while (scrollUpCount < maxScrollUp) {
+        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+        var foundOne = false;
+        var minNum = 999999;
+
+        // 检查是否有题号 1，同时找出最小题号
+        for (var i = 0; i < items.length; i++) {
+            var num = parseInt(items[i].text());
+            if (!isNaN(num)) {
+                if (num === 1) {
+                    foundOne = true;
+                    break;
+                }
+                if (num < minNum) {
+                    minNum = num;
+                }
+            }
+        }
+
+        if (foundOne) {
+            console.log("  找到题号 1");
+            break;
+        }
+
+        // 如果最小题号大于 1，向上滚动
+        if (minNum > 1) {
+            console.log("  当前最小题号: " + minNum + "，向上滚动查找题号 1...");
+            swipe(700, 1800, 700, 2200, 1000);  // 向上滚动
+            sleep(1000);
+            scrollUpCount++;
+        } else {
+            console.log("  未找到题号 1，可能已到达列表顶部");
             break;
         }
     }
@@ -747,6 +1016,14 @@ function main() {
             savejson(json);
             savedCount++;
             failCount = 0;
+
+            // 每 100 题执行一次返回恢复
+            if (savedCount % 100 === 0) {
+                if (!handlePeriodicReturn(savedCount)) {
+                    console.log("周期性返回失败，退出脚本");
+                    break;
+                }
+            }
         }
 
         swipeNextMain();
