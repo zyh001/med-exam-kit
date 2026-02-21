@@ -5,6 +5,13 @@ from collections import Counter, defaultdict
 from med_exam_toolkit.models import Question
 from med_exam_toolkit.exam.config import ExamConfig
 
+DIFFICULTY_LABELS = {
+    "easy": "简单",
+    "medium": "中等",
+    "hard": "较难",
+    "extreme": "困难",
+}
+
 
 class ExamGenerationError(Exception):
     pass
@@ -17,18 +24,26 @@ class ExamGenerator:
         self.config = config
         self._rng = random.Random(config.seed)
 
+    # ── 公开接口 ──
+
     def generate(self) -> list[Question]:
         filtered = self._filter_pool()
         if not filtered:
             raise ExamGenerationError("筛选后题库为空，请检查 units / modes 条件")
 
-        if self.config.per_mode:
+        has_per_mode = bool(self.config.per_mode)
+        has_difficulty = bool(self.config.difficulty_dist)
+
+        if has_per_mode and has_difficulty:
+            selected = self._sample_per_mode_with_difficulty(filtered)
+        elif has_per_mode:
             selected = self._sample_per_mode(filtered)
+        elif has_difficulty:
+            selected = self._sample_by_difficulty(filtered)
         else:
             selected = self._sample_total(filtered)
 
         self._rng.shuffle(selected)
-
         order = self._mode_order()
         selected.sort(key=lambda q: order.get(q.mode, 99))
         return selected
@@ -42,12 +57,73 @@ class ExamGenerator:
             f"题型分布: {dict(by_mode.most_common())}",
             f"章节分布: {dict(by_unit.most_common(10))}",
         ]
+        if self.config.difficulty_dist:
+            by_diff = Counter(self._classify_difficulty(q) for q in selected)
+            diff_str = ", ".join(
+                f"{DIFFICULTY_LABELS.get(k, k)}: {v}道"
+                for k, v in sorted(by_diff.items(), key=lambda x: list(DIFFICULTY_LABELS).index(x[0]) if x[0] in DIFFICULTY_LABELS else 99)
+            )
+            lines.append(f"难度分布: {diff_str}")
         return "\n".join(lines)
 
-    # ── 内部 ──
+    # ── 难度分级 ──
+
+    @staticmethod
+    def _parse_rate(raw: str) -> float | None:
+        """解析正确率字符串 → 0~100 浮点数"""
+        if not raw or not raw.strip():
+            return None
+        s = raw.strip().rstrip("%")
+        try:
+            v = float(s)
+            return v if 0 <= v <= 100 else None
+        except ValueError:
+            return None
+
+    def _classify_difficulty(self, q: Question) -> str:
+        """按子题平均正确率分四档，无数据默认 medium"""
+        rates = []
+        for sq in q.sub_questions:
+            r = self._parse_rate(sq.rate)
+            if r is not None:
+                rates.append(r)
+        if not rates:
+            return "medium"
+        avg = sum(rates) / len(rates)
+        if avg >= 80:
+            return "easy"
+        if avg >= 60:
+            return "medium"
+        if avg >= 40:
+            return "hard"
+        return "extreme"
+
+    # ── 按比例分配 ──
+
+    def _distribute_by_ratio(self, total: int, ratios: dict[str, int]) -> dict[str, int]:
+        """将 total 按比例分配为整数，保证总和 == total"""
+        ratio_sum = sum(ratios.values())
+        if ratio_sum == 0:
+            return {k: 0 for k in ratios}
+        result = {}
+        allocated = 0
+        items = list(ratios.items())
+        for i, (key, pct) in enumerate(items):
+            if i == len(items) - 1:
+                result[key] = total - allocated
+            else:
+                n = round(total * pct / ratio_sum)
+                result[key] = n
+                allocated += n
+        return result
+
+    # ── 抽样策略 ──
 
     def _filter_pool(self) -> list[Question]:
         pool = self.pool
+        if self.config.cls_list:
+            cls_lower = {c.lower() for c in self.config.cls_list}
+            pool = [q for q in pool if q.cls.lower() in cls_lower]
         if self.config.units:
             units_lower = {u.lower() for u in self.config.units}
             pool = [q for q in pool if q.unit.lower() in units_lower]
@@ -74,6 +150,64 @@ class ExamGenerator:
             if n < need:
                 print(f"[WARN] {mode} 可用 {len(available)} 道，不足 {need}，将全部使用")
             selected.extend(self._rng.sample(available, n))
+        return selected
+
+    def _sample_from_pool_by_difficulty(self, pool: list[Question], total: int) -> list[Question]:
+        """核心: 从 pool 中按难度比例抽取 total 道题"""
+        dist = self.config.difficulty_dist
+        by_diff: dict[str, list[Question]] = defaultdict(list)
+        for q in pool:
+            by_diff[self._classify_difficulty(q)].append(q)
+
+        targets = self._distribute_by_ratio(total, dist)
+
+        selected = []
+        shortfall = 0
+        for level, need in targets.items():
+            available = by_diff.get(level, [])
+            n = min(need, len(available))
+            if n < need:
+                label = DIFFICULTY_LABELS.get(level, level)
+                print(f"[WARN] {label}({level}) 可用 {len(available)} 道，不足 {need}")
+                shortfall += need - n
+            if n > 0:
+                selected.extend(self._rng.sample(available, n))
+
+        # 不够的从剩余题目补齐
+        if shortfall > 0:
+            used = {id(q) for q in selected}
+            remaining = [q for q in pool if id(q) not in used]
+            fill = min(shortfall, len(remaining))
+            if fill > 0:
+                selected.extend(self._rng.sample(remaining, fill))
+                print(f"[INFO] 从其他难度补充 {fill} 道")
+
+        return selected
+
+    def _sample_by_difficulty(self, pool: list[Question]) -> list[Question]:
+        """仅按难度比例，不分题型"""
+        total = min(self.config.count, len(pool))
+        if total < self.config.count:
+            print(f"[WARN] 可用题目 {len(pool)} 道，不足 {self.config.count}，将全部使用")
+        return self._sample_from_pool_by_difficulty(pool, total)
+
+    def _sample_per_mode_with_difficulty(self, pool: list[Question]) -> list[Question]:
+        """先按题型分，再在每个题型内按难度比例抽取"""
+        by_mode: dict[str, list[Question]] = defaultdict(list)
+        for q in pool:
+            by_mode[q.mode].append(q)
+
+        selected = []
+        for mode, need in self.config.per_mode.items():
+            mode_pool = by_mode.get(mode, [])
+            if not mode_pool:
+                print(f"[WARN] {mode} 无可用题目")
+                continue
+            n = min(need, len(mode_pool))
+            if n < need:
+                print(f"[WARN] {mode} 可用 {len(mode_pool)} 道，不足 {need}")
+            batch = self._sample_from_pool_by_difficulty(mode_pool, n)
+            selected.extend(batch)
         return selected
 
     @staticmethod

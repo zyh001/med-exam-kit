@@ -162,10 +162,12 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 @click.option("-o", "--output", default="./data/output/exam", help="输出路径")
 @click.option("--title", default="模拟考试", help="试卷标题")
 @click.option("--subtitle", default="", help="副标题")
+@click.option("--cls", multiple=True, help="限定题库分类 (可多选)")
 @click.option("--unit", multiple=True, help="限定章节 (可多选)")
 @click.option("--mode", multiple=True, help="限定题型 (可多选)")
 @click.option("-n", "--count", default=50, type=int, help="总抽题数")
-@click.option("--per-mode", default="", help='按题型指定数量, JSON格式: \'{"A1型题":20,"A2型题":15}\'')
+@click.option("--per-mode", default="", help='按题型指定数量, 如 A1型题:30,A2型题:20')
+@click.option("--difficulty", default="", help="按难度比例抽题, 如 easy:20,medium:40,hard:30,extreme:10")
 @click.option("--seed", default=None, type=int, help="随机种子 (固定种子可复现)")
 @click.option("--show-answers/--hide-answers", default=False, help="题目中显示答案")
 @click.option("--answer-sheet/--no-answer-sheet", default=True, help="末尾附答案页")
@@ -176,8 +178,8 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 @click.option("--bank", default=None, type=click.Path(exists=True), help="从 .mqb 题库加载")
 @click.option("--password", default=None, help="题库解密密码")
 @click.pass_context
-def generate(ctx, input_dir, output, title, subtitle, unit, mode, count,
-             per_mode, seed, show_answers, answer_sheet, show_discuss,
+def generate(ctx, input_dir, output, title, subtitle, cls, unit, mode, count,
+             per_mode, difficulty, seed, show_answers, answer_sheet, show_discuss,
              score, time_limit, dedup, bank, password):
     """自动组卷: 随机抽题 → 导出 Word 试卷"""
 
@@ -206,15 +208,28 @@ def generate(ctx, input_dir, output, title, subtitle, unit, mode, count,
     if per_mode:
         mode_dist = parse_per_mode(per_mode)
 
+    # 解析 difficulty
+    diff_dist = {}
+    if difficulty:
+        diff_dist = parse_per_mode(difficulty)
+        valid = {"easy", "medium", "hard", "extreme"}
+        bad = set(diff_dist.keys()) - valid
+        if bad:
+            click.echo(f"[ERROR] 无效难度等级: {bad}，支持: easy / medium / hard / extreme")
+            click.echo("  easy=简单(≥80%) medium=中等(60-80%) hard=较难(40-60%) extreme=困难(<40%)")
+            sys.exit(1)
+
     # 组卷配置
     exam_cfg = ExamConfig(
         title=title,
         subtitle=subtitle,
         time_limit=time_limit,
+        cls_list=list(cls),
         units=list(unit),
         modes=list(mode),
         count=count,
-        per_mode=mode_dist,
+        per_mode=mode_dist or None,
+        difficulty_dist=diff_dist or None,
         seed=seed,
         show_answers=show_answers,
         answer_sheet=answer_sheet,
