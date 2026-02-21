@@ -157,6 +157,8 @@ function updateChapter() {
     var title = id("com.yikaobang.yixue:id/txt_actionbar_title").findOne(500);
     if (title != null && title.text() !== "") {
         currentChapter = title.text();
+    } else {
+        currentChapter = get_unit() || currentChapter;
     }
 }
 
@@ -735,7 +737,7 @@ function handleNextChapter() {
     // 场景1: 弹窗 "跳转下一章"
     var jumpBtn = id("com.yikaobang.yixue:id/tv_next").findOne(500);
     if (jumpBtn != null) {
-        updateChapter;
+        updateChapter();
         console.log("★ 当前章节结束: " + currentChapter + "，跳转下一章 ★");
         jumpBtn.click();
         sleep(2000);
