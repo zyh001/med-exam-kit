@@ -11,10 +11,12 @@ class ExamConfig:
     total_score: int = 100
 
     # 抽题规则
+    cls_list: list[str] = field(default_factory=list)
     units: list[str] = field(default_factory=list)
     modes: list[str] = field(default_factory=list)
     count: int = 50
     per_mode: dict[str, int] = field(default_factory=dict)
+    difficulty_dist: dict[str, int] | None = None
     # 例: {"A1型题": 20, "A2型题": 15, "A3/A4型题": 10}
 
     seed: int | None = None
