@@ -839,33 +839,46 @@ function enterFromQuestionList() {
         sleep(1000);
     }
 
-    // 点击题号 "1"，用坐标点击更可靠
-    var retries = 3;
-    for (var r = 0; r < retries; r++) {
+    // 查找并点击题号"1"，不存在或点击无效则向下滚动
+    // 列表页面不在顶部，并且筛选条件展开的情况下，openrel 不存在。因此需要滚动查找题号"1"，作为兜底。
+    var gridView = id("com.yikaobang.yixue:id/questionList_GridView").findOne(1000);
+    if (!gridView) {
+        console.log("  未找到 GridView");
+        return false;
+    }
+
+    var scrollCount = 0;
+    // TODO: 基于题目数动态调整滚动次数，目前固定最多滚动 100 次，避免死循环
+    var maxScroll = 100;
+    while (scrollCount++ < maxScroll) {
         var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+
         for (var i = 0; i < items.length; i++) {
-            if (items[i].text() === "1") {
-                var b = items[i].bounds();
-                console.log("  点击第1题 (尝试" + (r + 1) + ")");
-                click(b.centerX(), b.centerY());
-                sleep(3000);
+            if (items[i].text() !== "1") continue;
 
-                // 验证是否离开了列表页
-                if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
-                    lastNumb = "";
-                    lastUnit = "";
-                    updateChapter();
-                    console.log("★ 已进入新章节: " + currentChapter + " ★");
+            var b = items[i].bounds();
+            console.log("  找到题号'1'，尝试点击进入");
+            click(b.centerX(), b.centerY());
+            sleep(3000);
 
-                    return true;
-                }
-                break;
+            if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+                lastNumb = "";
+                lastUnit = "";
+                updateChapter();
+                console.log("★ 已进入新章节: " + currentChapter + " ★");
+                return true;
             }
+
+            console.log("  点击无效，继续滚动查找");
+            break;
         }
+
+        console.log("  向下滚动查找有效的题号'1'... (" + scrollCount + "/" + maxScroll + ")");
+        gridView.scrollBackward();
         sleep(1000);
     }
 
-    console.log("  进入新章节失败，仍在列表页");
+    console.log("  未找到有效的题号'1'");
     return false;
 }
 
