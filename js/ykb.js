@@ -2,6 +2,7 @@
 var APP_NAME = "医考帮";
 var PKG_NAME = "com.yikaobang.yixue";
 var OUTPUT_DIR = "/sdcard/tests/";
+var PERIODIC_RETURN_INTERVAL = 250;   // 每 N 题返回列表页释放内存（建议 200~350）
 var record = null;
 var lastNumb = "";
 var lastUnit = "";
@@ -647,7 +648,7 @@ function scrollToQuestion(targetNum) {
             if (scrollCount % 10 === 0) {
                 console.log("  向下滚动中... (已滚动 " + scrollCount + " 次，当前最大题号: " + currentMaxNum + ")");
             }
-            swipe(700, 2000, 700, 1800, 1000);
+            swipe(700, 2000, 700, 1500, 500);
             sleep(1500);
         }
     }
@@ -1018,7 +1019,7 @@ function main() {
             failCount = 0;
 
             // 每 100 题执行一次返回恢复
-            if (savedCount % 100 === 0) {
+            if (savedCount % PERIODIC_RETURN_INTERVAL === 0) {
                 if (!handlePeriodicReturn(savedCount)) {
                     console.log("周期性返回失败，退出脚本");
                     break;
