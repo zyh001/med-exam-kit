@@ -3,6 +3,44 @@ from __future__ import annotations
 from collections import Counter
 from med_exam_toolkit.models import Question
 
+DIFFICULTY_LABELS = {
+    "easy": "简单 (≥80%)",
+    "medium": "中等 (60-80%)",
+    "hard": "较难 (40-60%)",
+    "extreme": "困难 (<40%)",
+    "unknown": "未知 (无正确率)",
+}
+
+DIFFICULTY_ORDER = ["easy", "medium", "hard", "extreme", "unknown"]
+
+def _parse_rate(raw: str) -> float | None:
+    if not raw or not raw.strip():
+        return None
+    s = raw.strip().rstrip("%")
+    try:
+        v = float(s)
+        return v if 0 <= v <= 100 else None
+    except ValueError:
+        return None
+
+
+def _classify_difficulty(q: Question) -> str:
+    rates = []
+    for sq in q.sub_questions:
+        r = _parse_rate(sq.rate)
+        if r is not None:
+            rates.append(r)
+    if not rates:
+        return "unknown"
+    avg = sum(rates) / len(rates)
+    if avg >= 80:
+        return "easy"
+    if avg >= 60:
+        return "medium"
+    if avg >= 40:
+        return "hard"
+    return "extreme"
+
 
 def summarize(questions: list[Question], full: bool = False) -> dict:
     """生成统计摘要, full=True 时章节/题库不截断"""
@@ -10,6 +48,7 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
     by_unit = Counter()
     by_pkg = Counter()
     by_cls = Counter()
+    by_difficulty = Counter()
     low_rate_questions = []
 
     for q in questions:
@@ -17,6 +56,7 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
         by_unit[q.unit] += 1
         by_pkg[q.pkg] += 1
         by_cls[q.cls] += 1
+        by_difficulty[_classify_difficulty(q)] += 1
 
         for sq in q.sub_questions:
             if sq.rate:
@@ -35,12 +75,20 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
 
     unit_limit = None if full else 20
 
+    # 按 DIFFICULTY_ORDER 排序
+    difficulty_sorted = {
+        k: by_difficulty.get(k, 0)
+        for k in DIFFICULTY_ORDER
+        if by_difficulty.get(k, 0) > 0
+    }
+
     return {
         "total": len(questions),
         "by_mode": dict(by_mode.most_common()),
         "by_unit": dict(by_unit.most_common(unit_limit)),
         "by_pkg": dict(by_pkg.most_common()),
         "by_cls": dict(by_cls.most_common()),
+        "by_difficulty": difficulty_sorted,
         "unit_total": len(by_unit),
         "low_rate_count": len(low_rate_questions),
         "low_rate_top10": sorted(
@@ -62,6 +110,13 @@ def print_summary(questions: list[Question], full: bool = False) -> None:
     print(f"\n按题型:")
     for mode, count in s["by_mode"].items():
         print(f"  {mode}: {count}")
+
+    print(f"\n按难度:")
+    for level, count in s["by_difficulty"].items():
+        label = DIFFICULTY_LABELS.get(level, level)
+        pct = count / s["total"] * 100 if s["total"] else 0
+        bar = "█" * int(pct / 2)
+        print(f"  {label}: {count} ({pct:.1f}%) {bar}")
 
     print(f"\n按来源:")
     for pkg, count in s["by_pkg"].items():
