@@ -1,17 +1,26 @@
 from __future__ import annotations
 import hashlib
+import re
 from med_exam_toolkit.models import Question
 
 
 def _normalize_text(text: str) -> str:
     """去除空白、标点差异，统一用于指纹计算"""
-    import re
     text = re.sub(r"\s+", "", text)
     # 统一中英文标点
     text = text.replace("，", ",").replace("。", ".").replace("；", ";")
     text = text.replace("：", ":").replace("（", "(").replace("）", ")")
     return text.lower()
 
+def _resolve_answer_text(sq) -> str:
+    """将答案字母转为实际选项文本，避免选项顺序影响指纹"""
+    try:
+        idx = ord(sq.answer.strip().upper()) - ord("A")
+        if 0 <= idx < len(sq.options):
+            return _normalize_text(sq.options[idx])
+    except (TypeError, ValueError):
+        pass
+    return sq.answer.strip().upper()
 
 def compute_fingerprint(q: Question, strategy: str = "strict") -> str:
     """
@@ -19,7 +28,7 @@ def compute_fingerprint(q: Question, strategy: str = "strict") -> str:
 
     strategy:
         - content: 仅基于题干/子题文本
-        - strict:  题干 + 选项 + 答案
+        - strict:  题干 + 选项(排序) + 答案文本
     """
     parts: list[str] = []
 
@@ -30,9 +39,11 @@ def compute_fingerprint(q: Question, strategy: str = "strict") -> str:
     for sq in q.sub_questions:
         parts.append(_normalize_text(sq.text))
         if strategy == "strict":
-            for opt in sq.options:
-                parts.append(_normalize_text(opt))
-            parts.append(sq.answer.strip().upper())
+            # 排序选项，消除顺序差异
+            sorted_opts = sorted(_normalize_text(opt) for opt in sq.options)
+            parts.extend(sorted_opts)
+            # 用答案文本而非字母
+            parts.append(_resolve_answer_text(sq))
 
     raw_str = "|".join(parts)
     return hashlib.sha256(raw_str.encode("utf-8")).hexdigest()[:16]
@@ -54,7 +65,7 @@ def deduplicate(
         q.fingerprint = fp
         if fp in seen:
             duplicates += 1
-            # 可选：合并来源信息
+            # 合并来源信息
             existing = seen[fp]
             if q.pkg not in existing.pkg:
                 existing.pkg += f",{q.pkg}"

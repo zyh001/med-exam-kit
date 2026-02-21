@@ -5,7 +5,7 @@ import sys
 import json as _json
 from pathlib import Path
 from med_exam_toolkit.loader import load_json_files
-from med_exam_toolkit.dedup import deduplicate
+from med_exam_toolkit.dedup import deduplicate, compute_fingerprint
 from med_exam_toolkit.stats import print_summary
 from med_exam_toolkit.bank import save_bank, load_bank
 from med_exam_toolkit.filters import FilterCriteria, apply_filters
@@ -317,6 +317,19 @@ def info(ctx, input_dir, bank, password):
         print_summary(questions, full=True)
     else:
         click.echo("题库为空。")
+
+@cli.command(hidden=True)
+@click.option("--bank", required=True, type=click.Path(exists=True))
+@click.option("--password", default=None)
+@click.pass_context
+def reindex(ctx, bank, password):
+    """重算题库内所有指纹"""
+    path = Path(bank)
+    questions = load_bank(path, password)
+    for q in questions:
+        q.fingerprint = compute_fingerprint(q, "strict")
+    save_bank(questions, path, password)
+    click.echo(f"[OK] 已重算 {len(questions)} 条指纹")
 
 def main():
     cli()
