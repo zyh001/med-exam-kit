@@ -168,6 +168,8 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 @click.option("-n", "--count", default=50, type=int, help="总抽题数")
 @click.option("--per-mode", default="", help='按题型指定数量, 如 A1型题:30,A2型题:20')
 @click.option("--difficulty", default="", help="按难度比例抽题, 如 easy:20,medium:40,hard:30,extreme:10")
+@click.option("--difficulty-mode", type=click.Choice(["global", "per_mode"]), default="global",
+              help="难度分配策略: global=先难度后题型(默认), per_mode=先题型后难度")
 @click.option("--seed", default=None, type=int, help="随机种子 (固定种子可复现)")
 @click.option("--show-answers/--hide-answers", default=False, help="题目中显示答案")
 @click.option("--answer-sheet/--no-answer-sheet", default=True, help="末尾附答案页")
@@ -179,8 +181,8 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 @click.option("--password", default=None, help="题库解密密码")
 @click.pass_context
 def generate(ctx, input_dir, output, title, subtitle, cls, unit, mode, count,
-             per_mode, difficulty, seed, show_answers, answer_sheet, show_discuss,
-             score, time_limit, dedup, bank, password):
+             per_mode, difficulty, difficulty_mode, seed, show_answers, answer_sheet,
+             show_discuss, score, time_limit, dedup, bank, password):
     """自动组卷: 随机抽题 → 导出 Word 试卷"""
 
     cfg = ctx.obj["config"]
@@ -230,6 +232,7 @@ def generate(ctx, input_dir, output, title, subtitle, cls, unit, mode, count,
         count=count,
         per_mode=mode_dist or None,
         difficulty_dist=diff_dist or None,
+        difficulty_mode = difficulty_mode,
         seed=seed,
         show_answers=show_answers,
         answer_sheet=answer_sheet,

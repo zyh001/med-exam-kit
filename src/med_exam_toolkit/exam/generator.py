@@ -35,7 +35,10 @@ class ExamGenerator:
         has_difficulty = bool(self.config.difficulty_dist)
 
         if has_per_mode and has_difficulty:
-            selected = self._sample_per_mode_with_difficulty(filtered)
+            if self.config.difficulty_mode == "per_mode":
+                selected = self._sample_per_mode_with_difficulty(filtered)
+            else:
+                selected = self._sample_global_difficulty_then_mode(filtered)
         elif has_per_mode:
             selected = self._sample_per_mode(filtered)
         elif has_difficulty:
@@ -191,6 +194,7 @@ class ExamGenerator:
             print(f"[WARN] 可用题目 {len(pool)} 道，不足 {self.config.count}，将全部使用")
         return self._sample_from_pool_by_difficulty(pool, total)
 
+    # ── 先题型后难度 ──
     def _sample_per_mode_with_difficulty(self, pool: list[Question]) -> list[Question]:
         """先按题型分，再在每个题型内按难度比例抽取"""
         by_mode: dict[str, list[Question]] = defaultdict(list)
@@ -208,6 +212,59 @@ class ExamGenerator:
                 print(f"[WARN] {mode} 可用 {len(mode_pool)} 道，不足 {need}")
             batch = self._sample_from_pool_by_difficulty(mode_pool, n)
             selected.extend(batch)
+        return selected
+
+    # ── 先难度后题型 (默认) ──
+    def _sample_global_difficulty_then_mode(self, pool: list[Question]) -> list[Question]:
+        dist = self.config.difficulty_dist
+        per_mode = self.config.per_mode
+        total_need = sum(per_mode.values())
+
+        # 1) 全局按难度分桶（只保留目标题型）
+        by_diff: dict[str, list[Question]] = defaultdict(list)
+        for q in pool:
+            if q.mode in per_mode:
+                by_diff[self._classify_difficulty(q)].append(q)
+
+        # 2) 每个难度档需要多少题
+        diff_targets = self._distribute_by_ratio(total_need, dist)
+
+        # 3) 在每个难度档内按题型比例分配
+        selected = []
+        used_ids: set[int] = set()
+
+        for level, diff_need in diff_targets.items():
+            diff_pool = by_diff.get(level, [])
+            by_mode_in_diff: dict[str, list[Question]] = defaultdict(list)
+            for q in diff_pool:
+                by_mode_in_diff[q.mode].append(q)
+
+            mode_targets = self._distribute_by_ratio(diff_need, per_mode)
+
+            for mode, need in mode_targets.items():
+                available = [q for q in by_mode_in_diff.get(mode, []) if id(q) not in used_ids]
+                n = min(need, len(available))
+                if n > 0:
+                    picked = self._rng.sample(available, n)
+                    selected.extend(picked)
+                    used_ids.update(id(q) for q in picked)
+
+        # 4) 按题型补齐缺口
+        mode_count = Counter(q.mode for q in selected)
+        for mode, need in per_mode.items():
+            got = mode_count.get(mode, 0)
+            if got < need:
+                shortfall = need - got
+                remaining = [q for q in pool if q.mode == mode and id(q) not in used_ids]
+                fill = min(shortfall, len(remaining))
+                if fill > 0:
+                    picked = self._rng.sample(remaining, fill)
+                    selected.extend(picked)
+                    used_ids.update(id(q) for q in picked)
+                    mode_count[mode] = got + fill
+                if fill < shortfall:
+                    print(f"[WARN] {mode} 最终只能凑到 {got + fill} 道，不足 {need}")
+
         return selected
 
     @staticmethod

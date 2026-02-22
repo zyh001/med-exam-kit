@@ -18,6 +18,7 @@ class ExamConfig:
     per_mode: dict[str, int] = field(default_factory=dict)
     difficulty_dist: dict[str, int] | None = None
     # 例: {"A1型题": 20, "A2型题": 15, "A3/A4型题": 10}
+    difficulty_mode: str = "global"  # "global" = 方案A(先难度后题型), "per_mode" = 方案B(先题型后难度)
 
     seed: int | None = None
     show_answers: bool = False
