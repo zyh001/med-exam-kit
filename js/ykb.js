@@ -157,6 +157,8 @@ function updateChapter() {
     var title = id("com.yikaobang.yixue:id/txt_actionbar_title").findOne(500);
     if (title != null && title.text() !== "") {
         currentChapter = title.text();
+    } else {
+        currentChapter = get_unit() || currentChapter;
     }
 }
 
@@ -727,6 +729,38 @@ function waitForPage(timeout) {
 }
 
 /**
+ * 等待元素消失
+ * @param {String} elementId 元素的 id（例如："com.yikaobang.yixue:id/openrel"）
+ * @param {Number} maxWait 最大等待次数
+ * @param {Function} waitFn 可选的等待函数，默认为 sleep(1000)，也可以传入滚动等操作
+ * @return {Boolean} 是否成功（元素已消失）
+ */
+function waitForElementDisappear(elementId, maxWait, waitFn) {
+    // 从 elementId 中提取元素名称（取最后一个 / 后面的部分）
+    var parts = elementId.split("/");
+    var elementName = parts[parts.length - 1];
+
+    var waitCount = 0;
+    while (id(elementId).exists() && waitCount < maxWait) {
+        console.log("  等待 " + elementName + " 消失... (" + (waitCount + 1) + "/" + maxWait + ")");
+        if (waitFn) {
+            waitFn();
+        } else {
+            sleep(1000);
+        }
+        waitCount++;
+    }
+
+    if (!id(elementId).exists()) {
+        console.log("  " + elementName + " 已消失");
+        return true;
+    } else {
+        console.log("  警告：等待超时，" + elementName + " 仍然存在");
+        return false;
+    }
+}
+
+/**
  * 处理章节切换
  * 场景1: 最后一题滑动后弹出"已经是最后一题，是否跳转下一章？"
  * 场景2: 跳转后进入题目列表页，需要选背题模式并点击第1题
@@ -739,6 +773,21 @@ function handleNextChapter() {
         console.log("★ 当前章节结束: " + currentChapter + "，跳转下一章 ★");
         jumpBtn.click();
         sleep(2000);
+
+        // 等待 centerPopupContainer 消失，表示已跳转
+        waitForElementDisappear("com.yikaobang.yixue:id/centerPopupContainer", 10);
+
+        // 根据 openrel 是否存在采取不同的等待策略
+        if (!id("com.yikaobang.yixue:id/openrel").exists()) {
+            // openrel 不存在，说明当前章节题目较少，等待 10 秒让新章节题目加载
+            console.log("  openrel 不存在，等待新章节题目加载...");
+            sleep(10000);
+            console.log("  等待完成");
+        } else {
+            // openrel 存在，等待其消失（新章节加载完会自动回滚到顶部，openrel 会消失）
+            waitForElementDisappear("com.yikaobang.yixue:id/openrel", 10);
+        }
+
         return enterFromQuestionList();
     }
 
@@ -755,6 +804,12 @@ function handleNextChapter() {
  * 从题目列表页进入：选背题模式 → 点第1题
  */
 function enterFromQuestionList() {
+    // 如果 openrel 存在，向上滚动直到 openrel 消失
+    waitForElementDisappear("com.yikaobang.yixue:id/openrel", 50, function() {
+        swipe(700, 1800, 700, 2200, 1000);  // 向上滚动
+        sleep(1000);
+    });
+
     // 点击"背题模式"
     var labels = id("com.yikaobang.yixue:id/labeltext").find();
     for (var i = 0; i < labels.length; i++) {
@@ -784,72 +839,46 @@ function enterFromQuestionList() {
         sleep(1000);
     }
 
-    // 向上滚动直到题号 1 出现
-    var scrollUpCount = 0;
-    var maxScrollUp = 50;  // 最多向上滚动 50 次
-    while (scrollUpCount < maxScrollUp) {
-        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
-        var foundOne = false;
-        var minNum = 999999;
-
-        // 检查是否有题号 1，同时找出最小题号
-        for (var i = 0; i < items.length; i++) {
-            var num = parseInt(items[i].text());
-            if (!isNaN(num)) {
-                if (num === 1) {
-                    foundOne = true;
-                    break;
-                }
-                if (num < minNum) {
-                    minNum = num;
-                }
-            }
-        }
-
-        if (foundOne) {
-            console.log("  找到题号 1");
-            break;
-        }
-
-        // 如果最小题号大于 1，向上滚动
-        if (minNum > 1) {
-            console.log("  当前最小题号: " + minNum + "，向上滚动查找题号 1...");
-            swipe(700, 1800, 700, 2200, 1000);  // 向上滚动
-            sleep(1000);
-            scrollUpCount++;
-        } else {
-            console.log("  未找到题号 1，可能已到达列表顶部");
-            break;
-        }
+    // 查找并点击题号"1"，不存在或点击无效则向下滚动
+    // 列表页面不在顶部，并且筛选条件展开的情况下，openrel 不存在。因此需要滚动查找题号"1"，作为兜底。
+    var gridView = id("com.yikaobang.yixue:id/questionList_GridView").findOne(1000);
+    if (!gridView) {
+        console.log("  未找到 GridView");
+        return false;
     }
 
-    // 点击题号 "1"，用坐标点击更可靠
-    var retries = 3;
-    for (var r = 0; r < retries; r++) {
+    var scrollCount = 0;
+    // TODO: 基于题目数动态调整滚动次数，目前固定最多滚动 100 次，避免死循环
+    var maxScroll = 100;
+    while (scrollCount++ < maxScroll) {
         var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+
         for (var i = 0; i < items.length; i++) {
-            if (items[i].text() === "1") {
-                var b = items[i].bounds();
-                console.log("  点击第1题 (尝试" + (r + 1) + ")");
-                click(b.centerX(), b.centerY());
-                sleep(3000);
+            if (items[i].text() !== "1") continue;
 
-                // 验证是否离开了列表页
-                if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
-                    lastNumb = "";
-                    lastUnit = "";
-                    updateChapter();
-                    console.log("★ 已进入新章节: " + currentChapter + " ★");
+            var b = items[i].bounds();
+            console.log("  找到题号'1'，尝试点击进入");
+            click(b.centerX(), b.centerY());
+            sleep(3000);
 
-                    return true;
-                }
-                break;
+            if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+                lastNumb = "";
+                lastUnit = "";
+                updateChapter();
+                console.log("★ 已进入新章节: " + currentChapter + " ★");
+                return true;
             }
+
+            console.log("  点击无效，继续滚动查找");
+            break;
         }
+
+        console.log("  向下滚动查找有效的题号'1'... (" + scrollCount + "/" + maxScroll + ")");
+        gridView.scrollBackward();
         sleep(1000);
     }
 
-    console.log("  进入新章节失败，仍在列表页");
+    console.log("  未找到有效的题号'1'");
     return false;
 }
 
