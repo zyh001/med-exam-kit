@@ -2,6 +2,7 @@
 from __future__ import annotations
 from collections import Counter
 from med_exam_toolkit.models import Question
+import unicodedata
 
 DIFFICULTY_LABELS = {
     "easy": "简单 (≥80%)",
@@ -23,6 +24,13 @@ def _parse_rate(raw: str) -> float | None:
     except ValueError:
         return None
 
+def _display_width(s: str) -> int:
+    """计算字符串在终端的显示宽度"""
+    return sum(2 if unicodedata.east_asian_width(c) in ("F", "W") else 1 for c in s)
+
+def _pad_right(s: str, width: int) -> str:
+    """按显示宽度右补空格"""
+    return s + " " * (width - _display_width(s))
 
 def _classify_difficulty(q: Question) -> str:
     rates = []
@@ -102,39 +110,44 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
 def print_summary(questions: list[Question], full: bool = False) -> None:
     """打印统计摘要到终端"""
     s = summarize(questions, full=full)
+    total = s["total"] or 1
     print(f"\n{'='*50}")
     print(f"📊 题目统计")
     print(f"{'='*50}")
     print(f"总题数: {s['total']}")
 
-    print(f"\n按题型:")
-    for mode, count in s["by_mode"].items():
-        print(f"  {mode}: {count}")
+    def _print_section(title: str, data: dict, show_bar: bool = True):
+        print(f"\n{title}:")
+        if not data:
+            print("  (无数据)")
+            return
+        # 自动计算标签列宽度
+        labels = {k: (k if k.strip() else "未知") for k in data}
+        col_width = max(_display_width(v) for v in labels.values()) + 2
+        max_count = max(data.values())
+        for key, count in data.items():
+            label = labels[key]
+            padded = _pad_right(label, col_width)
+            pct = count / total * 100
+            bar = " " + "■" * round(count / max_count * 20) if show_bar else ""
+            print(f"  {padded} {count:>5d} ({pct:>5.1f}%){bar}")
 
-    print(f"\n按难度:")
-    for level, count in s["by_difficulty"].items():
-        label = DIFFICULTY_LABELS.get(level, level)
-        pct = count / s["total"] * 100 if s["total"] else 0
-        bar = "█" * int(pct / 2)
-        print(f"  {label}: {count} ({pct:.1f}%) {bar}")
+    _print_section("按题型", s["by_mode"])
 
-    print(f"\n按来源:")
-    for pkg, count in s["by_pkg"].items():
-        print(f"  {pkg}: {count}")
+    difficulty_labeled = {
+        DIFFICULTY_LABELS.get(k, k): v for k, v in s["by_difficulty"].items()
+    }
+    _print_section("按难度", difficulty_labeled)
 
-    print(f"\n按题库:")
-    for cls, count in s["by_cls"].items():
-        print(f"  {cls}: {count}")
+    _print_section("按来源", s["by_pkg"])
+    _print_section("按题库", s["by_cls"], show_bar=False)
 
     unit_items = list(s["by_unit"].items())
     if full:
-        print(f"\n按章节 (共 {s['unit_total']} 个):")
-        for unit, count in unit_items:
-            print(f"  {unit}: {count}")
+        _print_section(f"按章节 (共 {s['unit_total']} 个)", s["by_unit"], show_bar=False)
     else:
-        print(f"\n按章节 (Top 10 / 共 {s['unit_total']} 个):")
-        for unit, count in unit_items[:10]:
-            print(f"  {unit}: {count}")
+        top10 = dict(unit_items[:10])
+        _print_section(f"按章节 (Top 10 / 共 {s['unit_total']} 个)", top10, show_bar=False)
         if s["unit_total"] > 10:
             print(f"  ... 还有 {s['unit_total'] - 10} 个章节")
 
