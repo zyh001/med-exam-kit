@@ -23,8 +23,98 @@ class ExamGenerator:
         self.pool = questions
         self.config = config
         self._rng = random.Random(config.seed)
+        self._by_sub = config.count_mode == "sub"
 
-    # ── 公开接口 ──
+    # ── 计数工具 ──
+
+    @staticmethod
+    def _sub_count(q: Question) -> int:
+        return len(q.sub_questions)
+
+    def _cost(self, q: Question) -> int:
+        """一道题的"花费"：小题模式返回子题数，大题模式返回 1"""
+        return self._sub_count(q) if self._by_sub else 1
+
+    def _total_cost(self, qs: list[Question]) -> int:
+        return sum(self._cost(q) for q in qs)
+
+    @staticmethod
+    def _total_subs(qs: list[Question]) -> int:
+        return sum(len(q.sub_questions) for q in qs)
+
+    # ── 核心抽取 ──
+
+    def _greedy_fill(self, pool: list[Question], target: int, used_ids: set[int]) -> list[Question]:
+        available = [q for q in pool if id(q) not in used_ids]
+        self._rng.shuffle(available)
+        picked = []
+        total = 0
+
+        # 第一轮：贪心塞能放下的
+        remaining = []
+        for q in available:
+            c = self._cost(q)
+            if total + c <= target:
+                picked.append(q)
+                used_ids.add(id(q))
+                total += c
+                if total == target:
+                    return picked
+            else:
+                remaining.append(q)
+
+        # 第二轮：找 cost <= gap 且最大的
+        while total < target and remaining:
+            gap = target - total
+            best = None
+            best_c = 0
+            best_idx = -1
+            for i, q in enumerate(remaining):
+                c = self._cost(q)
+                if c <= gap and c > best_c:
+                    best = q
+                    best_c = c
+                    best_idx = i
+            if best is not None:
+                picked.append(best)
+                used_ids.add(id(best))
+                total += best_c
+                remaining.pop(best_idx)
+                if total == target:
+                    return picked
+            else:
+                break
+
+        # 第三轮（仅小题模式）：截断凑满
+        if self._by_sub and total < target and remaining:
+            gap = target - total
+
+            # 优先找子题数刚好 == gap 的
+            exact = None
+            exact_idx = -1
+            for i, q in enumerate(remaining):
+                if self._sub_count(q) == gap:
+                    exact = q
+                    exact_idx = i
+                    break
+            if exact is not None:
+                picked.append(exact)
+                used_ids.add(id(exact))
+                remaining.pop(exact_idx)
+                return picked
+
+            # 找不到精确匹配，选子题数最少且 > gap 的截断
+            candidates = [(i, q) for i, q in enumerate(remaining) if self._sub_count(q) > gap]
+            if candidates:
+                candidates.sort(key=lambda x: self._sub_count(x[1]))
+                idx, q = candidates[0]
+                sc = self._sub_count(q)
+                q.sub_questions = q.sub_questions[:gap]
+                picked.append(q)
+                used_ids.add(id(q))
+                print(f"[INFO] 截断大题（原 {sc} 子题 → 保留 {gap} 子题）")
+
+        return picked
 
     def generate(self) -> list[Question]:
         filtered = self._filter_pool()
@@ -48,26 +138,69 @@ class ExamGenerator:
 
         self._rng.shuffle(selected)
         order = self._mode_order()
-        selected.sort(key=lambda q: order.get(q.mode, 99))
+        selected.sort(key=lambda q: (order.get(q.mode, 99), q.unit))
         return selected
 
     def summary(self, selected: list[Question]) -> str:
-        by_mode = Counter(q.mode for q in selected)
-        by_unit = Counter(q.unit for q in selected)
+        total_subs = self._total_subs(selected)
+        by_mode_subs = Counter()
+        by_mode_q = Counter()
+        for q in selected:
+            by_mode_subs[q.mode] += self._sub_count(q)
+            by_mode_q[q.mode] += 1
+        by_unit = Counter()
+        for q in selected:
+            by_unit[q.unit] += self._sub_count(q)
+
+        mode_str = ", ".join(
+            f"{m}: {by_mode_subs[m]}小题({by_mode_q[m]}大题)"
+            for m, _ in by_mode_subs.most_common()
+        )
+
         lines = [
             f"试卷: {self.config.title}",
-            f"总题数: {len(selected)}",
-            f"题型分布: {dict(by_mode.most_common())}",
+            f"计数模式: {'按小题' if self._by_sub else '按大题'}",
+            f"总题数: {total_subs} 小题（{len(selected)} 大题）",
+            f"题型分布: {mode_str}",
             f"章节分布: {dict(by_unit.most_common(10))}",
         ]
+
+        # 分数
+        score_info = self._calc_score(selected)
+        if score_info:
+            lines.append(score_info)
+
         if self.config.difficulty_dist:
-            by_diff = Counter(self._classify_difficulty(q) for q in selected)
+            by_diff = Counter()
+            for q in selected:
+                by_diff[self._classify_difficulty(q)] += self._sub_count(q)
             diff_str = ", ".join(
                 f"{DIFFICULTY_LABELS.get(k, k)}: {v}道"
-                for k, v in sorted(by_diff.items(), key=lambda x: list(DIFFICULTY_LABELS).index(x[0]) if x[0] in DIFFICULTY_LABELS else 99)
+                for k, v in sorted(
+                    by_diff.items(),
+                    key=lambda x: list(DIFFICULTY_LABELS).index(x[0])
+                    if x[0] in DIFFICULTY_LABELS else 99,
+                )
             )
             lines.append(f"难度分布: {diff_str}")
         return "\n".join(lines)
+
+    def _calc_score(self, selected: list[Question]) -> str | None:
+        total_subs = self._total_subs(selected)
+        if not total_subs:
+            return None
+
+        if self.config.score_per_sub:
+            per = self.config.score_per_sub
+            total = per * total_subs
+            return f"分值: 每小题 {per} 分，总分 {total} 分"
+
+        if self.config.total_score:
+            per = round(self.config.total_score / total_subs, 2)
+            total = self.config.total_score
+            return f"分值: 总分 {total} 分，每小题 {per} 分"
+
+        return None
 
     # ── 难度分级 ──
 
@@ -120,7 +253,7 @@ class ExamGenerator:
                 allocated += n
         return result
 
-    # ── 抽样策略 ──
+    # ── 筛选 ──
 
     def _filter_pool(self) -> list[Question]:
         pool = self.pool
@@ -135,11 +268,16 @@ class ExamGenerator:
             pool = [q for q in pool if q.mode.lower() in modes_lower]
         return pool
 
+    # ── 抽样策略 ──
+
     def _sample_total(self, pool: list[Question]) -> list[Question]:
-        n = min(self.config.count, len(pool))
-        if n < self.config.count:
-            print(f"[WARN] 可用题目 {len(pool)} 道，不足 {self.config.count}，将全部使用")
-        return self._rng.sample(pool, n)
+        target = self.config.count
+        pool_cost = self._total_cost(pool)
+        if pool_cost < target:
+            unit = "小题" if self._by_sub else "大题"
+            print(f"[WARN] 可用{unit} {pool_cost} 道，不足 {target}，将全部使用")
+            return list(pool)
+        return self._greedy_fill(pool, target, set())
 
     def _sample_per_mode(self, pool: list[Question]) -> list[Question]:
         by_mode: dict[str, list[Question]] = defaultdict(list)
@@ -147,20 +285,28 @@ class ExamGenerator:
             by_mode[q.mode].append(q)
 
         selected = []
+        used_ids: set[int] = set()
+        unit = "小题" if self._by_sub else "大题"
         for mode, need in self.config.per_mode.items():
             available = by_mode.get(mode, [])
-            n = min(need, len(available))
-            if n < need:
-                print(f"[WARN] {mode} 可用 {len(available)} 道，不足 {need}，将全部使用")
-            selected.extend(self._rng.sample(available, n))
+            avail_cost = self._total_cost([q for q in available if id(q) not in used_ids])
+            if avail_cost < need:
+                print(f"[WARN] {mode} 可用{unit} {avail_cost} 道，不足 {need}，将全部使用")
+            picked = self._greedy_fill(available, need, used_ids)
+            selected.extend(picked)
         return selected
 
-    def _sample_from_pool_by_difficulty(self, pool: list[Question], total: int) -> list[Question]:
-        """核心: 从 pool 中按难度比例抽取 total 道题"""
+    def _sample_from_pool_by_difficulty(
+        self, pool: list[Question], total: int, used_ids: set[int] | None = None,
+    ) -> list[Question]:
+        if used_ids is None:
+            used_ids = set()
+
         dist = self.config.difficulty_dist
         by_diff: dict[str, list[Question]] = defaultdict(list)
         for q in pool:
-            by_diff[self._classify_difficulty(q)].append(q)
+            if id(q) not in used_ids:
+                by_diff[self._classify_difficulty(q)].append(q)
 
         targets = self._distribute_by_ratio(total, dist)
 
@@ -168,31 +314,33 @@ class ExamGenerator:
         shortfall = 0
         for level, need in targets.items():
             available = by_diff.get(level, [])
-            n = min(need, len(available))
-            if n < need:
+            picked = self._greedy_fill(available, need, used_ids)
+            got = self._total_cost(picked)
+            if got < need:
                 label = DIFFICULTY_LABELS.get(level, level)
-                print(f"[WARN] {label}({level}) 可用 {len(available)} 道，不足 {need}")
-                shortfall += need - n
-            if n > 0:
-                selected.extend(self._rng.sample(available, n))
+                print(f"[WARN] {label}({level}) 可用 {got} 道，不足 {need}")
+                shortfall += need - got
+            selected.extend(picked)
 
         # 不够的从剩余题目补齐
         if shortfall > 0:
-            used = {id(q) for q in selected}
-            remaining = [q for q in pool if id(q) not in used]
-            fill = min(shortfall, len(remaining))
-            if fill > 0:
-                selected.extend(self._rng.sample(remaining, fill))
-                print(f"[INFO] 从其他难度补充 {fill} 道")
+            remaining = [q for q in pool if id(q) not in used_ids]
+            filled = self._greedy_fill(remaining, shortfall, used_ids)
+            fill_count = self._total_cost(filled)
+            if fill_count > 0:
+                selected.extend(filled)
+                print(f"[INFO] 从其他难度补充 {fill_count} 道")
 
         return selected
 
     def _sample_by_difficulty(self, pool: list[Question]) -> list[Question]:
-        """仅按难度比例，不分题型"""
-        total = min(self.config.count, len(pool))
-        if total < self.config.count:
-            print(f"[WARN] 可用题目 {len(pool)} 道，不足 {self.config.count}，将全部使用")
-        return self._sample_from_pool_by_difficulty(pool, total)
+        target = self.config.count
+        pool_cost = self._total_cost(pool)
+        if pool_cost < target:
+            unit = "小题" if self._by_sub else "大题"
+            print(f"[WARN] 可用{unit} {pool_cost} 道，不足 {target}，将全部使用")
+            return list(pool)
+        return self._sample_from_pool_by_difficulty(pool, target)
 
     # ── 先题型后难度 ──
     def _sample_per_mode_with_difficulty(self, pool: list[Question]) -> list[Question]:
@@ -202,15 +350,17 @@ class ExamGenerator:
             by_mode[q.mode].append(q)
 
         selected = []
+        used_ids: set[int] = set()
+        unit = "小题" if self._by_sub else "大题"
         for mode, need in self.config.per_mode.items():
             mode_pool = by_mode.get(mode, [])
             if not mode_pool:
                 print(f"[WARN] {mode} 无可用题目")
                 continue
-            n = min(need, len(mode_pool))
-            if n < need:
-                print(f"[WARN] {mode} 可用 {len(mode_pool)} 道，不足 {need}")
-            batch = self._sample_from_pool_by_difficulty(mode_pool, n)
+            avail_cost = self._total_cost([q for q in mode_pool if id(q) not in used_ids])
+            if avail_cost < need:
+                print(f"[WARN] {mode} 可用{unit} {avail_cost} 道，不足 {need}")
+            batch = self._sample_from_pool_by_difficulty(mode_pool, need, used_ids)
             selected.extend(batch)
         return selected
 
@@ -220,7 +370,7 @@ class ExamGenerator:
         per_mode = self.config.per_mode
         total_need = sum(per_mode.values())
 
-        # 1) 全局按难度分桶（只保留目标题型）
+        # 1) 全局按难度分桶
         by_diff: dict[str, list[Question]] = defaultdict(list)
         for q in pool:
             if q.mode in per_mode:
@@ -229,41 +379,94 @@ class ExamGenerator:
         # 2) 每个难度档需要多少题
         diff_targets = self._distribute_by_ratio(total_need, dist)
 
-        # 3) 在每个难度档内按题型比例分配
+        # 3) 区分单子题题型和多子题题型
+        multi_sub_modes = {m for m in per_mode if any(
+            self._sub_count(q) > 1 for q in pool if q.mode == m
+        )}
+        single_sub_modes = {m: n for m, n in per_mode.items() if m not in multi_sub_modes}
+        multi_sub_mode_targets = {m: n for m, n in per_mode.items() if m in multi_sub_modes}
+
         selected = []
         used_ids: set[int] = set()
 
+        # 4) 先在每个难度档内分配单子题题型（这些不会截断）
         for level, diff_need in diff_targets.items():
             diff_pool = by_diff.get(level, [])
             by_mode_in_diff: dict[str, list[Question]] = defaultdict(list)
             for q in diff_pool:
-                by_mode_in_diff[q.mode].append(q)
+                if id(q) not in used_ids and q.mode in single_sub_modes:
+                    by_mode_in_diff[q.mode].append(q)
 
-            mode_targets = self._distribute_by_ratio(diff_need, per_mode)
-
-            for mode, need in mode_targets.items():
-                available = [q for q in by_mode_in_diff.get(mode, []) if id(q) not in used_ids]
-                n = min(need, len(available))
-                if n > 0:
-                    picked = self._rng.sample(available, n)
+            if single_sub_modes:
+                single_need = sum(
+                    round(diff_need * single_sub_modes[m] / total_need)
+                    for m in single_sub_modes
+                )
+                mode_targets = self._distribute_by_ratio(
+                    min(single_need, diff_need), single_sub_modes
+                )
+                for mode, need in mode_targets.items():
+                    available = by_mode_in_diff.get(mode, [])
+                    picked = self._greedy_fill(available, need, used_ids)
                     selected.extend(picked)
-                    used_ids.update(id(q) for q in picked)
 
-        # 4) 按题型补齐缺口
-        mode_count = Counter(q.mode for q in selected)
+        # 5) 多子题题型：不按难度档细分，直接从全池按难度优先级整题抽取
+        for mode, need in multi_sub_mode_targets.items():
+            mode_pool = [q for q in pool if q.mode == mode and id(q) not in used_ids]
+
+            # 按难度优先级排序：让目标难度的题排前面
+            diff_order = list(dist.keys())
+            mode_pool_by_diff: list[Question] = []
+            for level in diff_order:
+                batch = [q for q in mode_pool if self._classify_difficulty(q) == level]
+                self._rng.shuffle(batch)
+                mode_pool_by_diff.extend(batch)
+
+            picked = self._greedy_fill(mode_pool_by_diff, need, used_ids)
+            selected.extend(picked)
+
+        # 6) 按题型补齐
+        mode_cost = Counter()
+        for q in selected:
+            mode_cost[q.mode] += self._cost(q)
+
+        unit = "小题" if self._by_sub else "大题"
         for mode, need in per_mode.items():
-            got = mode_count.get(mode, 0)
+            got = mode_cost.get(mode, 0)
             if got < need:
                 shortfall = need - got
                 remaining = [q for q in pool if q.mode == mode and id(q) not in used_ids]
-                fill = min(shortfall, len(remaining))
-                if fill > 0:
-                    picked = self._rng.sample(remaining, fill)
-                    selected.extend(picked)
-                    used_ids.update(id(q) for q in picked)
-                    mode_count[mode] = got + fill
-                if fill < shortfall:
-                    print(f"[WARN] {mode} 最终只能凑到 {got + fill} 道，不足 {need}")
+                filled = self._greedy_fill(remaining, shortfall, used_ids)
+                fill_cost = self._total_cost(filled)
+                selected.extend(filled)
+                mode_cost[mode] = got + fill_cost
+                if got + fill_cost < need:
+                    print(f"[WARN] {mode} 最终只能凑到 {got + fill_cost} 道{unit}，不足 {need}")
+
+        # 最终总量校验：如果超出 total_need，从多子题题型末尾截断
+        total_cost = sum(self._cost(q) for q in selected)
+        if total_cost > total_need:
+            overflow = total_cost - total_need
+            # 从后往前找多子题的大题，截断子题
+            for q in reversed(selected):
+                if overflow <= 0:
+                    break
+                sc = self._sub_count(q)
+                if sc > 1:
+                    can_trim = min(sc - 1, overflow)
+                    q.sub_questions = q.sub_questions[:sc - can_trim]
+                    overflow -= can_trim
+            # 如果截断后还多，移除整题
+            while overflow > 0:
+                for i in range(len(selected) - 1, -1, -1):
+                    c = self._cost(selected[i])
+                    if c <= overflow:
+                        overflow -= c
+                        used_ids.discard(id(selected[i]))
+                        selected.pop(i)
+                        break
+                else:
+                    break
 
         return selected
 

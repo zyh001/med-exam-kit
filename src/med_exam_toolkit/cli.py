@@ -166,6 +166,8 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 @click.option("--unit", multiple=True, help="限定章节 (可多选)")
 @click.option("--mode", multiple=True, help="限定题型 (可多选)")
 @click.option("-n", "--count", default=50, type=int, help="总抽题数")
+@click.option("--count-mode", type=click.Choice(["sub", "question"]), default="sub",
+              help="计数模式: sub=按小题(默认), question=按大题")
 @click.option("--per-mode", default="", help='按题型指定数量, 如 A1型题:30,A2型题:20')
 @click.option("--difficulty", default="", help="按难度比例抽题, 如 easy:20,medium:40,hard:30,extreme:10")
 @click.option("--difficulty-mode", type=click.Choice(["global", "per_mode"]), default="global",
@@ -174,15 +176,16 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
 @click.option("--show-answers/--hide-answers", default=False, help="题目中显示答案")
 @click.option("--answer-sheet/--no-answer-sheet", default=True, help="末尾附答案页")
 @click.option("--show-discuss/--no-discuss", default=False, help="答案页附解析")
-@click.option("--score", default=2.0, type=float, help="每题分值, 0=不显示")
+@click.option("--total-score", default=100, type=int, help="总分，不指定则默认“100”分")
+@click.option("--score", default=None, type=float, help="每题分值, 不指定则由总分自动计算, 0=不显示")
 @click.option("--time-limit", default=120, type=int, help="考试时间(分钟)")
 @click.option("--dedup/--no-dedup", default=True, help="是否去重")
 @click.option("--bank", default=None, type=click.Path(exists=True), help="从 .mqb 题库加载")
 @click.option("--password", default=None, help="题库解密密码")
 @click.pass_context
-def generate(ctx, input_dir, output, title, subtitle, cls, unit, mode, count,
+def generate(ctx, input_dir, output, title, subtitle, cls, unit, mode, count, count_mode,
              per_mode, difficulty, difficulty_mode, seed, show_answers, answer_sheet,
-             show_discuss, score, time_limit, dedup, bank, password):
+             show_discuss, total_score, score, time_limit, dedup, bank, password):
     """自动组卷: 随机抽题 → 导出 Word 试卷"""
 
     cfg = ctx.obj["config"]
@@ -231,13 +234,15 @@ def generate(ctx, input_dir, output, title, subtitle, cls, unit, mode, count,
         modes=list(mode),
         count=count,
         per_mode=mode_dist or None,
+        count_mode=count_mode,
+        total_score=total_score,
         difficulty_dist=diff_dist or None,
         difficulty_mode = difficulty_mode,
         seed=seed,
         show_answers=show_answers,
         answer_sheet=answer_sheet,
         show_discuss=show_discuss,
-        score_per_question=score,
+        score_per_sub=score or None,
     )
 
     # 生成

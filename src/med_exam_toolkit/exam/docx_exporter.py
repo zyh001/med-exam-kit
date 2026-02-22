@@ -84,8 +84,8 @@ class ExamDocxExporter:
         if cfg.total_score:
             info_parts.append(f"满分: {cfg.total_score} 分")
         info_parts.append(f"共 {len(questions)} 题")
-        if cfg.score_per_question:
-            info_parts.append(f"每题 {cfg.score_per_question} 分")
+        if cfg.score_per_sub:
+            info_parts.append(f"每题 {cfg.score_per_sub} 分")
 
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
