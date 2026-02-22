@@ -501,111 +501,267 @@ function reset() {
 }
 
 /**
- * 获取当前屏幕的最大题号
- * @param {Array} items 题号元素列表
- * @returns {number} 最大题号
+ * 获取题目列表的实际可视区域边界
+ * @returns {object|null} {top: number, bottom: number} 或 null
  */
-function getMaxQuestionNumber(items) {
-    var maxNum = 0;
-    for (var i = 0; i < items.length; i++) {
-        var num = parseInt(items[i].text());
-        if (!isNaN(num) && num > maxNum) {
-            maxNum = num;
-        }
+function getVisibleBounds() {
+    var gridView = id("com.yikaobang.yixue:id/questionList_GridView").findOne(1000);
+    if (!gridView) {
+        console.log("  警告：未找到 questionList_GridView");
+        return null;
     }
-    return maxNum;
+
+    var bounds = gridView.bounds();
+    return {
+        top: bounds.top,
+        bottom: bounds.bottom
+    };
 }
 
 /**
- * 检查题号位置是否在安全区域（不在屏幕底部）
- * @param {Object} bounds 元素边界对象
- * @returns {boolean} true 表示在安全区域
+ * 获取可视区内的题号范围
+ * @param {Array} items 题号元素列表
+ * @returns {object} {min: number, max: number}
  */
-function isPositionSafe(bounds) {
-    return bounds.centerY() <= device.height - 200;
+function getVisibleQuestionRange(items) {
+    var minNum = Infinity;
+    var maxNum = 0;
+    var visibleBounds = getVisibleBounds();
+
+    for (var i = 0; i < items.length; i++) {
+        var num = parseInt(items[i].text());
+        if (isNaN(num)) continue;
+
+        // 检查题号是否在实际可视区内
+        if (visibleBounds) {
+            var bounds = items[i].bounds();
+
+            // 判断是否不在可视区内：贴边、超出边界、或者 top >= bottom（异常元素，不在可视区的元素）
+            if (bounds.top <= visibleBounds.top ||
+                bounds.bottom >= visibleBounds.bottom ||
+                bounds.top >= bounds.bottom) {
+                continue;  // 不在可视区内，跳过
+            }
+        }
+
+        if (num < minNum) minNum = num;
+        if (num > maxNum) maxNum = num;
+    }
+
+    return {
+        min: minNum === Infinity ? 0 : minNum,
+        max: maxNum
+    };
 }
 
 /**
  * 尝试点击题号并验证是否成功进入题目页
  * @param {string} targetNum 目标题号
- * @param {Object} bounds 元素边界对象
+ * @param {Object} element 元素对象
  * @returns {boolean} true 表示成功进入题目页
  */
-function clickQuestionAndVerify(targetNum, bounds) {
+function clickQuestionAndVerify(targetNum, element) {
+    var parent = element.parent();
+    var grandParent = parent ? parent.parent() : null;
+
+    console.log("  找到题号 " + targetNum + "，尝试点击策略");
+
+    // 策略1: 尝试点击 grandParent
+    if (grandParent && grandParent.clickable()) {
+        console.log("  策略1: 尝试点击 grandParent");
+        grandParent.click();
+        sleep(3000);
+        if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+            console.log("  策略1 成功");
+            return true;
+        }
+    }
+
+    // 策略2: 尝试点击 parent
+    if (parent && parent.clickable()) {
+        console.log("  策略2: 尝试点击 parent");
+        parent.click();
+        sleep(3000);
+        if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+            console.log("  策略2 成功");
+            return true;
+        }
+    }
+
+    // 策略3: 尝试点击 X/Y 坐标
+    var bounds = element.bounds();
     var x = bounds.centerX();
     var y = bounds.centerY();
-    console.log("  找到题号 " + targetNum + "，点击坐标 (" + x + ", " + y + ")");
+    console.log("  策略3: 尝试点击坐标 (" + x + ", " + y + ")");
     click(x, y);
     sleep(3000);
+    if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+        console.log("  策略3 成功");
+        return true;
+    }
 
-    return !id("com.yikaobang.yixue:id/questionList_item_tv").exists();
+    // 策略4: 尝试点击 id("img_conunite")
+    var imgConunite = id("com.yikaobang.yixue:id/img_conunite").findOne(1000);
+    if (imgConunite) {
+        console.log("  策略4: 尝试点击 id('img_conunite')");
+        imgConunite.click();
+        sleep(3000);
+        if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+            console.log("  策略4 成功");
+            return true;
+        }
+    }
+
+    console.log("  所有点击策略均失败");
+    return false;
+}
+
+/**
+ * 检查题号是否在安全可见范围内
+ * @param {Object} bounds 题号边界
+ * @returns {boolean} true 表示在安全范围内
+ */
+function isInSafeVisibleArea(bounds) {
+    var visibleBounds = getVisibleBounds();
+    if (!visibleBounds) return false;
+
+    var safeMargin = 1;
+    return bounds.top >= visibleBounds.top + safeMargin &&
+           bounds.bottom <= visibleBounds.bottom - safeMargin;
+}
+
+/**
+ * 根据题号位置判断滚动方向
+ * @param {Object} bounds 题号边界
+ * @returns {string} "forward" 或 "backward"
+ *          - 靠近上边界：返回 "backward"（手指向下滑动）
+ *          - 靠近下边界：返回 "forward"（手指向上滑动）
+ */
+function determineScrollDirectionByPosition(bounds) {
+    var visibleBounds = getVisibleBounds();
+    if (!visibleBounds) return "forward";
+
+    var visibleCenter = (visibleBounds.top + visibleBounds.bottom) / 2;
+    var itemCenter = (bounds.top + bounds.bottom) / 2;
+
+    // 题号中心在可视区上半部分，手指向下滑动让它往中间移
+    if (itemCenter < visibleCenter) {
+        return "backward";
+    }
+    // 题号中心在可视区下半部分，手指向上滑动让它往中间移
+    return "forward";
+}
+
+/**
+ * 根据目标题号和可视区范围判断滚动方向
+ * @param {number} targetNum 目标题号
+ * @param {object} range 可视区范围 {min, max}
+ * @returns {string} "backward" 或 "forward"
+ *          - "backward": 手指向下滑动，显示更小的题号
+ *          - "forward": 手指向上滑动，显示更大的题号
+ */
+function determineScrollDirection(targetNum, range) {
+    console.log("  当前可视区题号范围: [" + range.min + ", " + range.max + "]");
+
+    if (targetNum < range.min) {
+        console.log("  题号 " + targetNum + " < 最小题号 " + range.min + "，需要更小的题号，scrollBackward（手指向下滑动）");
+        return "backward";
+    }
+    if (targetNum > range.max) {
+        console.log("  题号 " + targetNum + " > 最大题号 " + range.max + "，需要更大的题号，scrollForward（手指向上滑动）");
+        return "forward";
+    }
+    console.log("  题号 " + targetNum + " 在可视区范围内但未找到，默认 scrollForward");
+    return "forward";
 }
 
 /**
  * 在列表中查找并点击目标题号
- * @param {string} targetNum 目标题号
- * @returns {object} 查找结果 {success: boolean, needScroll: boolean}
+ * @param {string} targetNum 目标题号（如 "1" 或 "123/456"）
+ * @returns {object} {success: boolean, needScroll: boolean, scrollDirection: string}
  */
 function findAndClickQuestion(targetNum) {
     var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+    var targetNumInt = parseInt(targetNum.split("/")[0]);
 
+    // 查找目标题号
     for (var i = 0; i < items.length; i++) {
-        if (items[i].text() !== targetNum) {
-          continue
-        }
+        if (items[i].text() !== targetNum) continue;
 
-        var bounds = items[i].bounds();
+        var element = items[i];
+        var bounds = element.bounds();
 
-        // 检查位置是否安全
-        if (!isPositionSafe(bounds)) {
-            var oldY = bounds.centerY();
-            console.log("  题号 " + targetNum + " 在屏幕底部 (Y=" + oldY + ")，调整位置");
-            swipe(700, 2000, 700, 1600, 1000);
-            sleep(1500);
-
-            // 再次查找该题号，检查位置是否变化
-            var newItems = id("com.yikaobang.yixue:id/questionList_item_tv").find();
-            for (var j = 0; j < newItems.length; j++) {
-                if (newItems[j].text() !== targetNum) {
-                  continue
-                }
-
-                var newBounds = newItems[j].bounds();
-                var newY = newBounds.centerY();
-
-                // 如果位置没变，说明已经到达底部，向上滚动再滚回
-                if (Math.abs(newY - oldY) < 10) {
-                    console.log("  位置未变 (Y=" + newY + ")，已到达列表底部，向上滚动后再滚回");
-                    swipe(700, 1800, 700, 2200, 1000);  // 向上滚动
-                    sleep(1000);
-                    swipe(700, 2200, 700, 1800, 1000);  // 滚回底部
-                    sleep(1000);
-                }
-
-                // 尝试点击
-                if (clickQuestionAndVerify(targetNum, newBounds)) {
-                    return {success: true, needScroll: false};
-                }
-
-                break;
-            }
-
-            return {success: false, needScroll: false};
+        // 检查位置是否安全（内部会获取实时可视区域）
+        if (!isInSafeVisibleArea(bounds)) {
+            var direction = determineScrollDirectionByPosition(bounds);
+            console.log("  题号 " + targetNum + " 贴近边界，" + direction + " 让其移到中间");
+            return {success: false, needScroll: true, scrollDirection: direction};
         }
 
         // 尝试点击
-        if (clickQuestionAndVerify(targetNum, bounds)) {
-            return {success: true, needScroll: false};
-        } else {
-            console.log("  点击后仍在列表页，继续滚动查找");
-            return {success: false, needScroll: true};
+        if (clickQuestionAndVerify(targetNum, element)) {
+            return {success: true, needScroll: false, scrollDirection: null};
         }
 
-        break;
+        // 点击失败，根据位置判断滚动方向
+        var direction = determineScrollDirectionByPosition(bounds);
+        console.log("  点击失败，" + direction + " 继续尝试");
+        return {success: false, needScroll: true, scrollDirection: direction};
     }
 
-    // 未找到题号，需要滚动
-    return {success: false, needScroll: true};
+    // 未找到题号，判断滚动方向
+    var range = getVisibleQuestionRange(items);
+    var scrollDirection = determineScrollDirection(targetNumInt, range);
+    return {success: false, needScroll: true, scrollDirection: scrollDirection};
+}
+
+/**
+ * 检查可视区是否卡住未变化
+ * @param {object} currentRange 当前范围
+ * @param {object} lastRange 上次范围
+ * @param {object} state 状态对象 {stuckCount}
+ * @returns {boolean} true 表示已卡住
+ */
+function isScrollStuck(currentRange, lastRange, state) {
+    if (currentRange.min === lastRange.min && currentRange.max === lastRange.max) {
+        state.stuckCount++;
+        return state.stuckCount >= 3;
+    }
+    state.stuckCount = 0;
+    return false;
+}
+
+/**
+ * 执行滚动操作
+ * @param {string} direction 滚动方向
+ *          - "backward": 手指向下滑动，显示更小的题号
+ *          - "forward": 手指向上滑动，显示更大的题号
+ * @returns {boolean} true 表示滚动成功，false 表示失败
+ */
+function performScroll(direction) {
+    var gridView = id("com.yikaobang.yixue:id/questionList_GridView").findOne(1000);
+    if (!gridView) {
+        console.log("  未找到 GridView，无法滚动");
+        return false;
+    }
+
+    var bounds = gridView.bounds();
+    var centerX = (bounds.left + bounds.right) / 2;
+    var startY, endY;
+
+    if (direction === "backward") {
+        // 手指从上往下滑（startY < endY），显示更小的题号
+        startY = bounds.top + 100;
+        endY = bounds.bottom - 100;
+    } else {
+        // 手指从下往上滑（startY > endY），显示更大的题号
+        startY = bounds.bottom - 100;
+        endY = bounds.top + 100;
+    }
+
+    swipe(centerX, startY, centerX, endY, 1000);
+    sleep(1500);
+    return true;
 }
 
 /**
@@ -615,43 +771,34 @@ function findAndClickQuestion(targetNum) {
  */
 function scrollToQuestion(targetNum) {
     var scrollCount = 0;
-    var lastMaxNum = 0;
-    var stuckCount = 0;
+    var lastRange = {min: 0, max: 0};
+    var state = {stuckCount: 0};
 
     while (true) {
         var result = findAndClickQuestion(targetNum);
 
-        // 成功点击并进入题目页
         if (result.success) {
             console.log("========== 恢复完成，继续爬取 ==========");
             return true;
         }
 
-        // 需要滚动查找
-        if (result.needScroll) {
-            var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
-            var currentMaxNum = getMaxQuestionNumber(items);
+        if (!result.needScroll) return false;
 
-            // 检查是否到达底部
-            if (currentMaxNum === lastMaxNum) {
-                stuckCount++;
-                if (stuckCount >= 3) {
-                    console.log("  恢复失败，已滚动到底部（最大题号: " + currentMaxNum + "），未找到题号 " + targetNum);
-                    console.log("  总共滚动: " + scrollCount + " 次");
-                    return false;
-                }
-            } else {
-                stuckCount = 0;
-                lastMaxNum = currentMaxNum;
-            }
+        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+        var currentRange = getVisibleQuestionRange(items);
 
-            // 执行滚动
-            scrollCount++;
-            if (scrollCount % 10 === 0) {
-                console.log("  向下滚动中... (已滚动 " + scrollCount + " 次，当前最大题号: " + currentMaxNum + ")");
-            }
-            swipe(700, 2000, 700, 1500, 500);
-            sleep(1500);
+        // 检查是否卡住
+        if (isScrollStuck(currentRange, lastRange, state)) {
+            console.log("  失败，可视区未变化（" + currentRange.min + "-" + currentRange.max + "），未找到题号 " + targetNum);
+            console.log("  总共滚动: " + scrollCount + " 次");
+            return false;
+        }
+
+        lastRange = currentRange;
+        scrollCount++;
+
+        if (!performScroll(result.scrollDirection)) {
+            return false;
         }
     }
 }
@@ -839,46 +986,16 @@ function enterFromQuestionList() {
         sleep(1000);
     }
 
-    // 查找并点击题号"1"，不存在或点击无效则向下滚动
-    // 列表页面不在顶部，并且筛选条件展开的情况下，openrel 不存在。因此需要滚动查找题号"1"，作为兜底。
-    var gridView = id("com.yikaobang.yixue:id/questionList_GridView").findOne(1000);
-    if (!gridView) {
-        console.log("  未找到 GridView");
-        return false;
+    // 查找并点击题号"1"，使用统一的滚动查找逻辑
+    if (scrollToQuestion("1")) {
+        lastNumb = "";
+        lastUnit = "";
+        updateChapter();
+        console.log("★ 已进入新章节: " + currentChapter + " ★");
+        return true;
     }
 
-    var scrollCount = 0;
-    // TODO: 基于题目数动态调整滚动次数，目前固定最多滚动 100 次，避免死循环
-    var maxScroll = 100;
-    while (scrollCount++ < maxScroll) {
-        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
-
-        for (var i = 0; i < items.length; i++) {
-            if (items[i].text() !== "1") continue;
-
-            var b = items[i].bounds();
-            console.log("  找到题号'1'，尝试点击进入");
-            click(b.centerX(), b.centerY());
-            sleep(3000);
-
-            if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
-                lastNumb = "";
-                lastUnit = "";
-                updateChapter();
-                console.log("★ 已进入新章节: " + currentChapter + " ★");
-                return true;
-            }
-
-            console.log("  点击无效，继续滚动查找");
-            break;
-        }
-
-        console.log("  向下滚动查找有效的题号'1'... (" + scrollCount + "/" + maxScroll + ")");
-        gridView.scrollBackward();
-        sleep(1000);
-    }
-
-    console.log("  未找到有效的题号'1'");
+    console.log("  进入新章节失败，未找到题号'1'");
     return false;
 }
 
