@@ -99,6 +99,7 @@ med-exam generate [OPTIONS]
 | `--mode MODE` | 限定题型范围（可多次指定） | 无 |
 | `-n, --count INT` | 总题目数量 | 50 |
 | `--per-mode TEXT` | 按题型精确分配数量：<br>格式1（JSON）：`'{"A1型题":30,"A2型题":20}'`<br>格式2（简写）：`A1型题:30,A2型题:20` | 无（均匀抽样） |
+| ` --difficulty TEXT` | 按难度比例分配题目：<br>格式：`easy:20,medium:40,hard:30,extreme:10` |无（均匀抽样）|
 | `--seed INT` | 随机种子（固定值可复现相同试卷） | 无 |
 | `--show-answers` / `--hide-answers` | 题目中是否显示答案 | 隐藏 |
 | `--answer-sheet` / `--no-answer-sheet` | 是否在末尾生成答案页 | 生成 |
