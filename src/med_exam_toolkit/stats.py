@@ -116,7 +116,7 @@ def print_summary(questions: list[Question], full: bool = False) -> None:
     print(f"{'='*50}")
     print(f"总题数: {s['total']}")
 
-    def _print_section(title: str, data: dict, show_bar: bool = True):
+    def _print_section(title: str, data: dict, show_bar: bool = True, show_pct: bool = True):
         print(f"\n{title}:")
         if not data:
             print("  (无数据)")
@@ -128,9 +128,9 @@ def print_summary(questions: list[Question], full: bool = False) -> None:
         for key, count in data.items():
             label = labels[key]
             padded = _pad_right(label, col_width)
-            pct = count / total * 100
+            pct =  f"({count / total * 100:>5.1f}%)" if show_pct else ""
             bar = " " + "■" * round(count / max_count * 20) if show_bar else ""
-            print(f"  {padded} {count:>5d} ({pct:>5.1f}%){bar}")
+            print(f"  {padded} {count:>5d} {pct}{bar}")
 
     _print_section("按题型", s["by_mode"])
 
@@ -144,10 +144,10 @@ def print_summary(questions: list[Question], full: bool = False) -> None:
 
     unit_items = list(s["by_unit"].items())
     if full:
-        _print_section(f"按章节 (共 {s['unit_total']} 个)", s["by_unit"], show_bar=False)
+        _print_section(f"按章节 (共 {s['unit_total']} 个)", s["by_unit"], show_bar=False, show_pct=False)
     else:
         top10 = dict(unit_items[:10])
-        _print_section(f"按章节 (Top 10 / 共 {s['unit_total']} 个)", top10, show_bar=False)
+        _print_section(f"按章节 (Top 10 / 共 {s['unit_total']} 个)", top10, show_bar=False, show_pct=False)
         if s["unit_total"] > 10:
             print(f"  ... 还有 {s['unit_total'] - 10} 个章节")
 
