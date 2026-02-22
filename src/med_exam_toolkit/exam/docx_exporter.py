@@ -4,7 +4,6 @@ from pathlib import Path
 from docx import Document
 from docx.shared import Pt, Cm, RGBColor
 from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
 from med_exam_toolkit.models import Question
@@ -34,6 +33,7 @@ class ExamDocxExporter:
         return fp
 
     # ── 页面设置 ──
+    @staticmethod
     def _set_font(run, name: str = "宋体", size: Pt | None = None):
         """同时设置中西文字体"""
         run.font.name = name
@@ -52,7 +52,6 @@ class ExamDocxExporter:
         style = doc.styles["Normal"]
         style.font.name = "宋体"
         style.font.size = Pt(10.5)
-        # 默认样式也要设东亚字体
         style.element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
         style.paragraph_format.space_after = Pt(2)
         style.paragraph_format.line_spacing = 1.25
@@ -169,21 +168,47 @@ class ExamDocxExporter:
         return global_idx
 
     @staticmethod
+    def _display_width(text: str) -> int:
+        """计算显示宽度：CJK 字符算 2，其余算 1"""
+        w = 0
+        for ch in text:
+            if '\u4e00' <= ch <= '\u9fff' or '\u3000' <= ch <= '\u303f' or '\uff00' <= ch <= '\uffef':
+                w += 2
+            else:
+                w += 1
+        return w
+
+    @staticmethod
     def _add_options(doc: Document, options: list[str]):
         if not options:
             return
 
-        max_len = max(len(o) for o in options)
+        max_display = max(ExamDocxExporter._display_width(o) for o in options)
 
-        if max_len <= 20 and len(options) <= 6:
+        if max_display <= 28 and len(options) <= 6:
+            tab_pos = Cm(9)
             for i in range(0, len(options), 2):
                 left = options[i]
                 right = options[i + 1] if i + 1 < len(options) else ""
                 p = doc.add_paragraph()
-                run = p.add_run(f"    {left:<28s}{right}")
-                run.font.size = Pt(10)
                 p.paragraph_format.space_after = Pt(0)
                 p.paragraph_format.space_before = Pt(0)
+
+                pPr = p._element.get_or_add_pPr()
+                tabs = OxmlElement("w:tabs")
+                tab = OxmlElement("w:tab")
+                tab.set(qn("w:val"), "left")
+                tab.set(qn("w:pos"), str(int(tab_pos.emu / 635)))
+                tabs.append(tab)
+                pPr.append(tabs)
+
+                run = p.add_run(f"    {left}")
+                run.font.size = Pt(10)
+                if right:
+                    run = p.add_run("\t")
+                    run.font.size = Pt(10)
+                    run = p.add_run(right)
+                    run.font.size = Pt(10)
         else:
             for opt in options:
                 p = doc.add_paragraph()
@@ -199,10 +224,49 @@ class ExamDocxExporter:
         run = p.add_run("参考答案")
         run.bold = True
         run.font.size = Pt(14)
-
         doc.add_paragraph("")
 
-        cols = 5
+        if self.config.show_discuss:
+            current_mode = ""
+            idx = 0
+            for q in questions:
+                if q.mode != current_mode:
+                    current_mode = q.mode
+                    p = doc.add_paragraph()
+                    p.space_before = Pt(8)
+                    run = p.add_run(f"【{current_mode}】")
+                    run.bold = True
+                    run.font.size = Pt(11)
+
+                for sq in q.sub_questions:
+                    idx += 1
+                    p = doc.add_paragraph()
+                    p.paragraph_format.space_after = Pt(1)
+                    p.paragraph_format.space_before = Pt(1)
+
+                    run = p.add_run(f"{idx}. ")
+                    run.font.size = Pt(10)
+                    run = p.add_run(sq.answer)
+                    run.bold = True
+                    run.font.size = Pt(10)
+                    run.font.color.rgb = RGBColor(0x00, 0x66, 0x00)
+
+                    if sq.discuss:
+                        run = p.add_run(f"  {sq.discuss}")
+                        run.font.size = Pt(9)
+                        run.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+
+            doc.add_paragraph("")
+
+        self._add_quick_ref(doc, questions)
+
+    def _add_quick_ref(self, doc: Document, questions: list[Question]):
+        """答案速查表 — 等宽对齐，自适应列数"""
+        p = doc.add_paragraph()
+        run = p.add_run("答案速查")
+        run.bold = True
+        run.font.size = Pt(11)
+
         answers = []
         idx = 0
         for q in questions:
@@ -210,48 +274,32 @@ class ExamDocxExporter:
                 idx += 1
                 answers.append((idx, sq.answer))
 
-        rows_needed = (len(answers) + cols - 1) // cols
-        table = doc.add_table(rows=rows_needed + 1, cols=cols * 2)
-        table.alignment = WD_TABLE_ALIGNMENT.CENTER
-        table.style = "Table Grid"
+        total = len(answers)
+        num_width = len(str(total))
+        ans_width = max(len(a) for _, a in answers)
+        cell_width = num_width + 1 + ans_width + 2
 
-        for c in range(cols):
-            table.rows[0].cells[c * 2].text = "题号"
-            table.rows[0].cells[c * 2 + 1].text = "答案"
-            for cell in [table.rows[0].cells[c * 2], table.rows[0].cells[c * 2 + 1]]:
-                for paragraph in cell.paragraphs:
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    for run in paragraph.runs:
-                        run.bold = True
-                        run.font.size = Pt(9)
+        section = doc.sections[0]
+        usable_emu = section.page_width - section.left_margin - section.right_margin
+        usable_pt = usable_emu / 12700
+        char_width_pt = 5.4
+        max_chars = int(usable_pt / char_width_pt)
+        cols = max(max_chars // cell_width, 1)
 
-        for i, (num, ans) in enumerate(answers):
-            row = i // cols + 1
-            col = i % cols
-            table.rows[row].cells[col * 2].text = str(num)
-            table.rows[row].cells[col * 2 + 1].text = ans
-            for cell in [table.rows[row].cells[col * 2], table.rows[row].cells[col * 2 + 1]]:
-                for paragraph in cell.paragraphs:
-                    paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER
-                    for run in paragraph.runs:
-                        run.font.size = Pt(9)
+        for i in range(0, total, cols):
+            chunk = answers[i:i + cols]
+            parts = [f"{num}-{ans}".ljust(cell_width) for num, ans in chunk]
+            line = "".join(parts).rstrip()
 
-        if self.config.show_discuss:
-            doc.add_paragraph("")
             p = doc.add_paragraph()
-            run = p.add_run("题目解析")
-            run.bold = True
-            run.font.size = Pt(12)
-
-            idx = 0
-            for q in questions:
-                for sq in q.sub_questions:
-                    idx += 1
-                    if sq.discuss:
-                        p = doc.add_paragraph()
-                        run = p.add_run(f"{idx}. 【{sq.answer}】")
-                        run.bold = True
-                        run.font.size = Pt(9)
-                        run = p.add_run(f" {sq.discuss}")
-                        run.font.size = Pt(9)
-                        run.font.color.rgb = RGBColor(0x55, 0x55, 0x55)
+            p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.space_before = Pt(0)
+            run = p.add_run(line)
+            run.font.size = Pt(9)
+            run.font.name = "Courier New"
+            rPr = run._element.get_or_add_rPr()
+            rFonts = rPr.find(qn("w:rFonts"))
+            if rFonts is None:
+                rFonts = OxmlElement("w:rFonts")
+                rPr.insert(0, rFonts)
+            rFonts.set(qn("w:eastAsia"), "Courier New")
