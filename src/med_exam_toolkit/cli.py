@@ -441,6 +441,122 @@ def enrich(bank, input_dir, output, password, provider, model, api_key, base_url
     )
     enricher.run()
 
+@cli.command()
+@click.option("--bank", required=True, type=click.Path(exists=True), help=".mqb 题库路径")
+@click.option("--password", default=None, help="题库密码")
+@click.option("--mode", "filter_modes", multiple=True, help="过滤题型")
+@click.option("--unit", "filter_units", multiple=True, help="过滤章节关键词")
+@click.option("--keyword", default="", help="题干关键词")
+@click.option("--has-ai", is_flag=True, default=False, help="只显示含 AI 补全内容的题")
+@click.option("--missing", is_flag=True, default=False, help="只显示缺答案或缺解析的题")
+@click.option("--limit", default=20, type=int, help="最多显示多少小题（默认 20，0=全部）")
+@click.option("--full", is_flag=True, default=False, help="显示完整解析（默认截断）")
+def inspect(bank, password, filter_modes, filter_units, keyword, has_ai, missing, limit, full):
+    """查看 .mqb 题库内容，支持过滤与搜索"""
+    from med_exam_toolkit.bank import load_bank
+    from collections import Counter
+
+    questions = load_bank(Path(bank), password)
+    W = 70
+
+    # ── 统计摘要 ──
+    total_q  = len(questions)
+    total_sq = sum(len(q.sub_questions) for q in questions)
+    no_ans   = sum(1 for q in questions for sq in q.sub_questions if not (sq.answer  or "").strip())
+    no_dis   = sum(1 for q in questions for sq in q.sub_questions if not (sq.discuss or "").strip())
+    has_ai_c = sum(1 for q in questions for sq in q.sub_questions if (sq.ai_answer or sq.ai_discuss))
+    mode_cnt = Counter(q.mode for q in questions)
+    cls_cnt  = Counter(q.cls  for q in questions)
+
+    click.echo(f"\n{'═' * W}")
+    click.echo(f"  📦 题库：{bank}")
+    click.echo(f"{'─' * W}")
+    click.echo(f"  大题数：{total_q}    小题数：{total_sq}")
+    click.echo(f"  缺答案：{no_ans}    缺解析：{no_dis}    含AI补全：{has_ai_c}")
+    click.echo(f"\n  题型分布：")
+    for m, c in sorted(mode_cnt.items()):
+        click.echo(f"    {m or '未知':<12} {c:>5} 题")
+    if len(cls_cnt) > 1:
+        click.echo(f"\n  分类分布：")
+        for c, n in sorted(cls_cnt.items(), key=lambda x: -x[1])[:10]:
+            click.echo(f"    {c or '未知':<20} {n:>5} 题")
+    click.echo(f"{'═' * W}")
+
+    # ── 过滤 ──
+    results: list[tuple[int, int]] = []   # (qi, si)
+    for qi, q in enumerate(questions):
+        if filter_modes and q.mode not in filter_modes:
+            continue
+        if filter_units and not any(kw in (q.unit or "") for kw in filter_units):
+            continue
+        if keyword and keyword not in (q.stem or "") and not any(
+            keyword in sq.text for sq in q.sub_questions
+        ):
+            continue
+        for si, sq in enumerate(q.sub_questions):
+            if has_ai and not (sq.ai_answer or sq.ai_discuss):
+                continue
+            if missing and (sq.answer or "").strip() and (sq.discuss or "").strip():
+                continue
+            results.append((qi, si))
+
+    has_filter = any([filter_modes, filter_units, keyword, has_ai, missing])
+    if has_filter:
+        click.echo(f"\n  🔎 过滤结果：{len(results)} 个小题\n")
+    else:
+        click.echo(f"\n  📋 题目列表（前 {limit if limit else '全部'} 个小题）\n")
+
+    show = results if limit == 0 else results[:limit]
+
+    for qi, si in show:
+        q  = questions[qi]
+        sq = q.sub_questions[si]
+
+        ans_flag = "✅" if (sq.answer  or "").strip() else "❓"
+        dis_flag = "✅" if (sq.discuss or "").strip() else "❓"
+        ai_flag  = " [AI]" if (sq.ai_answer or sq.ai_discuss) else ""
+
+        click.echo(f"{'─' * W}")
+        click.echo(
+            f"  [{qi+1}-{si+1}]  {q.mode}  {q.unit or ''}  "
+            f"答案:{ans_flag}  解析:{dis_flag}{ai_flag}"
+        )
+
+        # 题干/小题
+        if q.stem:
+            click.echo(f"  【题干】{_trunc(q.stem, 80) if not full else q.stem}")
+        text = sq.text or "(无小题文本)"
+        click.echo(f"  【题目】{_trunc(text, 80) if not full else text}")
+
+        # 选项
+        labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        for oi, opt in enumerate(sq.options or []):
+            key = labels[oi] if oi < len(labels) else str(oi+1)
+            click.echo(f"         {key}. {opt}")
+
+        # 答案
+        if (sq.answer or "").strip():
+            click.echo(f"  【答案】{sq.answer}")
+        elif (sq.ai_answer or "").strip():
+            click.echo(f"  【答案】(AI) {sq.ai_answer}  [置信:{sq.ai_confidence:.2f}  模型:{sq.ai_model}]")
+
+        # 解析
+        if (sq.discuss or "").strip():
+            dis = sq.discuss if full else _trunc(sq.discuss, 120)
+            click.echo(f"  【解析】{dis}")
+        elif (sq.ai_discuss or "").strip():
+            dis = sq.ai_discuss if full else _trunc(sq.ai_discuss, 120)
+            click.echo(f"  【解析】(AI) {dis}")
+
+    click.echo(f"{'─' * W}")
+    if limit and len(results) > limit:
+        click.echo(f"  … 还有 {len(results) - limit} 个，用 --limit 0 显示全部")
+    click.echo()
+
+def _trunc(s: str, n: int = 40) -> str:
+    s = (s or "").replace("\n", " ").strip()
+    return s[:n] + "…" if len(s) > n else s
+
 def main():
     cli()
 

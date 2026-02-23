@@ -12,6 +12,40 @@ class SubQuestion:
     error_prone: str = ""
     discuss: str = ""
     point: str = ""
+    # AI 补全结果（默认不覆盖正式字段）
+    ai_answer: str = ""
+    ai_discuss: str = ""
+    ai_confidence: float = 0.0
+    ai_model: str = ""
+    ai_status: str = ""  # pending/accepted/rejected
+
+    @property
+    def eff_answer(self) -> str:
+        """有效答案：优先用正式字段，为空时用 AI 补全结果"""
+        return (self.answer or "").strip() or (self.ai_answer or "").strip()
+
+    @property
+    def eff_discuss(self) -> str:
+        """有效解析：优先用正式字段，为空时用 AI 补全结果"""
+        return (self.discuss or "").strip() or (self.ai_discuss or "").strip()
+
+    @property
+    def answer_source(self) -> str:
+        """答案来源：'official' / 'ai' / ''"""
+        if (self.answer or "").strip():
+            return "official"
+        if (self.ai_answer or "").strip():
+            return "ai"
+        return ""
+
+    @property
+    def discuss_source(self) -> str:
+        """解析来源：'official' / 'ai' / ''"""
+        if (self.discuss or "").strip():
+            return "official"
+        if (self.ai_discuss or "").strip():
+            return "ai"
+        return ""
 
 
 @dataclass
@@ -27,4 +61,5 @@ class Question:
     shared_options: list[str] = field(default_factory=list)  # B 型共享选项
     sub_questions: list[SubQuestion] = field(default_factory=list)
     discuss: str = ""                        # 整题解析
+    source_file: str = ""
     raw: dict = field(default_factory=dict)  # 保留原始 JSON
