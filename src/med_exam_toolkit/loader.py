@@ -9,7 +9,7 @@ def load_json_files(input_dir: str | Path, parser_map: dict[str, str]) -> list[Q
     """
     扫描目录下所有 .json 文件，根据 pkg 字段分发到对应 parser。
 
-    parser_map: {"ahuyikao.com": "ahuyikao", "com.yikaobang.yixue": "yikaobang"}
+    parser_map: {"com.ahuxueshu": "ahuyikao", "com.yikaobang.yixue": "yikaobang"}
     """
     discover()  # 确保所有内置 parser 已注册
 
@@ -46,6 +46,7 @@ def load_json_files(input_dir: str | Path, parser_map: dict[str, str]) -> list[Q
         try:
             parser = get_parser(parser_name)
             q = parser.parse(raw)
+            q.source_file = str(fp.resolve())
             questions.append(q)
         except Exception as e:
             print(f"[WARN] 解析失败 {fp.name}: {e}")
