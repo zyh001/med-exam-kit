@@ -13,9 +13,8 @@ HEADER_LABELS = {
     "mode": "题型", "stem": "共享题干", "sub_index": "子题序号",
     "text": "题目", "options": "选项", "answer": "答案",
     "rate": "正确率", "error_prone": "易错项", "discuss": "解析", "point": "考点",
+    "answer_source": "答案来源", "discuss_source": "解析来源",
 }
-
-# 选项列中文映射
 for i in range(10):
     HEADER_LABELS[f"option_{chr(65 + i)}"] = f"选项{chr(65 + i)}"
 
@@ -23,11 +22,14 @@ for i in range(10):
 COL_WIDTHS = {
     "text": 50, "discuss": 50, "point": 40, "stem": 50,
     "unit": 20, "cls": 20, "options": 60,
+    "answer_source": 12, "discuss_source": 12,
 }
 # 选项列默认宽度
 for i in range(10):
     COL_WIDTHS[f"option_{chr(65 + i)}"] = 25
 
+# 来源标注颜色：AI 补全的单元格用浅黄色背景提示
+_AI_FILL = PatternFill(start_color="FFF2CC", end_color="FFF2CC", fill_type="solid")
 
 @register("xlsx")
 class XlsxExporter(BaseExporter):
@@ -56,13 +58,22 @@ class XlsxExporter(BaseExporter):
             cell.fill = header_fill
             cell.alignment = Alignment(horizontal="center")
 
-        # 数据行
+        # 预先建立列名→列号的索引，用于 AI 来源着色
+        col_index = {key: i + 1 for i, key in enumerate(columns)}
+
         for row_idx, row in enumerate(rows, 2):
             for col_idx, col_key in enumerate(columns, 1):
                 cell = ws.cell(row=row_idx, column=col_idx, value=row.get(col_key, ""))
                 cell.alignment = Alignment(wrap_text=True, vertical="top")
 
-        # 列宽
+            # AI 兜底的答案/解析单元格加浅黄色背景
+            if row.get("answer_source") == "ai":
+                if "answer" in col_index:
+                    ws.cell(row=row_idx, column=col_index["answer"]).fill = _AI_FILL
+            if row.get("discuss_source") == "ai":
+                if "discuss" in col_index:
+                    ws.cell(row=row_idx, column=col_index["discuss"]).fill = _AI_FILL
+
         for col_idx, col_key in enumerate(columns, 1):
             letter = get_column_letter(col_idx)
             ws.column_dimensions[letter].width = COL_WIDTHS.get(col_key, 14)
