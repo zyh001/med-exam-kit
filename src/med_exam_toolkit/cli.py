@@ -354,6 +354,93 @@ def reindex(ctx, bank, password):
     save_bank(questions, path, password)
     click.echo(f"[OK] 已重算 {len(questions)} 条指纹")
 
+@cli.command()
+@click.option("--bank", default=None, type=click.Path(exists=True), help="输入 .mqb 题库")
+@click.option("-i", "--input-dir", default=None, help="JSON 文件目录（与 --bank 二选一）")
+@click.option("-o", "--output", default=None, help="输出路径（.mqb），不填则自动命名 *_ai.mqb")
+@click.option("--password", default=None, help="题库密码")
+@click.option("--provider", default="", help="AI provider: openai/deepseek/ollama")
+@click.option("--model", default="", help="模型名")
+@click.option("--api-key", default="", envvar="OPENAI_API_KEY", help="API Key（也可用环境变量 OPENAI_API_KEY）")
+@click.option("--base-url", default="", help="自定义 API Base URL")
+@click.option("--max-workers", default=0, type=int, help="并发数（默认 4）")
+@click.option("--resume/--no-resume", default=True, help="是否断点续跑")
+@click.option("--checkpoint-dir", default="", help="断点目录")
+@click.option("--mode", "filter_modes", multiple=True, help="仅处理指定题型，如 A1型题")
+@click.option("--unit", "filter_units", multiple=True, help="仅处理包含关键词的章节")
+@click.option("--limit", default=0, type=int, help="最多处理多少小题，0=不限制")
+@click.option("--dry-run", is_flag=True, help="仅预览待处理列表，不实际调用 AI")
+@click.option("--only-missing/--force", default=True,
+              help="仅补缺失字段（默认）/ 强制重新生成所有")
+@click.option("--apply-ai", is_flag=True, default=False,
+              help="将 AI 结果写入 answer/discuss 正式字段（默认只写 ai_answer/ai_discuss）")
+@click.option("--in-place", is_flag=True, default=False,
+              help="--bank 模式下就地修改原文件（配合 --apply-ai 使用）")
+@click.option("--write-json", is_flag=True, default=False,
+              help="--input-dir 模式下将结果写回原始 JSON 文件（而不是生成 .mqb）")
+def enrich(bank, input_dir, output, password, provider, model, api_key, base_url,
+           max_workers, resume, checkpoint_dir, filter_modes, filter_units,
+           limit, dry_run, only_missing, apply_ai, in_place, write_json):
+    """AI 补全题库：为缺答案/缺解析的小题自动生成内容"""
+    from med_exam_toolkit.ai.enricher import BankEnricher
+
+    ctx_cfg    = click.get_current_context().obj.get("config", {})
+    ai_cfg     = ctx_cfg.get("ai", {})
+    parser_map = ctx_cfg.get("parser_map", {
+        "com.ahuxueshu":      "ahuyikao",
+        "com.yikaobang.yixue": "yikaobang",
+    })
+
+    # 参数优先级：命令行 > config.yaml > 默认值
+    provider      = provider      or ai_cfg.get("provider",       "openai")
+    model         = model         or ai_cfg.get("model",          "gpt-4o")
+    api_key       = api_key       or ai_cfg.get("api_key",        "")
+    base_url      = base_url      or ai_cfg.get("base_url",       "")
+    max_workers   = max_workers   or int(ai_cfg.get("max_workers", 4))
+    checkpoint_dir = checkpoint_dir or ai_cfg.get("checkpoint_dir", "data/checkpoints")
+
+    if not bank and not input_dir:
+        raise click.UsageError("必须指定 --bank 或 -i/--input-dir 中的一个")
+
+    # 确定输出路径
+    resolved_in_place = in_place or (apply_ai and output is None and bank and not write_json)
+    if resolved_in_place and bank:
+        output_path = Path(bank)
+        click.echo(f"  ⚠️  --apply-ai --in-place：将就地修改原文件 {output_path}")
+    elif output:
+        output_path = Path(output).with_suffix(".mqb")
+    elif bank:
+        output_path = Path(bank).with_name(Path(bank).stem + "_ai.mqb")
+    elif write_json:
+        output_path = None   # JSON 写回模式不需要 .mqb 输出
+    else:
+        out_dir = ctx_cfg.get("output_dir", "./data/output")
+        output_path = Path(out_dir) / "questions_ai.mqb"
+
+    enricher = BankEnricher(
+        bank_path=Path(bank) if bank else None,
+        output_path=output_path,
+        input_dir=Path(input_dir) if input_dir else None,
+        parser_map=parser_map,
+        password=password,
+        provider=provider,
+        model=model,
+        api_key=api_key,
+        base_url=base_url,
+        max_workers=max_workers,
+        resume=resume,
+        checkpoint_dir=Path(checkpoint_dir),
+        modes_filter=list(filter_modes),
+        chapters_filter=list(filter_units),
+        limit=limit,
+        dry_run=dry_run,
+        only_missing=only_missing,
+        apply_ai=apply_ai,
+        in_place=resolved_in_place,
+        write_json=write_json,
+    )
+    enricher.run()
+
 def main():
     cli()
 
