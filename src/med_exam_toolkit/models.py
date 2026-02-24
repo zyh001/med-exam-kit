@@ -26,25 +26,35 @@ class SubQuestion:
 
     @property
     def eff_discuss(self) -> str:
-        """有效解析：优先用正式字段，为空时用 AI 补全结果"""
+        """有效解析：官方优先，官方为空时用 AI 兜底"""
         return (self.discuss or "").strip() or (self.ai_discuss or "").strip()
 
     @property
     def answer_source(self) -> str:
-        """答案来源：'official' / 'ai' / ''"""
-        if (self.answer or "").strip():
-            return "official"
-        if (self.ai_answer or "").strip():
+        """答案来源：'official' / 'ai' / ''
+        - ai_answer 有值且与 eff_answer 一致 → 'ai'（含官方空、或官方与AI相同两种情况）
+        - 否则官方有值 → 'official'
+        """
+        ai  = (self.ai_answer or "").strip()
+        eff = self.eff_answer
+        if ai and ai == eff:
             return "ai"
+        if eff:
+            return "official"
         return ""
 
     @property
     def discuss_source(self) -> str:
-        """解析来源：'official' / 'ai' / ''"""
-        if (self.discuss or "").strip():
-            return "official"
-        if (self.ai_discuss or "").strip():
+        """解析来源：'official' / 'ai' / ''
+        - ai_discuss 有值且与 eff_discuss 一致 → 'ai'（含官方空、或官方与AI相同两种情况）
+        - 否则官方有值 → 'official'
+        """
+        ai  = (self.ai_discuss or "").strip()
+        eff = self.eff_discuss
+        if ai and ai == eff:
             return "ai"
+        if eff:
+            return "official"
         return ""
 
 

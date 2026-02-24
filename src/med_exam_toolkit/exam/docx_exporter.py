@@ -9,6 +9,8 @@ from docx.oxml import OxmlElement
 from med_exam_toolkit.models import Question
 from med_exam_toolkit.exam.config import ExamConfig
 
+# AI 补全答案/解析的提示颜色
+_AI_COLOR = RGBColor(0xCC, 0x77, 0x00)   # 橙色，区别于正式答案的绿色
 
 class ExamDocxExporter:
 
@@ -33,6 +35,7 @@ class ExamDocxExporter:
         return fp
 
     # ── 页面设置 ──
+
     @staticmethod
     def _set_font(run, name: str = "宋体", size: Pt | None = None):
         """同时设置中西文字体"""
@@ -55,17 +58,16 @@ class ExamDocxExporter:
         style.element.rPr.rFonts.set(qn("w:eastAsia"), "宋体")
         style.paragraph_format.space_after = Pt(2)
         style.paragraph_format.line_spacing = 1.25
-
         for section in doc.sections:
-            section.top_margin = Cm(2.5)
+            section.top_margin    = Cm(2.5)
             section.bottom_margin = Cm(2.5)
-            section.left_margin = Cm(2.8)
-            section.right_margin = Cm(2.8)
+            section.left_margin   = Cm(2.8)
+            section.right_margin  = Cm(2.8)
 
     # ── 试卷头 ──
+
     def _add_header(self, doc: Document, questions: list[Question]):
         cfg = self.config
-
         p = doc.add_paragraph()
         p.alignment = WD_ALIGN_PARAGRAPH.CENTER
         run = p.add_run(cfg.title)
@@ -92,13 +94,13 @@ class ExamDocxExporter:
         run = p.add_run("    ".join(info_parts))
         run.font.size = Pt(10)
         run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
-
         doc.add_paragraph("━" * 43)
 
     # ── 题目区 ──
+
     def _add_questions(self, doc: Document, questions: list[Question]):
         current_mode = ""
-        global_idx = 0
+        global_idx   = 0
 
         for q in questions:
             if q.mode != current_mode:
@@ -123,10 +125,7 @@ class ExamDocxExporter:
         self._add_options(doc, sq.options)
 
         if self.config.show_answers:
-            p = doc.add_paragraph()
-            run = p.add_run(f"【答案】{sq.answer}")
-            run.font.size = Pt(9)
-            run.font.color.rgb = RGBColor(0x00, 0x80, 0x00)
+            self._add_inline_answer(doc, sq)
 
         doc.add_paragraph("")
 
@@ -159,13 +158,24 @@ class ExamDocxExporter:
                 self._add_options(doc, sq.options)
 
             if self.config.show_answers:
-                p = doc.add_paragraph()
-                run = p.add_run(f"【答案】{sq.answer}")
-                run.font.size = Pt(9)
-                run.font.color.rgb = RGBColor(0x00, 0x80, 0x00)
+                self._add_inline_answer(doc, sq)
 
         doc.add_paragraph("")
         return global_idx
+
+    def _add_inline_answer(self, doc: Document, sq) -> None:
+        """题目正文中内嵌答案（show_answers 模式）"""
+        ans = sq.eff_answer
+        if not ans:
+            return
+        p = doc.add_paragraph()
+        run = p.add_run(f"【答案】{ans}")
+        run.font.size = Pt(9)
+        if sq.answer_source == "ai":
+            run.font.color.rgb = _AI_COLOR
+            run.add_run("(AI)")  # 不加括号，直接标注
+        else:
+            run.font.color.rgb = RGBColor(0x00, 0x80, 0x00)
 
     @staticmethod
     def _display_width(text: str) -> int:
@@ -188,15 +198,15 @@ class ExamDocxExporter:
         if max_display <= 28 and len(options) <= 6:
             tab_pos = Cm(9)
             for i in range(0, len(options), 2):
-                left = options[i]
+                left  = options[i]
                 right = options[i + 1] if i + 1 < len(options) else ""
                 p = doc.add_paragraph()
-                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.space_after  = Pt(0)
                 p.paragraph_format.space_before = Pt(0)
 
-                pPr = p._element.get_or_add_pPr()
+                pPr  = p._element.get_or_add_pPr()
                 tabs = OxmlElement("w:tabs")
-                tab = OxmlElement("w:tab")
+                tab  = OxmlElement("w:tab")
                 tab.set(qn("w:val"), "left")
                 tab.set(qn("w:pos"), str(int(tab_pos.emu / 635)))
                 tabs.append(tab)
@@ -214,7 +224,7 @@ class ExamDocxExporter:
                 p = doc.add_paragraph()
                 run = p.add_run(f"    {opt}")
                 run.font.size = Pt(10)
-                p.paragraph_format.space_after = Pt(0)
+                p.paragraph_format.space_after  = Pt(0)
                 p.paragraph_format.space_before = Pt(0)
 
     # ── 答案页 ──
@@ -241,27 +251,43 @@ class ExamDocxExporter:
                 for sq in q.sub_questions:
                     idx += 1
                     p = doc.add_paragraph()
-                    p.paragraph_format.space_after = Pt(1)
+                    p.paragraph_format.space_after  = Pt(1)
                     p.paragraph_format.space_before = Pt(1)
 
                     run = p.add_run(f"{idx}. ")
                     run.font.size = Pt(10)
-                    run = p.add_run(sq.answer)
+
+                    # 答案（AI 兜底时橙色标注）
+                    ans = sq.eff_answer
+                    run = p.add_run(ans if ans else "—")
                     run.bold = True
                     run.font.size = Pt(10)
-                    run.font.color.rgb = RGBColor(0x00, 0x66, 0x00)
+                    if sq.answer_source == "ai":
+                        run.font.color.rgb = _AI_COLOR
+                    else:
+                        run.font.color.rgb = RGBColor(0x00, 0x66, 0x00)
 
-                    if sq.discuss:
-                        run = p.add_run(f"  {sq.discuss}")
+                    if sq.answer_source == "ai":
+                        run = p.add_run("(AI)")
+                        run.font.size = Pt(8)
+                        run.font.color.rgb = _AI_COLOR
+
+                    # 解析（AI 兜底时橙色标注）
+                    dis = sq.eff_discuss
+                    if dis:
+                        run = p.add_run(f"  {dis}")
                         run.font.size = Pt(9)
-                        run.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
+                        if sq.discuss_source == "ai":
+                            run.font.color.rgb = _AI_COLOR
+                        else:
+                            run.font.color.rgb = RGBColor(0x88, 0x88, 0x88)
 
             doc.add_paragraph("")
 
         self._add_quick_ref(doc, questions)
 
     def _add_quick_ref(self, doc: Document, questions: list[Question]):
-        """答案速查表 — 等宽对齐，自适应列数"""
+        """答案速查表 — 等宽对齐，AI 答案加 * 标注"""
         p = doc.add_paragraph()
         run = p.add_run("答案速查")
         run.bold = True
@@ -272,19 +298,23 @@ class ExamDocxExporter:
         for q in questions:
             for sq in q.sub_questions:
                 idx += 1
-                answers.append((idx, sq.answer))
+                ans = sq.eff_answer or "—"
+                # AI 来源在速查表里用 * 后缀标注
+                if sq.answer_source == "ai":
+                    ans = ans + "*"
+                answers.append((idx, ans))
 
-        total = len(answers)
+        total     = len(answers)
         num_width = len(str(total))
         ans_width = max(len(a) for _, a in answers)
         cell_width = num_width + 1 + ans_width + 2
 
-        section = doc.sections[0]
+        section    = doc.sections[0]
         usable_emu = section.page_width - section.left_margin - section.right_margin
-        usable_pt = usable_emu / 12700
+        usable_pt  = usable_emu / 12700
         char_width_pt = 5.4
-        max_chars = int(usable_pt / char_width_pt)
-        cols = max(max_chars // cell_width, 1)
+        max_chars  = int(usable_pt / char_width_pt)
+        cols       = max(max_chars // cell_width, 1)
 
         for i in range(0, total, cols):
             chunk = answers[i:i + cols]
@@ -303,3 +333,11 @@ class ExamDocxExporter:
                 rFonts = OxmlElement("w:rFonts")
                 rPr.insert(0, rFonts)
             rFonts.set(qn("w:eastAsia"), "Courier New")
+
+        # 图例说明
+        if any(sq.answer_source == "ai"
+               for q in questions for sq in q.sub_questions):
+            p = doc.add_paragraph()
+            run = p.add_run("* 标注表示该答案由 AI 补全，建议人工核对")
+            run.font.size   = Pt(8)
+            run.font.color.rgb = _AI_COLOR
