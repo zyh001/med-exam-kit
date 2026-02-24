@@ -49,13 +49,13 @@ def parse_per_mode(raw: str) -> dict[str, int]:
     )
 
 @click.group()
+@click.version_option(package_name="med-exam-toolkit", prog_name="med-exam-kit")
 @click.option("-c", "--config", "config_path", default="config.yaml", help="配置文件路径")
 @click.pass_context
 def cli(ctx, config_path):
     """医学考试题目去重与多格式导出工具"""
     ctx.ensure_object(dict)
     ctx.obj["config"] = _load_config(config_path)
-
 
 @cli.command()
 @click.option("-i", "--input-dir", default=None, help="输入目录")
@@ -513,6 +513,8 @@ def inspect(bank, password, filter_modes, filter_units, keyword,
     from med_exam_toolkit.inspect import run_inspect
     run_inspect(bank, password, filter_modes, filter_units, keyword,
                 has_ai, missing, limit, full, show_ai)
+
+@click.version_option(package_name="med-exam-toolkit")
 
 def main():
     cli()
