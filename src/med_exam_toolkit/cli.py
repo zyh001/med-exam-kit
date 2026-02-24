@@ -359,7 +359,7 @@ def reindex(ctx, bank, password):
 @click.option("-i", "--input-dir", default=None, help="JSON 文件目录（与 --bank 二选一）")
 @click.option("-o", "--output", default=None, help="输出路径（.mqb），不填则自动命名 *_ai.mqb")
 @click.option("--password", default=None, help="题库密码")
-@click.option("--provider", default="", help="AI provider: openai/deepseek/ollama")
+@click.option("--provider", default="", help="AI provider: openai/deepseek/qwen/ollama 等")
 @click.option("--model", default="", help="模型名")
 @click.option("--api-key", default="", envvar="OPENAI_API_KEY", help="API Key（也可用环境变量 OPENAI_API_KEY）")
 @click.option("--base-url", default="", help="自定义 API Base URL")
@@ -378,31 +378,75 @@ def reindex(ctx, bank, password):
               help="--bank 模式下就地修改原文件（配合 --apply-ai 使用）")
 @click.option("--write-json", is_flag=True, default=False,
               help="--input-dir 模式下将结果写回原始 JSON 文件（而不是生成 .mqb）")
+@click.option("--timeout", default=0, type=float,
+              help="AI 请求超时秒数（推理/思考模型建议 180+，0=自动推断）")
+@click.option("--thinking/--no-thinking", default=None,
+              help="混合思考模型（如 Qwen3）是否开启深度思考；纯推理模型（o1/R1）忽略此参数")
 def enrich(bank, input_dir, output, password, provider, model, api_key, base_url,
            max_workers, resume, checkpoint_dir, filter_modes, filter_units,
-           limit, dry_run, only_missing, apply_ai, in_place, write_json):
-    """AI 补全题库：为缺答案/缺解析的小题自动生成内容"""
+           limit, dry_run, only_missing, apply_ai, in_place, write_json,
+           timeout, thinking):
+    """AI 补全题库：为缺答案/缺解析的小题自动生成内容
+
+    \b
+    数据来源（二选一）：
+      --bank          从已有 .mqb 题库文件读取
+      -i/--input-dir  从 JSON 原始文件目录读取（自动去重）
+
+    \b
+    输出规则：
+      默认                    AI 结果存入 ai_answer/ai_discuss，另存为 *_ai.mqb
+      --apply-ai              同时写入 answer/discuss 正式字段
+      --apply-ai --in-place   就地覆盖原 .mqb 文件
+      -i + --write-json       结果写回每个原始 JSON 文件（就地修改）
+
+    \b
+    模型示例：
+      普通模型:  --model gpt-4o
+      纯推理:    --model o3-mini / --model deepseek-reasoner
+      混合思考:  --model qwen3-235b-a22b --thinking      (开启思考)
+                --model qwen3-235b-a22b --no-thinking   (关闭思考，更快)
+    """
     from med_exam_toolkit.ai.enricher import BankEnricher
+    from med_exam_toolkit.ai.client import is_reasoning_model, is_hybrid_thinking_model
 
     ctx_cfg    = click.get_current_context().obj.get("config", {})
     ai_cfg     = ctx_cfg.get("ai", {})
     parser_map = ctx_cfg.get("parser_map", {
-        "com.ahuxueshu":      "ahuyikao",
+        "com.ahuxueshu":       "ahuyikao",
         "com.yikaobang.yixue": "yikaobang",
     })
 
     # 参数优先级：命令行 > config.yaml > 默认值
-    provider      = provider      or ai_cfg.get("provider",       "openai")
-    model         = model         or ai_cfg.get("model",          "gpt-4o")
-    api_key       = api_key       or ai_cfg.get("api_key",        "")
-    base_url      = base_url      or ai_cfg.get("base_url",       "")
-    max_workers   = max_workers   or int(ai_cfg.get("max_workers", 4))
+    provider       = provider       or ai_cfg.get("provider",       "openai")
+    model          = model          or ai_cfg.get("model",          "gpt-4o")
+    api_key        = api_key        or ai_cfg.get("api_key",        "")
+    base_url       = base_url       or ai_cfg.get("base_url",       "")
+    max_workers    = max_workers    or int(ai_cfg.get("max_workers", 4))
     checkpoint_dir = checkpoint_dir or ai_cfg.get("checkpoint_dir", "data/checkpoints")
 
     if not bank and not input_dir:
         raise click.UsageError("必须指定 --bank 或 -i/--input-dir 中的一个")
 
-    # 确定输出路径
+    # ── 模型类型检测 ──
+    pure_r = is_reasoning_model(model)
+    hybrid = is_hybrid_thinking_model(model)
+
+    if pure_r:
+        click.echo(f"  🧠 纯推理模型: {model}（始终开启深度思考）")
+        if max_workers > 2:
+            click.echo(f"  ⚠️  推理模型响应较慢，建议 --max-workers 1~2，当前: {max_workers}")
+    elif hybrid:
+        state = "开启 🧠" if thinking else "关闭（加 --thinking 可开启）"
+        click.echo(f"  🔀 混合思考模型: {model}  深度思考: {state}")
+        if thinking and max_workers > 2:
+            click.echo(f"  ⚠️  思考模式响应较慢，建议 --max-workers 1~2，当前: {max_workers}")
+
+    # ── 超时自动推断 ──
+    use_slow         = pure_r or (hybrid and thinking)
+    resolved_timeout = timeout or (180.0 if use_slow else 60.0)
+
+    # ── 输出路径 ──
     resolved_in_place = in_place or (apply_ai and output is None and bank and not write_json)
     if resolved_in_place and bank:
         output_path = Path(bank)
@@ -438,151 +482,37 @@ def enrich(bank, input_dir, output, password, provider, model, api_key, base_url
         apply_ai=apply_ai,
         in_place=resolved_in_place,
         write_json=write_json,
+        timeout=resolved_timeout,
+        enable_thinking=thinking,
     )
     enricher.run()
 
 @cli.command()
 @click.option("--bank", required=True, type=click.Path(exists=True), help=".mqb 题库路径")
 @click.option("--password", default=None, help="题库密码")
-@click.option("--mode", "filter_modes", multiple=True, help="过滤题型")
+@click.option("--mode", "filter_modes", multiple=True, help="过滤题型，如 A1型题")
 @click.option("--unit", "filter_units", multiple=True, help="过滤章节关键词")
 @click.option("--keyword", default="", help="题干或题目关键词")
 @click.option("--has-ai", is_flag=True, default=False, help="只显示含 AI 补全内容的题")
 @click.option("--missing", is_flag=True, default=False, help="只显示缺答案或缺解析的题")
 @click.option("--limit", default=20, type=int, help="最多显示多少小题（默认 20，0=全部）")
-@click.option("--full", is_flag=True, default=False, help="显示完整解析（默认截断）")
-def inspect(bank, password, filter_modes, filter_units, keyword, has_ai, missing, limit, full):
-    """查看 .mqb 题库内容，支持过滤与搜索"""
-    from med_exam_toolkit.bank import load_bank
-    from collections import Counter
-    import re as _re
+@click.option("--full", is_flag=True, default=False, help="显示完整解析（默认截断至 150 字）")
+@click.option("--show-ai", is_flag=True, default=False,
+              help="同时显示 AI 原始输出（即使官方字段有值）")
+def inspect(bank, password, filter_modes, filter_units, keyword,
+            has_ai, missing, limit, full, show_ai):
+    """查看 .mqb 题库内容，支持过滤与搜索
 
-    def _print_options(options: list[str]) -> list[str]:
-        """渲染选项，避免双重字母前缀（原始数据已有 'A.' 前缀时不重复加）"""
-        labels = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        lines = []
-        for oi, opt in enumerate(options or []):
-            opt = opt.strip()
-            if _re.match(r'^[A-Za-z][.．、]\s*', opt):  # 已有前缀
-                lines.append(f"         {opt}")
-            else:
-                key = labels[oi] if oi < len(labels) else str(oi + 1)
-                lines.append(f"         {key}. {opt}")
-        return lines
-
-    questions = load_bank(Path(bank), password)
-    W = 70
-
-    # ── 统计摘要 ──
-    total_q  = len(questions)
-    total_sq = sum(len(q.sub_questions) for q in questions)
-    no_ans   = sum(1 for q in questions for sq in q.sub_questions
-                   if not (sq.answer or "").strip())
-    no_dis   = sum(1 for q in questions for sq in q.sub_questions
-                   if not (sq.discuss or "").strip())
-    has_ai_c = sum(1 for q in questions for sq in q.sub_questions
-                   if sq.ai_answer or sq.ai_discuss)
-    ai_ans_c = sum(1 for q in questions for sq in q.sub_questions
-                   if sq.answer_source == "ai")
-    ai_dis_c = sum(1 for q in questions for sq in q.sub_questions
-                   if sq.discuss_source == "ai")
-    mode_cnt = Counter(q.mode for q in questions)
-    cls_cnt  = Counter(q.cls  for q in questions)
-
-    click.echo(f"\n{'═' * W}")
-    click.echo(f"  📦 题库：{bank}")
-    click.echo(f"{'─' * W}")
-    click.echo(f"  大题数：{total_q}    小题数：{total_sq}")
-    click.echo(f"  缺答案：{no_ans}    缺解析：{no_dis}")
-    click.echo(f"  含AI内容：{has_ai_c}    AI答案兜底：{ai_ans_c}    AI解析兜底：{ai_dis_c}")
-    click.echo(f"\n  题型分布：")
-    for m, c in sorted(mode_cnt.items()):
-        click.echo(f"    {m or '未知':<14} {c:>5} 题")
-    if len(cls_cnt) > 1:
-        click.echo(f"\n  分类分布：")
-        for c, n in sorted(cls_cnt.items(), key=lambda x: -x[1])[:10]:
-            click.echo(f"    {c or '未知':<22} {n:>5} 题")
-    click.echo(f"{'═' * W}")
-
-    # ── 过滤 ──
-    results: list[tuple[int, int]] = []
-    for qi, q in enumerate(questions):
-        if filter_modes and q.mode not in filter_modes:
-            continue
-        if filter_units and not any(kw in (q.unit or "") for kw in filter_units):
-            continue
-        if keyword and keyword not in (q.stem or "") and not any(
-            keyword in sq.text for sq in q.sub_questions
-        ):
-            continue
-        for si, sq in enumerate(q.sub_questions):
-            if has_ai and not (sq.ai_answer or sq.ai_discuss):
-                continue
-            if missing and (sq.answer or "").strip() and (sq.discuss or "").strip():
-                continue
-            results.append((qi, si))
-
-    has_filter = any([filter_modes, filter_units, keyword, has_ai, missing])
-    if has_filter:
-        click.echo(f"\n  🔎 过滤结果：{len(results)} 个小题\n")
-    else:
-        click.echo(f"\n  📋 题目列表（前 {limit if limit else '全部'} 个小题）\n")
-
-    show = results if limit == 0 else results[:limit]
-
-    for qi, si in show:
-        q  = questions[qi]
-        sq = q.sub_questions[si]
-
-        # 答案/解析状态标注
-        ans_flag = ("✅" if (sq.answer or "").strip()
-                    else "🤖" if (sq.ai_answer or "").strip() else "❓")
-        dis_flag = ("✅" if (sq.discuss or "").strip()
-                    else "🤖" if (sq.ai_discuss or "").strip() else "❓")
-        ai_tag   = " [AI]" if (sq.ai_answer or sq.ai_discuss) else ""
-
-        click.echo(f"{'─' * W}")
-        click.echo(
-            f"  [{qi+1}-{si+1}]  {q.mode}  {q.unit or ''}  "
-            f"答案:{ans_flag}  解析:{dis_flag}{ai_tag}"
-        )
-
-        # 题干（A3/A4 共享题干）
-        if q.stem:
-            stem_text = q.stem if full else _trunc(q.stem, 100)
-            click.echo(f"  【题干】{stem_text}")
-
-        # 题目
-        text = sq.text or "(无题目文本)"
-        text_disp = text if full else _trunc(text, 100)
-        click.echo(f"  【题目】{text_disp}")
-
-        # 选项（智能去重前缀）
-        for line in _print_options(sq.options):
-            click.echo(line)
-
-        # 答案（优先正式，兜底 AI）
-        eff_ans = sq.eff_answer
-        if eff_ans:
-            src = " (AI)" if sq.answer_source == "ai" else ""
-            conf = f"  [置信:{sq.ai_confidence:.2f}  模型:{sq.ai_model}]" if sq.answer_source == "ai" else ""
-            click.echo(f"  【答案】{eff_ans}{src}{conf}")
-
-        # 解析（优先正式，兜底 AI）
-        eff_dis = sq.eff_discuss
-        if eff_dis:
-            src = " (AI)" if sq.discuss_source == "ai" else ""
-            dis_disp = eff_dis if full else _trunc(eff_dis, 150)
-            click.echo(f"  【解析】{dis_disp}{src}")
-
-    click.echo(f"{'─' * W}")
-    if limit and len(results) > limit:
-        click.echo(f"  … 还有 {len(results) - limit} 个，用 --limit 0 显示全部")
-    click.echo()
-
-def _trunc(s: str, n: int = 40) -> str:
-    s = (s or "").replace("\n", " ").strip()
-    return s[:n] + "…" if len(s) > n else s
+    \b
+    示例：
+      med-exam-kit inspect --bank questions.mqb
+      med-exam-kit inspect --bank questions.mqb --missing
+      med-exam-kit inspect --bank questions.mqb --has-ai --show-ai --full
+      med-exam-kit inspect --bank questions.mqb --mode A1型题 --keyword 肝炎 --limit 5
+    """
+    from med_exam_toolkit.inspect import run_inspect
+    run_inspect(bank, password, filter_modes, filter_units, keyword,
+                has_ai, missing, limit, full, show_ai)
 
 def main():
     cli()
