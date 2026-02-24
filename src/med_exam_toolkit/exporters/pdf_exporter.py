@@ -3,6 +3,7 @@ from pathlib import Path
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.units import mm
+from reportlab.lib import colors
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, HRFlowable
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
@@ -11,6 +12,7 @@ from med_exam_toolkit.exporters import register
 from med_exam_toolkit.exporters.base import BaseExporter
 
 _FONT_REGISTERED = False
+_AI_COLOR_HEX    = colors.HexColor("#CC7700")   # 橙色，与其他导出器一致
 
 
 def _ensure_font():
@@ -44,64 +46,95 @@ class PdfExporter(BaseExporter):
 
         font_name = "ChineseFont" if _FONT_REGISTERED else "Helvetica"
 
-        doc = SimpleDocTemplate(str(fp), pagesize=A4,
-                                leftMargin=20 * mm, rightMargin=20 * mm,
-                                topMargin=15 * mm, bottomMargin=15 * mm)
+        doc = SimpleDocTemplate(
+            str(fp), pagesize=A4,
+            leftMargin=20*mm, rightMargin=20*mm,
+            topMargin=15*mm,  bottomMargin=15*mm,
+        )
 
         styles = getSampleStyleSheet()
-        styles.add(ParagraphStyle(name="CN", fontName=font_name, fontSize=10, leading=14))
-        styles.add(ParagraphStyle(name="CNBold", fontName=font_name, fontSize=11, leading=15,
-                                  spaceAfter=4))
-        styles.add(ParagraphStyle(name="CNSmall", fontName=font_name, fontSize=9, leading=12,
-                                  textColor="grey"))
+        styles.add(ParagraphStyle(name="CN",
+            fontName=font_name, fontSize=10, leading=14))
+        styles.add(ParagraphStyle(name="CNBold",
+            fontName=font_name, fontSize=11, leading=15, spaceAfter=4))
+        styles.add(ParagraphStyle(name="CNSmall",
+            fontName=font_name, fontSize=9, leading=12, textColor="grey"))
+        styles.add(ParagraphStyle(name="CNAi",
+            fontName=font_name, fontSize=9, leading=12, textColor=_AI_COLOR_HEX))
 
         story = []
         story.append(Paragraph("医学考试题库", ParagraphStyle(
-            name="Title", fontName=font_name, fontSize=18, leading=24, alignment=1)))
-        story.append(Spacer(1, 10 * mm))
+            name="Title", fontName=font_name, fontSize=18, leading=24, alignment=1,
+        )))
+        story.append(Spacer(1, 10*mm))
 
         for idx, q in enumerate(questions, 1):
-            # 题目标题
-            title = f"第{idx}题 [{q.mode}] {q.unit}"
-            story.append(Paragraph(title, styles["CNBold"]))
+            story.append(Paragraph(
+                f"第{idx}题 [{q.mode}] {q.unit}", styles["CNBold"],
+            ))
 
             if q.stem:
-                story.append(Paragraph(f"【题干】{_escape(q.stem)}", styles["CN"]))
-                story.append(Spacer(1, 2 * mm))
+                story.append(Paragraph(f"【题干】{_esc(q.stem)}", styles["CN"]))
+                story.append(Spacer(1, 2*mm))
 
             if q.shared_options:
                 story.append(Paragraph("【共享选项】", styles["CNBold"]))
                 for opt in q.shared_options:
-                    story.append(Paragraph(f"  {_escape(opt)}", styles["CN"]))
-                story.append(Spacer(1, 2 * mm))
+                    story.append(Paragraph(f"  {_esc(opt)}", styles["CN"]))
+                story.append(Spacer(1, 2*mm))
 
             for si, sq in enumerate(q.sub_questions, 1):
                 prefix = f"({si}) " if len(q.sub_questions) > 1 else ""
-                story.append(Paragraph(f"{prefix}{_escape(sq.text)}", styles["CNBold"]))
+                story.append(Paragraph(
+                    f"{prefix}{_esc(sq.text)}", styles["CNBold"],
+                ))
 
                 if sq.options and sq.options != q.shared_options:
                     for opt in sq.options:
-                        story.append(Paragraph(f"    {_escape(opt)}", styles["CN"]))
+                        story.append(Paragraph(f"    {_esc(opt)}", styles["CN"]))
 
-                answer_line = f"答案: {sq.answer}"
-                if sq.rate:
-                    answer_line += f"  正确率: {sq.rate}"
-                story.append(Paragraph(answer_line, styles["CN"]))
+                # 答案（AI 兜底时橙色 + 标注）
+                ans = sq.eff_answer
+                if sq.answer_source == "ai":
+                    story.append(Paragraph(
+                        f"答案: {_esc(ans)}  <font color='#CC7700'>(AI补全，建议核对)</font>",
+                        styles["CNAi"],
+                    ))
+                else:
+                    story.append(Paragraph(
+                        f"答案: {_esc(ans)}" + (f"  正确率: {sq.rate}" if sq.rate else ""),
+                        ParagraphStyle(name=f"ANS{idx}_{si}",
+                            fontName=font_name, fontSize=10, leading=14,
+                            textColor=colors.HexColor("#008000")),
+                    ))
+                    if sq.rate and sq.answer_source != "ai":
+                        pass  # rate 已拼入上面的字符串
 
-                discuss = sq.discuss or q.discuss
+                # 解析（AI 兜底时橙色标注）
+                dis     = sq.eff_discuss
+                discuss = dis or q.discuss
                 if discuss:
-                    story.append(Paragraph(f"解析: {_escape(discuss)}", styles["CNSmall"]))
+                    if sq.discuss_source == "ai":
+                        story.append(Paragraph(
+                            f"解析: {_esc(discuss)}  "
+                            f"<font color='#CC7700'>(AI补全，建议核对)</font>",
+                            styles["CNAi"],
+                        ))
+                    else:
+                        story.append(Paragraph(
+                            f"解析: {_esc(discuss)}", styles["CNSmall"],
+                        ))
 
-                story.append(Spacer(1, 2 * mm))
+                story.append(Spacer(1, 2*mm))
 
             story.append(HRFlowable(width="100%", thickness=0.5, color="grey"))
-            story.append(Spacer(1, 4 * mm))
+            story.append(Spacer(1, 4*mm))
 
         doc.build(story)
         print(f"[INFO] PDF 导出完成: {fp} ({len(questions)} 题)")
 
 
-def _escape(text: str) -> str:
+def _esc(text: str) -> str:
     """转义 XML 特殊字符，防止 reportlab 解析出错"""
     return (text
             .replace("&", "&amp;")
