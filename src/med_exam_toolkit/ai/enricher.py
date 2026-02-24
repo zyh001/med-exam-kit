@@ -79,6 +79,8 @@ class BankEnricher:
         apply_ai: bool = False,
         in_place: bool = False,
         write_json: bool = False,
+        timeout: float = 60.0,
+        enable_thinking: bool | None = None,
     ) -> None:
         if bank_path is None and input_dir is None:
             raise ValueError("bank_path 和 input_dir 至少指定一个")
@@ -102,6 +104,8 @@ class BankEnricher:
         self.apply_ai = apply_ai
         self.in_place = in_place
         self.write_json = write_json
+        self.timeout         = timeout
+        self.enable_thinking = enable_thinking
 
         # 输出路径（.mqb），JSON 写回模式不需要
         if output_path:
@@ -283,7 +287,19 @@ class BankEnricher:
         print(f"  provider:  {self.provider}")
         print(f"  model:     {self.model}")
         print(f"  workers:   {self.max_workers}")
+        from med_exam_toolkit.ai.client import is_reasoning_model, is_hybrid_thinking_model
+        pure_r  = is_reasoning_model(self.model)
+        hybrid  = is_hybrid_thinking_model(self.model)
+        thinking_on = pure_r or (hybrid and self.enable_thinking)
         print(f"  apply-ai:  {'是（写回 answer/discuss 正式字段）' if self.apply_ai else '否（仅写 ai_answer/ai_discuss）'}")
+        if pure_r:
+            print(f"  推理模式:  是（纯推理模型，始终开启）")
+        elif hybrid:
+            state = "开启" if self.enable_thinking else "关闭（加 --thinking 开启）"
+            print(f"  推理模式:  混合思考模型，当前思考：{state}")
+        else:
+            print(f"  推理模式:  否（普通模型）")
+        print(f"  超时设置:  {self.timeout:.0f}s")
         if self.write_json:
             print(f"  输出模式:  就地修改原始 JSON 文件")
         elif self.output_path:
@@ -313,6 +329,7 @@ class BankEnricher:
             api_key=self.api_key,
             base_url=self.base_url,
             model=self.model,
+            timeout=self.timeout,
         )
 
         total   = len(pending)
@@ -429,6 +446,12 @@ class BankEnricher:
         if self._shutdown.is_set():
             return None
 
+        from med_exam_toolkit.ai.client import (
+            build_chat_params, adapt_messages_for_reasoning,
+            is_reasoning_model, is_hybrid_thinking_model,
+            extract_response_text,
+        )
+
         q  = questions[task["qi"]]
         sq = q.sub_questions[task["si"]]
 
@@ -438,32 +461,60 @@ class BankEnricher:
             need_discuss=task["need_discuss"],
         )
 
+        # token 预算：开启思考时需要更多空间（思维链消耗）
+        pure_r    = is_reasoning_model(self.model)
+        hybrid    = is_hybrid_thinking_model(self.model)
+        thinking  = self.enable_thinking   # 用户设置的开关
+        use_large = pure_r or (hybrid and thinking)
+        max_tokens = 8000 if use_large else 800
+
+        raw_messages = [
+            {"role": "system", "content": "你是医学考试辅导专家，严格按 JSON 输出，不要 markdown。"},
+            {"role": "user",   "content": prompt},
+        ]
+        messages = adapt_messages_for_reasoning(self.model, raw_messages)
+        params   = build_chat_params(
+            model           = self.model,
+            messages        = messages,
+            temperature     = 0.2,
+            max_tokens      = max_tokens,
+            enable_thinking = thinking,
+        )
+
         try:
-            response = client.chat.completions.create(
-                model=self.model,
-                messages=[
-                    {"role": "system", "content": "你是医学考试辅导专家，严格按 JSON 输出，不要 markdown。"},
-                    {"role": "user",   "content": prompt},
-                ],
-                temperature=0.2,
-                max_tokens=800,
-            )
+            response = client.chat.completions.create(**params)
         except Exception as exc:  # noqa: BLE001
             if self._shutdown.is_set():
                 return None
             logger.warning("AI 请求异常: %s", exc)
             return None
 
-        raw    = response.choices[0].message.content or ""
-        result = parse_response(raw)
+        content, reasoning_text = extract_response_text(response)
+
+        if reasoning_text:
+            logger.debug("推理过程 (%d chars): %s…", len(reasoning_text), reasoning_text[:100])
+
+        result = parse_response(content)
         ok, missing = validate_result(
             result,
             need_answer=task["need_answer"],
             need_discuss=task["need_discuss"],
         )
         if not ok:
-            logger.warning("AI 结果缺少字段 %s", missing)
+            # 极少数情况：答案混在思维链而非 content，尝试兜底解析
+            if reasoning_text:
+                result2 = parse_response(reasoning_text)
+                ok2, _ = validate_result(
+                    result2,
+                    need_answer=task["need_answer"],
+                    need_discuss=task["need_discuss"],
+                )
+                if ok2:
+                    logger.info("从 reasoning_content 中成功提取结果")
+                    return result2
+            logger.warning("AI 结果缺少字段 %s  raw=%s", missing, content[:200])
             return None
+
         return result
 
     # ─────────────────────────────── 回填内存 ───────────────────────────────

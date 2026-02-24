@@ -47,7 +47,7 @@ def build_subquestion_prompt(
 
         规则:
         1) {answer_rule}
-        2) discuss 要简洁、医学上准确，说明为何正确并简要排除干扰项
+        2) discuss 要简洁、医学上准确，要有理有据的说明为何正确并简要排除干扰项
         3) confidence 为 0~1 小数
         4) 禁止输出 markdown、代码块或多余文本
 
