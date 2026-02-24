@@ -28,19 +28,32 @@ class BaseExporter(ABC):
             "fingerprint", "pkg", "cls", "unit", "mode", "stem",
             "sub_index", "text",
         ]
-        # 动态选项列: option_A, option_B, ...
         opt_cols = [f"option_{chr(65 + i)}" for i in range(max_opt)]
-        tail = ["answer", "rate", "error_prone", "discuss", "point"]
+        tail = [
+            # 有效值（官方优先，为空时 fallback 到 AI）
+            "answer", "answer_source",
+            "rate", "error_prone",
+            "discuss", "discuss_source",
+            "point",
+            # AI 原始输出（无论官方字段是否为空都单独保留）
+            "ai_answer", "ai_discuss", "ai_confidence", "ai_model",
+        ]
         return base + opt_cols + tail
 
     @staticmethod
-    def flatten(questions: list[Question], split_options: bool = True) -> tuple[list[dict], list[str]]:
+    def flatten(
+        questions: list[Question],
+        split_options: bool = True,
+    ) -> tuple[list[dict], list[str]]:
         """
-        将 Question 列表展平为行记录。
+        展平 Question 列表为行记录。
 
-        返回 (rows, columns)
-        split_options=True:  每个选项独立一列 (option_A, option_B, ...)
-        split_options=False: 所有选项合并为一列 (options)
+        列说明：
+          answer / discuss        → eff_answer / eff_discuss（官方优先，空时用 AI 兜底）
+          answer_source           → "official" / "ai" / ""
+          ai_answer / ai_discuss  → AI 原始输出，无论官方字段是否有值都单独输出
+          ai_confidence           → AI 置信度
+          ai_model                → 生成该 AI 结果的模型名
         """
         # 先确定最大选项数
         max_opt = 0
@@ -55,7 +68,11 @@ class BaseExporter(ABC):
             columns = [
                 "fingerprint", "pkg", "cls", "unit", "mode", "stem",
                 "sub_index", "text", "options",
-                "answer", "rate", "error_prone", "discuss", "point",
+                "answer", "answer_source",
+                "rate", "error_prone",
+                "discuss", "discuss_source",
+                "point",
+                "ai_answer", "ai_discuss", "ai_confidence", "ai_model",
             ]
 
         rows = []
@@ -71,13 +88,21 @@ class BaseExporter(ABC):
             for i, sq in enumerate(q.sub_questions, 1):
                 row = {
                     **base,
-                    "sub_index": i,
-                    "text": sq.text,
-                    "answer": sq.answer,
-                    "rate": sq.rate,
-                    "error_prone": sq.error_prone,
-                    "discuss": sq.discuss,
-                    "point": sq.point,
+                    "sub_index":      i,
+                    "text":           sq.text,
+                    # 有效值（官方优先 fallback AI）
+                    "answer":         sq.eff_answer,
+                    "answer_source":  sq.answer_source,
+                    "rate":           sq.rate,
+                    "error_prone":    sq.error_prone,
+                    "discuss":        sq.eff_discuss,
+                    "discuss_source": sq.discuss_source,
+                    "point":          sq.point,
+                    # AI 原始输出（单独列，供对比/审核）
+                    "ai_answer":      (sq.ai_answer or "").strip(),
+                    "ai_discuss":     (sq.ai_discuss or "").strip(),
+                    "ai_confidence":  sq.ai_confidence if sq.ai_confidence else "",
+                    "ai_model":       sq.ai_model or "",
                 }
 
                 if split_options:

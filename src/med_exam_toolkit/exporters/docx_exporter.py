@@ -10,6 +10,7 @@ from med_exam_toolkit.exporters import register
 from med_exam_toolkit.exporters.base import BaseExporter
 
 FONT_NAME = "宋体"
+_AI_COLOR = RGBColor(0xCC, 0x77, 0x00)   # 橙色，与 exam/docx_exporter.py 保持一致
 
 
 def _set_font(run, name: str = FONT_NAME, size: Pt | None = None):
@@ -39,16 +40,15 @@ class DocxExporter(BaseExporter):
         doc.add_heading("医学考试题库", level=0).alignment = WD_ALIGN_PARAGRAPH.CENTER
 
         for idx, q in enumerate(questions, 1):
-            heading = f"第{idx}题 [{q.mode}] {q.unit}"
-            doc.add_heading(heading, level=2)
+            doc.add_heading(f"第{idx}题 [{q.mode}] {q.unit}", level=2)
 
             if q.stem:
-                p = doc.add_paragraph()
+                p   = doc.add_paragraph()
                 run = p.add_run(f"【题干】{q.stem}")
                 _set_font(run, size=Pt(10.5))
 
             if q.shared_options:
-                p = doc.add_paragraph()
+                p   = doc.add_paragraph()
                 run = p.add_run("【共享选项】")
                 run.bold = True
                 _set_font(run)
@@ -57,7 +57,7 @@ class DocxExporter(BaseExporter):
 
             for si, sq in enumerate(q.sub_questions, 1):
                 prefix = f"({si}) " if len(q.sub_questions) > 1 else ""
-                p = doc.add_paragraph()
+                p   = doc.add_paragraph()
                 run = p.add_run(f"{prefix}{sq.text}")
                 run.bold = True
                 _set_font(run)
@@ -66,20 +66,41 @@ class DocxExporter(BaseExporter):
                     for opt in sq.options:
                         doc.add_paragraph(opt, style="List Bullet")
 
-                p = doc.add_paragraph()
-                run = p.add_run(f"答案: {sq.answer}")
-                run.font.color.rgb = RGBColor(0, 128, 0)
-                _set_font(run)
-                if sq.rate:
-                    run2 = p.add_run(f"  正确率: {sq.rate}")
+                # 答案（AI 兜底时橙色 + 标注）
+                ans = sq.eff_answer
+                p   = doc.add_paragraph()
+                run = p.add_run(f"答案: {ans}" if ans else "答案: —")
+                if sq.answer_source == "ai":
+                    run.font.color.rgb = _AI_COLOR
+                    _set_font(run)
+                    run2 = p.add_run("  (AI补全，建议核对)")
+                    run2.font.size = Pt(8)
+                    run2.font.color.rgb = _AI_COLOR
                     _set_font(run2)
+                else:
+                    run.font.color.rgb = RGBColor(0, 128, 0)
+                    _set_font(run)
 
-                discuss = sq.discuss or q.discuss
+                if sq.rate:
+                    run3 = p.add_run(f"  正确率: {sq.rate}")
+                    _set_font(run3)
+
+                # 解析（AI 兜底时同样橙色标注）
+                dis     = sq.eff_discuss
+                discuss = dis or q.discuss
                 if discuss:
-                    p = doc.add_paragraph()
+                    p   = doc.add_paragraph()
                     run = p.add_run(f"解析: {discuss}")
-                    run.font.color.rgb = RGBColor(100, 100, 100)
-                    _set_font(run, size=Pt(9))
+                    if sq.discuss_source == "ai":
+                        run.font.color.rgb = _AI_COLOR
+                        _set_font(run, size=Pt(9))
+                        run2 = p.add_run("  (AI补全，建议核对)")
+                        run2.font.size = Pt(8)
+                        run2.font.color.rgb = _AI_COLOR
+                        _set_font(run2)
+                    else:
+                        run.font.color.rgb = RGBColor(100, 100, 100)
+                        _set_font(run, size=Pt(9))
 
             doc.add_paragraph("—" * 40)
 
@@ -92,7 +113,7 @@ class DocxExporter(BaseExporter):
         style = doc.styles["Normal"]
         style.font.name = FONT_NAME
         style.font.size = Pt(10.5)
-        rPr = style.element.get_or_add_rPr()
+        rPr    = style.element.get_or_add_rPr()
         rFonts = rPr.find(qn("w:rFonts"))
         if rFonts is None:
             rFonts = OxmlElement("w:rFonts")
