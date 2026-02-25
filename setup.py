@@ -15,6 +15,7 @@ setup(
         "sqlalchemy>=2.0",
         "pyyaml>=6.0",
         "openai>=2.0.0",
+        "flask>=3.0.0",
     ],
     entry_points={
         "console_scripts": [
