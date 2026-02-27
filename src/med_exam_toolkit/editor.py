@@ -13,7 +13,8 @@ from flask import Flask, jsonify, request, render_template_string
 # ── 全局状态 ──
 _questions: list = []
 _bank_path: Path | None = None
-_dirty = False          # 是否有未保存的改动
+_dirty    = False
+_password: str | None = None
 
 app = Flask(__name__)
 app.config["JSON_AS_ASCII"] = False
@@ -43,7 +44,8 @@ def _sq_to_dict(q, sq, qi: int, si: int) -> dict:
         "eff_discuss": sq.eff_discuss,
         "answer_source": sq.answer_source,
         "discuss_source": sq.discuss_source,
-        "sub_total": len(q.sub_questions),
+        "sub_total":   len(q.sub_questions),
+        "fingerprint": getattr(q, "fingerprint", ""),
     }
 
 
@@ -66,8 +68,9 @@ def api_info():
 
 @app.get("/api/questions")
 def api_questions():
-    q_kw   = request.args.get("q", "").strip()
-    mode   = request.args.get("mode", "")
+    q_kw  = request.args.get("q",  "").strip()
+    fp_kw = request.args.get("fp", "").strip()
+    mode  = request.args.get("mode", "")
     unit   = request.args.get("unit", "")
     has_ai = request.args.get("has_ai", "") == "1"
     missing = request.args.get("missing", "") == "1"
@@ -76,6 +79,9 @@ def api_questions():
 
     rows = []
     for qi, q in enumerate(_questions):
+        q_fp = getattr(q, "fingerprint", "") or ""
+        if fp_kw and fp_kw.lower() not in q_fp.lower():
+            continue
         if mode and q.mode != mode:
             continue
         if unit and unit not in (q.unit or ""):
@@ -168,6 +174,9 @@ def api_replace():
 
     count = 0
     for q in _questions:
+        q_fp = getattr(q, "fingerprint", "") or ""
+        if fp_kw and fp_kw.lower() not in q_fp.lower():
+            continue
         if mode and q.mode != mode:
             continue
         if unit and unit not in (q.unit or ""):
@@ -189,8 +198,7 @@ def api_save():
     global _dirty
     try:
         from med_exam_toolkit.bank import save_bank
-        pwd = request.get_json(silent=True) or {}
-        save_bank(_questions, _bank_path, pwd.get("password"))
+        save_bank(_questions, _bank_path, _password)
         _dirty = False
         return jsonify({"ok": True, "path": str(_bank_path)})
     except Exception as e:
@@ -199,9 +207,8 @@ def api_save():
 
 @app.post("/api/shutdown")
 def api_shutdown():
-    func = request.environ.get("werkzeug.server.shutdown")
-    if func:
-        func()
+    import os, signal
+    os.kill(os.getpid(), signal.SIGTERM)
     return jsonify({"ok": True})
 
 
@@ -219,308 +226,291 @@ def index():
 # ═══════════════════════════════════════════════════════════════════
 
 HTML = r"""<!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="dark">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
 <title>题库编辑器</title>
 <style>
-:root {
-  --bg:       #0f1117;
-  --surface:  #181c27;
-  --panel:    #1e2333;
-  --border:   #2a3045;
-  --accent:   #4f9cf9;
-  --accent2:  #f0a04b;
-  --ai-color: #f0a04b;
-  --ok:       #3ecf8e;
-  --danger:   #f56565;
-  --text:     #e2e8f0;
-  --muted:    #6b7a99;
-  --mono:     ui-monospace, 'Cascadia Code', 'SF Mono', monospace;
-  --serif:    'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
-  --sidebar-w: 320px;
-  --topbar-h:  52px;
+/* ══════════════════════════════════════════
+   主题变量
+══════════════════════════════════════════ */
+
+/* 夜间主题（默认） */
+:root,[data-theme="dark"]{
+  --bg:        #0f1117;
+  --surface:   #181c27;
+  --panel:     #1e2333;
+  --border:    #2a3045;
+  --accent:    #4f9cf9;
+  --accent2:   #f0a04b;
+  --ai-color:  #f0a04b;
+  --ok:        #3ecf8e;
+  --danger:    #f56565;
+  --text:      #e2e8f0;
+  --muted:     #6b7a99;
+  --fp-color:  #3a4a66;
+  --active-bg: #1a2540;
+  --input-bg:  #0f1117;
+  --scrollbar: #2a3045;
 }
+
+/* 白天主题 */
+[data-theme="light"]{
+  --bg:        #f5f6fa;
+  --surface:   #ffffff;
+  --panel:     #f0f2f8;
+  --border:    #d8dce8;
+  --accent:    #2563eb;
+  --accent2:   #d97706;
+  --ai-color:  #d97706;
+  --ok:        #16a34a;
+  --danger:    #dc2626;
+  --text:      #1e2535;
+  --muted:     #6b7a99;
+  --fp-color:  #a0aec0;
+  --active-bg: #dbeafe;
+  --input-bg:  #ffffff;
+  --scrollbar: #d8dce8;
+}
+
+/* 暖调主题 */
+[data-theme="warm"]{
+  --bg:        #1a1510;
+  --surface:   #231d16;
+  --panel:     #2c2419;
+  --border:    #3d3025;
+  --accent:    #f59e0b;
+  --accent2:   #fb923c;
+  --ai-color:  #fb923c;
+  --ok:        #4ade80;
+  --danger:    #f87171;
+  --text:      #f5e6d0;
+  --muted:     #9a8070;
+  --fp-color:  #5a4a38;
+  --active-bg: #3d2e1a;
+  --input-bg:  #1a1510;
+  --scrollbar: #3d3025;
+}
+
+/* 绿色终端主题 */
+[data-theme="terminal"]{
+  --bg:        #0a0f0a;
+  --surface:   #0d130d;
+  --panel:     #111811;
+  --border:    #1a2e1a;
+  --accent:    #22c55e;
+  --accent2:   #86efac;
+  --ai-color:  #86efac;
+  --ok:        #4ade80;
+  --danger:    #f87171;
+  --text:      #bbf7d0;
+  --muted:     #4a7a4a;
+  --fp-color:  #2a4a2a;
+  --active-bg: #0f2a0f;
+  --input-bg:  #0a0f0a;
+  --scrollbar: #1a2e1a;
+}
+
+/* ══════════════════════════════════════════
+   全局基础
+══════════════════════════════════════════ */
 *{box-sizing:border-box;margin:0;padding:0}
 html,body{height:100%;overflow:hidden}
 body{
-  background:var(--bg);color:var(--text);font-family:var(--serif);font-size:14px;
-  display:flex;flex-direction:column;min-height:100vh;
+  background:var(--bg);color:var(--text);
+  font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  font-size:14px;display:flex;flex-direction:column;
+  transition:background .2s,color .2s;
 }
 
 /* ── 顶栏 ── */
 #topbar{
   display:flex;align-items:center;gap:8px;
-  padding:0 16px;height:var(--topbar-h);
+  padding:0 16px;height:52px;
   background:var(--surface);border-bottom:1px solid var(--border);
   flex-shrink:0;min-width:0;
+  transition:background .2s,border-color .2s;
 }
-.logo{font-size:12px;font-family:var(--mono);color:var(--accent);letter-spacing:.05em;white-space:nowrap;flex-shrink:0}
-.bank-name{font-size:11px;color:var(--muted);font-family:var(--mono);
-  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
-.top-stats{font-size:11px;color:var(--muted);font-family:var(--mono);white-space:nowrap;flex-shrink:0}
+.logo{font-size:12px;font-family:ui-monospace,'SF Mono',monospace;color:var(--accent);letter-spacing:.05em;white-space:nowrap;flex-shrink:0}
+.bank-name{font-size:11px;color:var(--muted);font-family:ui-monospace,monospace;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0}
+.top-stats{font-size:11px;color:var(--muted);font-family:ui-monospace,monospace;white-space:nowrap;flex-shrink:0}
 .dirty-dot{width:7px;height:7px;border-radius:50%;background:var(--accent2);display:none;flex-shrink:0}
 .dirty-dot.show{display:block}
-.top-btn{padding:5px 12px;border-radius:6px;cursor:pointer;font-family:var(--mono);
-  font-size:12px;font-weight:600;border:none;white-space:nowrap;flex-shrink:0;transition:opacity .15s}
+.top-btn{
+  padding:5px 12px;border-radius:6px;cursor:pointer;
+  font-family:ui-monospace,monospace;font-size:12px;font-weight:600;
+  border:none;white-space:nowrap;flex-shrink:0;transition:opacity .15s;
+}
 .top-btn:hover{opacity:.85}
 #btnSave{background:var(--accent);color:#fff}
 #btnSave:disabled{opacity:.35;cursor:default}
 #btnReplace{background:var(--panel);color:var(--text);border:1px solid var(--border)}
 #btnReplace:hover{border-color:var(--accent)}
 
-/* ── 主布局 ── */
-#layout{
-  display:flex;
-  flex:1;
-  min-height:0;
-  height:calc(100vh - var(--topbar-h));
-  overflow:hidden;
+/* 主题切换按钮 */
+#btnTheme{
+  background:var(--panel);color:var(--muted);
+  border:1px solid var(--border);
+  padding:5px 10px;border-radius:6px;cursor:pointer;
+  font-size:14px;flex-shrink:0;line-height:1;
+  transition:border-color .15s,color .15s;
 }
+#btnTheme:hover{border-color:var(--accent);color:var(--accent)}
+
+/* 主题选择下拉 */
+#themeMenu{
+  position:absolute;top:calc(52px + 6px);right:16px;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:10px;padding:6px;
+  display:none;flex-direction:column;gap:3px;
+  z-index:300;box-shadow:0 8px 32px rgba(0,0,0,.4);
+  min-width:150px;
+}
+#themeMenu.open{display:flex}
+.theme-opt{
+  display:flex;align-items:center;gap:10px;
+  padding:8px 12px;border-radius:7px;cursor:pointer;
+  font-size:13px;transition:background .1s;white-space:nowrap;
+}
+.theme-opt:hover{background:var(--panel)}
+.theme-opt.active{background:var(--panel);color:var(--accent)}
+.theme-swatch{
+  width:28px;height:16px;border-radius:4px;flex-shrink:0;
+  border:1px solid rgba(255,255,255,.1);
+}
+
+/* ── 主布局 ── */
+#layout{display:flex;flex:1;min-height:0;height:calc(100vh - 52px);overflow:hidden}
 
 /* ── 左栏 ── */
 #sidebar{
-  width:var(--sidebar-w);flex-shrink:0;
-  display:flex;flex-direction:column;
-  border-right:1px solid var(--border);
-  background:var(--surface);
-  overflow:hidden;
-  min-height:0;
+  width:320px;flex-shrink:0;display:flex;flex-direction:column;
+  border-right:1px solid var(--border);background:var(--surface);
+  overflow:hidden;min-height:0;
+  transition:background .2s,border-color .2s;
 }
-#search-area{
-  padding:10px 12px;display:flex;flex-direction:column;gap:7px;
-  border-bottom:1px solid var(--border);flex-shrink:0;
-}
+#search-area{padding:10px 12px;display:flex;flex-direction:column;gap:7px;border-bottom:1px solid var(--border);flex-shrink:0}
 #search-area input,#search-area select{
   background:var(--panel);border:1px solid var(--border);color:var(--text);
-  border-radius:6px;padding:7px 10px;font-size:12px;font-family:var(--mono);
-  width:100%;outline:none;
+  border-radius:6px;padding:7px 10px;font-size:12px;
+  font-family:ui-monospace,monospace;width:100%;outline:none;
+  transition:background .2s,border-color .15s,color .2s;
 }
 #search-area input:focus,#search-area select:focus{border-color:var(--accent)}
 .filter-row{display:flex;gap:6px}
 .filter-row select{flex:1;min-width:0}
 .filter-checks{display:flex;gap:14px;flex-wrap:wrap}
-.filter-checks label{
-  display:flex;align-items:center;gap:5px;
-  font-family:var(--mono);font-size:11px;color:var(--muted);cursor:pointer;
-}
-#result-count{
-  font-size:11px;color:var(--muted);font-family:var(--mono);
-  padding:5px 12px;border-bottom:1px solid var(--border);flex-shrink:0;
-}
+.filter-checks label{display:flex;align-items:center;gap:5px;font-family:ui-monospace,monospace;font-size:11px;color:var(--muted);cursor:pointer}
+#result-count{font-size:11px;color:var(--muted);font-family:ui-monospace,monospace;padding:5px 12px;border-bottom:1px solid var(--border);flex-shrink:0}
 #qlist{flex:1;overflow-y:auto;min-height:0}
-.q-item{
-  padding:10px 14px;border-bottom:1px solid var(--border);
-  cursor:pointer;transition:background .1s;
-}
+.q-item{padding:10px 14px;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s}
 .q-item:hover{background:var(--panel)}
-.q-item.active{background:#1a2540;border-left:3px solid var(--accent)}
-.q-idx{font-family:var(--mono);font-size:10px;color:var(--muted)}
-.q-mode{font-size:10px;color:var(--accent);font-family:var(--mono)}
-.q-text{
-  font-size:12px;margin-top:3px;line-height:1.5;
-  overflow:hidden;display:-webkit-box;
-  -webkit-line-clamp:2;-webkit-box-orient:vertical;
-}
+.q-item.active{background:var(--active-bg);border-left:3px solid var(--accent)}
+.q-idx{font-family:ui-monospace,monospace;font-size:10px;color:var(--muted)}
+.q-mode{font-size:10px;color:var(--accent);font-family:ui-monospace,monospace}
+.q-fp{font-family:ui-monospace,monospace;font-size:9px;color:var(--fp-color);margin-left:6px}
+.q-text{font-size:12px;margin-top:3px;line-height:1.5;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical}
 .q-badges{display:flex;gap:4px;margin-top:4px;flex-wrap:wrap}
-.badge{font-size:10px;padding:1px 6px;border-radius:3px;font-family:var(--mono)}
-.badge.ai{background:#2d2010;color:var(--ai-color)}
-.badge.miss{background:#2d1010;color:var(--danger)}
-#pagination{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:8px 12px;border-top:1px solid var(--border);
-  font-family:var(--mono);font-size:11px;color:var(--muted);flex-shrink:0;
-}
-#pagination button{
-  background:var(--panel);border:1px solid var(--border);color:var(--text);
-  border-radius:4px;padding:3px 10px;cursor:pointer;font-family:var(--mono);font-size:11px;
-}
+.badge{font-size:10px;padding:1px 6px;border-radius:3px;font-family:ui-monospace,monospace}
+.badge.ai{background:color-mix(in srgb,var(--ai-color) 15%,transparent);color:var(--ai-color)}
+.badge.miss{background:color-mix(in srgb,var(--danger) 15%,transparent);color:var(--danger)}
+#pagination{display:flex;align-items:center;justify-content:space-between;padding:6px 10px;border-top:1px solid var(--border);font-family:ui-monospace,monospace;font-size:11px;color:var(--muted);flex-shrink:0;gap:6px}
+#pagination button{background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 10px;cursor:pointer;font-family:ui-monospace,monospace;font-size:11px}
 #pagination button:disabled{opacity:.35;cursor:default}
+#jumpInput{width:42px;background:var(--panel);border:1px solid var(--border);color:var(--text);border-radius:4px;padding:3px 6px;font-family:ui-monospace,monospace;font-size:11px;text-align:center;outline:none}
+#jumpInput:focus{border-color:var(--accent)}
 
 /* ── 移动端：返回按钮 ── */
-#mobileBack{
-  display:none;align-items:center;gap:6px;
-  padding:8px 14px;border-bottom:1px solid var(--border);
-  font-family:var(--mono);font-size:12px;color:var(--accent);
-  cursor:pointer;background:var(--surface);flex-shrink:0;
-}
+#mobileBack{display:none;align-items:center;gap:6px;padding:8px 14px;border-bottom:1px solid var(--border);font-family:ui-monospace,monospace;font-size:12px;color:var(--accent);cursor:pointer;background:var(--surface);flex-shrink:0}
 
 /* ── 右栏 ── */
 #editor{
-  flex:1;
-  min-width:0;
-  min-height:0;
-  overflow-y:auto;
-  overflow-x:hidden;
-  padding:20px 24px 28px;
+  flex:1;min-width:0;min-height:0;
+  overflow-y:auto;overflow-x:hidden;
+  padding:20px 24px 32px;
   display:flex;flex-direction:column;gap:16px;
+  transition:background .2s;
 }
-.empty{color:var(--muted);font-family:var(--mono);text-align:center;margin-top:80px;font-size:13px}
+.empty{color:var(--muted);font-family:ui-monospace,monospace;text-align:center;margin-top:80px;font-size:13px}
 
 /* ── 编辑区块 ── */
-.section{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden}
-.section-header{
-  display:flex;align-items:center;justify-content:space-between;
-  padding:9px 14px;border-bottom:1px solid var(--border);background:var(--surface);
-}
-.sec-title{font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.section{background:var(--panel);border:1px solid var(--border);border-radius:10px;overflow:hidden;flex-shrink:0;transition:background .2s,border-color .2s}
+.section-header{display:flex;align-items:center;justify-content:space-between;padding:9px 14px;border-bottom:1px solid var(--border);background:var(--surface);transition:background .2s}
+.sec-title{font-size:10px;font-family:ui-monospace,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+.sec-fp{font-size:9px;font-family:ui-monospace,monospace;color:var(--fp-color);letter-spacing:.04em;cursor:pointer;user-select:all;padding:2px 6px;border-radius:3px;transition:background .15s,color .15s}
+.sec-fp:hover{background:var(--border);color:var(--muted)}
 .section-body{padding:14px}
-
 .meta-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
 .field-group{display:flex;flex-direction:column;gap:4px}
-.field-label{font-size:10px;font-family:var(--mono);color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.field-label{font-size:10px;font-family:ui-monospace,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
 .field-input{
-  background:var(--bg);border:1px solid var(--border);color:var(--text);
-  border-radius:6px;padding:7px 10px;font-size:13px;font-family:var(--serif);
-  outline:none;width:100%;transition:border-color .15s;
+  background:var(--input-bg);border:1px solid var(--border);color:var(--text);
+  border-radius:6px;padding:7px 10px;font-size:13px;
+  font-family:'PingFang SC','Microsoft YaHei',sans-serif;
+  outline:none;width:100%;
+  transition:background .2s,border-color .15s,color .2s;
 }
 .field-input:focus{border-color:var(--accent)}
 textarea.field-input{resize:vertical;min-height:72px;line-height:1.65}
 textarea.field-input.tall{min-height:110px}
-
 .options-list{display:flex;flex-direction:column;gap:6px}
 .option-row{display:flex;align-items:center;gap:8px}
-.option-label{font-family:var(--mono);font-size:12px;color:var(--accent);width:20px;flex-shrink:0;text-align:center}
-.option-input{
-  flex:1;min-width:0;background:var(--bg);border:1px solid var(--border);
-  color:var(--text);border-radius:6px;padding:6px 10px;font-size:13px;outline:none;
-}
+.option-label{font-family:ui-monospace,monospace;font-size:12px;color:var(--accent);width:20px;flex-shrink:0;text-align:center}
+.option-input{flex:1;min-width:0;background:var(--input-bg);border:1px solid var(--border);color:var(--text);border-radius:6px;padding:6px 10px;font-size:13px;outline:none;transition:background .2s,border-color .15s}
 .option-input:focus{border-color:var(--accent)}
 .btn-icon{background:none;border:none;color:var(--muted);cursor:pointer;font-size:14px;padding:2px 5px;border-radius:3px}
 .btn-icon:hover{color:var(--danger)}
-
 .answer-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:start}
-.ai-badge{font-size:10px;font-family:var(--mono);color:var(--ai-color);background:#2d2010;padding:2px 6px;border-radius:3px;margin-left:5px}
-
+.ai-badge{font-size:10px;font-family:ui-monospace,monospace;color:var(--ai-color);background:color-mix(in srgb,var(--ai-color) 15%,transparent);padding:2px 6px;border-radius:3px;margin-left:5px}
 .action-bar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.btn{padding:7px 16px;border-radius:6px;cursor:pointer;font-family:var(--mono);font-size:12px;font-weight:600;border:none;transition:opacity .15s}
+.btn{padding:7px 16px;border-radius:6px;cursor:pointer;font-family:ui-monospace,monospace;font-size:12px;font-weight:600;border:none;transition:opacity .15s}
 .btn:hover{opacity:.85}
 .btn-primary{background:var(--accent);color:#fff}
 .btn-danger{background:var(--danger);color:#fff}
 .btn-ghost{background:var(--panel);color:var(--text);border:1px solid var(--border)}
 .btn-ghost:hover{border-color:var(--accent);opacity:1}
-
 .sub-tabs{display:flex;gap:4px;flex-wrap:wrap}
-.sub-tab{padding:4px 12px;border-radius:5px;cursor:pointer;font-family:var(--mono);font-size:11px;background:var(--panel);border:1px solid var(--border);color:var(--muted)}
+.sub-tab{padding:4px 12px;border-radius:5px;cursor:pointer;font-family:ui-monospace,monospace;font-size:11px;background:var(--panel);border:1px solid var(--border);color:var(--muted)}
 .sub-tab.active{background:var(--accent);border-color:var(--accent);color:#fff}
 
 /* ── 弹窗 ── */
-.modal-backdrop{
-  position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;
-  display:flex;align-items:center;justify-content:center;
-  backdrop-filter:blur(2px);padding:16px;
-}
-.modal{
-  background:var(--surface);border:1px solid var(--border);border-radius:12px;
-  width:100%;max-width:520px;max-height:90vh;overflow-y:auto;
-  padding:22px;display:flex;flex-direction:column;gap:14px;
-  box-shadow:0 20px 60px rgba(0,0,0,.5);
-}
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,.65);z-index:100;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px);padding:16px}
+.modal{background:var(--surface);border:1px solid var(--border);border-radius:12px;width:100%;max-width:520px;max-height:90vh;overflow-y:auto;padding:22px;display:flex;flex-direction:column;gap:14px;box-shadow:0 20px 60px rgba(0,0,0,.4);transition:background .2s}
 .modal h3{font-size:15px;color:var(--text)}
 .modal-btns{display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap}
 .checkbox-group{display:flex;gap:10px;flex-wrap:wrap}
-.checkbox-group label{display:flex;align-items:center;gap:4px;font-family:var(--mono);font-size:12px;color:var(--muted);cursor:pointer}
+.checkbox-group label{display:flex;align-items:center;gap:4px;font-family:ui-monospace,monospace;font-size:12px;color:var(--muted);cursor:pointer}
 
 /* ── Toast ── */
-#toast{
-  position:fixed;bottom:20px;right:20px;left:20px;max-width:340px;margin:0 auto;
-  background:var(--surface);border:1px solid var(--border);border-radius:8px;
-  padding:10px 16px;font-family:var(--mono);font-size:12px;color:var(--text);
-  z-index:200;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;
-  text-align:center;
-}
+#toast{position:fixed;bottom:20px;right:20px;left:20px;max-width:340px;margin:0 auto;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 16px;font-family:ui-monospace,monospace;font-size:12px;color:var(--text);z-index:200;opacity:0;transform:translateY(8px);transition:all .25s;pointer-events:none;text-align:center}
 #toast.show{opacity:1;transform:translateY(0)}
 #toast.err{border-color:var(--danger);color:var(--danger)}
 
 /* ── 滚动条 ── */
 ::-webkit-scrollbar{width:4px;height:4px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+::-webkit-scrollbar-thumb{background:var(--scrollbar);border-radius:3px}
 
 /* ══════════════════════════════════════════
    移动端响应式  ≤ 768px
 ══════════════════════════════════════════ */
 @media (max-width: 768px) {
-  :root { --sidebar-w: 100%; }
-
   #topbar { padding:0 12px; gap:6px; }
   .top-stats { display:none; }
   .logo { font-size:11px; }
-
-  #layout {
-    position:relative;
-    height:calc(100dvh - var(--topbar-h));
-  }
-
-  #sidebar {
-    position:absolute;inset:0;
-    width:100%;border-right:none;
-    z-index:10;
-    transition:transform .25s ease;
-    min-height:0;
-  }
-  #editor {
-    position:absolute;inset:0;
-    padding:14px 16px 24px;
-    transform:translateX(100%);
-    transition:transform .25s ease;
-    background:var(--bg);
-    min-height:0;
-    overflow-y:auto;
-    -webkit-overflow-scrolling:touch;
-  }
-
+  #layout { position:relative; height:calc(100dvh - 52px); }
+  #sidebar { position:absolute;inset:0;width:100%;border-right:none;z-index:10;transition:transform .25s ease }
+  #editor  { position:absolute;inset:0;padding:14px 16px 24px;transform:translateX(100%);transition:transform .25s ease;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch }
   body.editor-open #sidebar { transform:translateX(-100%); }
   body.editor-open #editor  { transform:translateX(0); }
-
   #mobileBack { display:flex; }
-
-  .meta-grid { grid-template-columns:1fr; }
+  .meta-grid  { grid-template-columns:1fr; }
   .answer-row { grid-template-columns:1fr; }
-
   .modal { padding:16px; }
   .modal-btns { justify-content:stretch; }
-  .modal-btns .btn { flex:1; justify-content:center; }
-}
-/* ===== 修复右侧编辑区显示不全：让右栏独立滚动 ===== */
-
-/* 顶栏之外的可用高度 */
-#layout{
-  height: calc(100vh - var(--topbar-h));
-  min-height: 0;
-  overflow: hidden;
-}
-
-/* 两栏在 flex 里都允许收缩，否则子元素滚动会失效 */
-#sidebar,
-#editor{
-  min-height: 0;
-}
-
-/* 关键：右栏自身滚动 */
-#editor{
-  height: 100%;
-  overflow-y: auto !important;
-  overflow-x: hidden;
-  -webkit-overflow-scrolling: touch;
-  padding-bottom: 32px; /* 防止最后一块“看起来被截断” */
-}
-
-/* 某些浏览器下 section 也会撑破，兜底 */
-#editor .section{
-  flex-shrink: 0;
-}
-
-/* 移动端地址栏伸缩时，100vh不准，用dvh */
-@media (max-width: 768px){
-  #layout{
-    height: calc(100dvh - var(--topbar-h));
-  }
-  #editor{
-    min-height: 0;
-    overflow-y: auto !important;
-  }
+  .modal-btns .btn { flex:1; }
+  #themeMenu { right:12px; }
 }
 </style>
 </head>
@@ -533,6 +523,27 @@ textarea.field-input.tall{min-height:110px}
   <div class="dirty-dot" id="dirtyDot" title="有未保存的改动"></div>
   <button class="top-btn" id="btnReplace" onclick="openReplace()">批量替换</button>
   <button class="top-btn" id="btnSave" onclick="doSave()">保存</button>
+  <button id="btnTheme" onclick="toggleThemeMenu()" title="切换主题">🎨</button>
+</div>
+
+<!-- 主题菜单 -->
+<div id="themeMenu">
+  <div class="theme-opt" data-t="dark">
+    <span class="theme-swatch" style="background:linear-gradient(135deg,#0f1117 50%,#4f9cf9 50%)"></span>
+    夜间
+  </div>
+  <div class="theme-opt" data-t="light">
+    <span class="theme-swatch" style="background:linear-gradient(135deg,#f5f6fa 50%,#2563eb 50%)"></span>
+    日间
+  </div>
+  <div class="theme-opt" data-t="warm">
+    <span class="theme-swatch" style="background:linear-gradient(135deg,#1a1510 50%,#f59e0b 50%)"></span>
+    暖调
+  </div>
+  <div class="theme-opt" data-t="terminal">
+    <span class="theme-swatch" style="background:linear-gradient(135deg,#0a0f0a 50%,#22c55e 50%)"></span>
+    终端
+  </div>
 </div>
 
 <div id="layout">
@@ -540,13 +551,11 @@ textarea.field-input.tall{min-height:110px}
   <div id="sidebar">
     <div id="search-area">
       <input id="searchInput" placeholder="搜索题目文字、解析…" oninput="debounceSearch()">
+      <input id="fpInput" placeholder="指纹搜索（前缀或完整MD5）" oninput="debounceSearch()"
+             style="font-family:ui-monospace,monospace;font-size:11px">
       <div class="filter-row">
-        <select id="filterMode" onchange="loadList()">
-          <option value="">全部题型</option>
-        </select>
-        <select id="filterUnit" onchange="loadList()">
-          <option value="">全部章节</option>
-        </select>
+        <select id="filterMode" onchange="loadList()"><option value="">全部题型</option></select>
+        <select id="filterUnit" onchange="loadList()"><option value="">全部章节</option></select>
       </div>
       <div class="filter-checks">
         <label><input type="checkbox" id="filterAI" onchange="loadList()"> 含AI内容</label>
@@ -556,9 +565,13 @@ textarea.field-input.tall{min-height:110px}
     <div id="result-count"></div>
     <div id="qlist"></div>
     <div id="pagination">
-      <button id="btnPrev" onclick="prevPage()">‹ 上页</button>
+      <button id="btnPrev" onclick="prevPage()">‹</button>
       <span id="pageInfo"></span>
-      <button id="btnNext" onclick="nextPage()">下页 ›</button>
+      <button id="btnNext" onclick="nextPage()">›</button>
+      <span style="color:var(--border)">|</span>
+      <span style="color:var(--muted)">跳转</span>
+      <input id="jumpInput" type="number" min="1" placeholder="页"
+             onkeydown="if(event.key==='Enter')jumpPage(this.value)">
     </div>
   </div>
 
@@ -593,12 +606,8 @@ textarea.field-input.tall{min-height:110px}
     <div class="field-group">
       <span class="field-label">范围限制（可选）</span>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <select class="field-input" id="rMode" style="flex:1;min-width:120px">
-          <option value="">全部题型</option>
-        </select>
-        <select class="field-input" id="rUnit" style="flex:1;min-width:120px">
-          <option value="">全部章节</option>
-        </select>
+        <select class="field-input" id="rMode" style="flex:1;min-width:120px"><option value="">全部题型</option></select>
+        <select class="field-input" id="rUnit" style="flex:1;min-width:120px"><option value="">全部章节</option></select>
       </div>
     </div>
     <div class="modal-btns">
@@ -623,12 +632,61 @@ textarea.field-input.tall{min-height:110px}
 <div id="toast"></div>
 
 <script>
+// ── 状态 ──
 let state = { page: 1, perPage: 50, total: 0, pages: 0 };
 let currentQi = null, currentSi = 0;
 let deleteTarget = null;
 let searchTimer = null;
 let info = {};
 
+// ══════════════════════════════════════════
+// 主题管理
+// ══════════════════════════════════════════
+const THEMES = ['dark','light','warm','terminal'];
+const THEME_LABELS = { dark:'夜间', light:'日间', warm:'暖调', terminal:'终端' };
+
+function applyTheme(t) {
+  document.documentElement.setAttribute('data-theme', t);
+  localStorage.setItem('editor-theme', t);
+  // 更新菜单高亮
+  document.querySelectorAll('.theme-opt').forEach(el => {
+    el.classList.toggle('active', el.dataset.t === t);
+  });
+}
+
+function toggleThemeMenu() {
+  const menu = document.getElementById('themeMenu');
+  menu.classList.toggle('open');
+}
+
+function closeThemeMenu() {
+  document.getElementById('themeMenu').classList.remove('open');
+}
+
+// 点击菜单外关闭
+document.addEventListener('click', e => {
+  if (!e.target.closest('#themeMenu') && !e.target.closest('#btnTheme')) {
+    closeThemeMenu();
+  }
+});
+
+// 点击主题选项
+document.querySelectorAll('.theme-opt').forEach(el => {
+  el.onclick = () => {
+    applyTheme(el.dataset.t);
+    closeThemeMenu();
+  };
+});
+
+// 初始化时恢复上次主题
+(function() {
+  const saved = localStorage.getItem('editor-theme') || 'dark';
+  applyTheme(saved);
+})();
+
+// ══════════════════════════════════════════
+// 初始化
+// ══════════════════════════════════════════
 async function init() {
   info = await fetch('/api/info').then(r => r.json());
   document.getElementById('bankName').textContent = info.bank_path.split(/[\\\/]/).pop();
@@ -653,27 +711,24 @@ function populateFilters() {
 function updateTopStats() {
   document.getElementById('topStats').textContent =
     `${info.total_q} 大题 / ${info.total_sq} 小题`;
-  const dot = document.getElementById('dirtyDot');
-  dot.className = 'dirty-dot' + (info.dirty ? ' show' : '');
+  document.getElementById('dirtyDot').className = 'dirty-dot' + (info.dirty ? ' show' : '');
   document.getElementById('btnSave').disabled = !info.dirty;
 }
 
-function openMobileEditor() {
-  if (window.innerWidth <= 768) document.body.classList.add('editor-open');
-}
-function closeMobileEditor() {
-  document.body.classList.remove('editor-open');
-}
+function openMobileEditor()  { if (window.innerWidth <= 768) document.body.classList.add('editor-open'); }
+function closeMobileEditor() { document.body.classList.remove('editor-open'); }
 
+// ── 列表 ──
 async function loadList() {
   const q       = document.getElementById('searchInput').value;
+  const fp      = document.getElementById('fpInput').value.trim();
   const mode    = document.getElementById('filterMode').value;
   const unit    = document.getElementById('filterUnit').value;
   const hasAI   = document.getElementById('filterAI').checked ? '1' : '';
   const missing = document.getElementById('filterMissing').checked ? '1' : '';
 
   const params = new URLSearchParams({
-    q, mode, unit, has_ai: hasAI, missing, page: state.page, per_page: state.perPage
+    q, fp, mode, unit, has_ai: hasAI, missing, page: state.page, per_page: state.perPage
   });
   const data = await fetch('/api/questions?' + params).then(r => r.json());
 
@@ -681,8 +736,7 @@ async function loadList() {
   state.pages = data.pages;
 
   document.getElementById('result-count').textContent = `共 ${data.total} 个小题`;
-  document.getElementById('pageInfo').textContent =
-    `${state.page} / ${Math.max(1, state.pages)}`;
+  document.getElementById('pageInfo').textContent = `${state.page} / ${Math.max(1, state.pages)}`;
   document.getElementById('btnPrev').disabled = state.page <= 1;
   document.getElementById('btnNext').disabled = state.page >= state.pages;
 
@@ -693,20 +747,19 @@ async function loadList() {
     div.className = 'q-item' + (item.qi === currentQi && item.si === currentSi ? ' active' : '');
     div.onclick = () => selectQuestion(item.qi, item.si);
 
-    const hasAIBadge  = item.ai_discuss || item.ai_answer;
-    const missingAns  = !item.answer;
-    const missingDis  = !item.discuss;
+    const hasAIBadge = item.ai_discuss || item.ai_answer;
     const badges = [
-      hasAIBadge ? `<span class="badge ai">AI</span>` : '',
-      item.answer_source  === 'ai' ? `<span class="badge ai">AI答案</span>` : '',
-      item.discuss_source === 'ai' ? `<span class="badge ai">AI解析</span>` : '',
-      (missingAns || missingDis) ? `<span class="badge miss">缺${missingAns?'答案':''}${missingDis?'解析':''}</span>` : '',
+      hasAIBadge                      ? `<span class="badge ai">AI</span>`     : '',
+      item.answer_source  === 'ai'    ? `<span class="badge ai">AI答案</span>` : '',
+      item.discuss_source === 'ai'    ? `<span class="badge ai">AI解析</span>` : '',
+      (!item.answer || !item.discuss) ? `<span class="badge miss">缺${!item.answer?'答案':''}${!item.discuss?'解析':''}</span>` : '',
     ].filter(Boolean).join('');
 
+    const fpShort = item.fingerprint ? item.fingerprint.slice(0, 8) : '';
     div.innerHTML = `
       <div style="display:flex;justify-content:space-between;align-items:baseline">
         <span class="q-idx">[${item.qi+1}-${item.si+1}]</span>
-        <span class="q-mode">${esc(item.mode)}</span>
+        <span><span class="q-mode">${esc(item.mode)}</span><span class="q-fp">${fpShort}</span></span>
       </div>
       <div class="q-text">${esc(item.text || item.stem || '（无题目文本）')}</div>
       <div class="q-badges">${badges}</div>`;
@@ -717,17 +770,23 @@ async function loadList() {
 function debounceSearch() {
   clearTimeout(searchTimer);
   state.page = 1;
-  searchTimer = setTimeout(loadList, 300);
+  searchTimer = setTimeout(loadList, 280);
 }
 function prevPage() { if (state.page > 1)           { state.page--; loadList(); } }
 function nextPage() { if (state.page < state.pages) { state.page++; loadList(); } }
+function jumpPage(v) {
+  const p = Math.max(1, Math.min(state.pages, parseInt(v) || 1));
+  state.page = p;
+  document.getElementById('jumpInput').value = '';
+  loadList();
+}
 
+// ── 编辑面板 ──
 async function selectQuestion(qi, si) {
-  currentQi = qi;
-  currentSi = si;
+  currentQi = qi; currentSi = si;
   document.querySelectorAll('.q-item').forEach(el => {
-    const idx = el.querySelector('.q-idx')?.textContent;
-    el.classList.toggle('active', idx === `[${qi+1}-${si+1}]`);
+    el.classList.toggle('active',
+      el.querySelector('.q-idx')?.textContent === `[${qi+1}-${si+1}]`);
   });
   const data = await fetch(`/api/question/${qi}`).then(r => r.json());
   renderEditor(data, si);
@@ -740,11 +799,12 @@ function renderEditor(data, activeSi = 0) {
 
   const back = document.createElement('div');
   back.id = 'mobileBack';
-  back.innerHTML = '← 返回列表';
+  back.textContent = '← 返回列表';
   back.onclick = closeMobileEditor;
   ed.appendChild(back);
 
-  const meta = mkSection('元数据', `
+  // 元数据
+  const metaSection = mkSection('元数据', `
     <div class="meta-grid">
       <div class="field-group">
         <span class="field-label">题型</span>
@@ -765,20 +825,27 @@ function renderEditor(data, activeSi = 0) {
       <textarea class="field-input tall" id="f_stem">${esc(data.stem)}</textarea>
     </div>` : ''}
   `);
-  ed.appendChild(meta);
+  const fp0 = data.sub_questions[0]?.fingerprint || '';
+  if (fp0) {
+    const fpEl = document.createElement('span');
+    fpEl.className = 'sec-fp';
+    fpEl.title = '点击复制完整指纹：' + fp0;
+    fpEl.textContent = fp0.slice(0, 12) + '…';
+    fpEl.onclick = () => navigator.clipboard?.writeText(fp0).then(() => toast('已复制指纹'));
+    metaSection.querySelector('.section-header').appendChild(fpEl);
+  }
+  ed.appendChild(metaSection);
 
+  // 子题切换
   if (data.sub_questions.length > 1) {
     const tabsDiv = document.createElement('div');
     tabsDiv.className = 'section';
-    tabsDiv.innerHTML = `<div class="section-body">
-      <div class="sub-tabs">
-        ${data.sub_questions.map((sq, i) => `
-          <div class="sub-tab ${i === activeSi ? 'active' : ''}"
-               onclick="selectSub(${data.qi}, ${i})">
-            子题 ${i+1}${!sq.answer ? ' ❓' : ''}
-          </div>`).join('')}
-      </div>
-    </div>`;
+    tabsDiv.innerHTML = `<div class="section-body"><div class="sub-tabs">
+      ${data.sub_questions.map((sq, i) => `
+        <div class="sub-tab ${i === activeSi ? 'active' : ''}" onclick="selectSub(${data.qi},${i})">
+          子题 ${i+1}${!sq.answer ? ' ❓' : ''}
+        </div>`).join('')}
+    </div></div>`;
     ed.appendChild(tabsDiv);
   }
 
@@ -793,7 +860,7 @@ function renderEditor(data, activeSi = 0) {
     `<div class="option-row">
       <span class="option-label">${String.fromCharCode(65+i)}</span>
       <input class="option-input" value="${esc(o)}" data-oi="${i}">
-      <button class="btn-icon" onclick="removeOption(${i})" title="删除此选项">✕</button>
+      <button class="btn-icon" onclick="removeOption(${i})" title="删除">✕</button>
     </div>`
   ).join('');
   ed.appendChild(mkSection('选项', `
@@ -801,7 +868,7 @@ function renderEditor(data, activeSi = 0) {
     <button class="btn btn-ghost" style="margin-top:10px;font-size:11px" onclick="addOption()">＋ 添加选项</button>
   `));
 
-  const aiAnsBadge = sq.ai_answer ? `<span class="ai-badge">AI: ${esc(sq.ai_answer)}</span>` : '';
+  const aiAnsBadge = sq.ai_answer  ? `<span class="ai-badge">AI: ${esc(sq.ai_answer)}</span>`  : '';
   const aiDisBadge = sq.ai_discuss ? `<span class="ai-badge">AI</span>` : '';
   ed.appendChild(mkSection('答案与解析', `
     <div class="answer-row">
@@ -824,18 +891,16 @@ function renderEditor(data, activeSi = 0) {
     <div class="field-group" style="margin-top:10px">
       <span class="field-label" style="color:var(--ai-color)">AI 解析原文（只读参考）</span>
       <textarea class="field-input tall" readonly
-        style="color:var(--ai-color);opacity:.75;cursor:default">${esc(sq.ai_discuss)}</textarea>
+        style="color:var(--ai-color);opacity:.7;cursor:default">${esc(sq.ai_discuss)}</textarea>
     </div>` : ''}
   `));
 
   const actDiv = document.createElement('div');
   actDiv.className = 'section';
-  actDiv.innerHTML = `<div class="section-body">
-    <div class="action-bar">
-      <button class="btn btn-primary" onclick="saveSubQuestion()">保存此题</button>
-      <button class="btn btn-danger" onclick="openDelete(${data.qi})">删除整道题</button>
-    </div>
-  </div>`;
+  actDiv.innerHTML = `<div class="section-body"><div class="action-bar">
+    <button class="btn btn-primary" onclick="saveSubQuestion()">保存此题</button>
+    <button class="btn btn-danger"  onclick="openDelete(${data.qi})">删除整道题</button>
+  </div></div>`;
   ed.appendChild(actDiv);
 }
 
@@ -853,9 +918,7 @@ async function selectSub(qi, si) {
   renderEditor(data, si);
 }
 
-function getOptions() {
-  return [...document.querySelectorAll('.option-input')].map(i => i.value);
-}
+function getOptions() { return [...document.querySelectorAll('.option-input')].map(i => i.value); }
 function addOption() {
   const list = document.getElementById('optionsList');
   const i = list.children.length;
@@ -889,105 +952,60 @@ async function saveSubQuestion() {
     options: getOptions(),
   };
   const res = await fetch(`/api/subquestion/${currentQi}/${currentSi}`, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
+    method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload),
   }).then(r => r.json());
-
-  if (res.ok) {
-    info.dirty = true;
-    updateTopStats();
-    loadList();
-    toast('✓ 已保存');
-  } else {
-    toast('保存失败: ' + (res.error || ''), true);
-  }
+  if (res.ok) { info.dirty = true; updateTopStats(); loadList(); toast('✓ 已保存'); }
+  else toast('保存失败: ' + (res.error || ''), true);
 }
 
-function openDelete(qi) {
-  deleteTarget = qi;
-  document.getElementById('deleteModal').style.display = 'flex';
-}
-function closeDelete() {
-  document.getElementById('deleteModal').style.display = 'none';
-  deleteTarget = null;
-}
+function openDelete(qi) { deleteTarget = qi; document.getElementById('deleteModal').style.display = 'flex'; }
+function closeDelete()  { document.getElementById('deleteModal').style.display = 'none'; deleteTarget = null; }
 async function confirmDelete() {
   if (deleteTarget === null) return;
-  const res = await fetch(`/api/question/${deleteTarget}`, { method: 'DELETE' }).then(r => r.json());
+  const res = await fetch(`/api/question/${deleteTarget}`, { method:'DELETE' }).then(r => r.json());
   closeDelete();
   if (res.ok) {
-    currentQi = null;
-    info.dirty = true;
-    info.total_q = res.total;
-    updateTopStats();
-    loadList();
-    closeMobileEditor();
-    const ed = document.getElementById('editor');
-    ed.innerHTML = '<div id="mobileBack" onclick="closeMobileEditor()" style="display:none">← 返回列表</div><div class="empty">← 从左侧选择一道题目进行编辑</div>';
-    document.getElementById('mobileBack').style.display = '';
+    currentQi = null; info.dirty = true; info.total_q = res.total;
+    updateTopStats(); loadList(); closeMobileEditor();
+    document.getElementById('editor').innerHTML =
+      '<div id="mobileBack" onclick="closeMobileEditor()">← 返回列表</div>' +
+      '<div class="empty">← 从左侧选择一道题目进行编辑</div>';
     toast(`已删除，剩余 ${res.total} 大题`);
-  } else {
-    toast('删除失败', true);
-  }
+  } else toast('删除失败', true);
 }
 
-function openReplace() {
-  document.getElementById('replaceModal').style.display = 'flex';
-}
-function closeReplace() {
-  document.getElementById('replaceModal').style.display = 'none';
-}
+function openReplace()  { document.getElementById('replaceModal').style.display = 'flex'; }
+function closeReplace() { document.getElementById('replaceModal').style.display = 'none'; }
 async function doReplace() {
-  const find    = document.getElementById('rFind').value;
-  const replace = document.getElementById('rReplace').value;
-  const fields  = [...document.querySelectorAll('.checkbox-group input:checked')].map(c => c.value);
-  const mode    = document.getElementById('rMode').value;
-  const unit    = document.getElementById('rUnit').value;
-
+  const find   = document.getElementById('rFind').value;
+  const repl   = document.getElementById('rReplace').value;
+  const fields = [...document.querySelectorAll('.checkbox-group input:checked')].map(c => c.value);
+  const mode   = document.getElementById('rMode').value;
+  const unit   = document.getElementById('rUnit').value;
   if (!find)          { toast('查找文本不能为空', true); return; }
   if (!fields.length) { toast('请至少选择一个作用字段', true); return; }
-
   const res = await fetch('/api/replace', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ find, replace, fields, mode, unit }),
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ find, replace: repl, fields, mode, unit }),
   }).then(r => r.json());
-
-  if (res.ok) {
-    info.dirty = true;
-    updateTopStats();
-    closeReplace();
-    loadList();
-    toast(`替换完成：共 ${res.replaced} 处`);
-  } else {
-    toast('替换失败: ' + (res.error || ''), true);
-  }
+  if (res.ok) { info.dirty = true; updateTopStats(); closeReplace(); loadList(); toast(`替换完成：共 ${res.replaced} 处`); }
+  else toast('替换失败: ' + (res.error || ''), true);
 }
 
 async function doSave() {
   const res = await fetch('/api/save', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({}),
+    method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({}),
   }).then(r => r.json());
-
-  if (res.ok) {
-    info.dirty = false;
-    updateTopStats();
-    toast('✓ 已保存至 ' + res.path.split(/[\\\/]/).pop());
-  } else {
-    toast('保存失败: ' + (res.error || ''), true);
-  }
+  if (res.ok) { info.dirty = false; updateTopStats(); toast('✓ 已保存至 ' + res.path.split(/[\\\/]/).pop()); }
+  else toast('保存失败: ' + (res.error || ''), true);
 }
 
 function esc(s) {
-  return (s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-                  .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+  return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+                .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
-
 let toastTimer;
-function toast(msg, err = false) {
+function toast(msg, err=false) {
   const t = document.getElementById('toast');
   t.textContent = msg;
   t.className = 'show' + (err ? ' err' : '');
@@ -996,10 +1014,7 @@ function toast(msg, err = false) {
 }
 
 document.addEventListener('keydown', e => {
-  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
-    e.preventDefault();
-    if (info.dirty) doSave();
-  }
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); if (info.dirty) doSave(); }
 });
 
 init();
@@ -1018,8 +1033,9 @@ def start_editor(bank_path: str, port: int = 5173, no_browser: bool = False,
                  password: str | None = None) -> None:
     from med_exam_toolkit.bank import load_bank
 
-    global _questions, _bank_path
+    global _questions, _bank_path, _password
     _bank_path = Path(bank_path).resolve()
+    _password  = password
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
     print(f"[INFO] 已加载 {len(_questions)} 道大题")
