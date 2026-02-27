@@ -98,7 +98,7 @@ def index():
     return render_template("quiz.html")
 
 
-def start_quiz(bank_path: str, port: int = 5174,
+def start_quiz(bank_path: str, port: int = 5174, host: str = "127.0.0.1",
                no_browser: bool = False, password: str | None = None) -> None:
     """启动医考练习 Web 应用"""
     from med_exam_toolkit.bank import load_bank
@@ -109,12 +109,12 @@ def start_quiz(bank_path: str, port: int = 5174,
     _questions = load_bank(_bank_path, password)
     sq_total = sum(len(q.sub_questions) for q in _questions)
     print(f"[INFO] 共 {len(_questions)} 大题 / {sq_total} 小题")
-    url = f"http://127.0.0.1:{port}"
+    url = f"http://{host}:{port}"
     print(f"[INFO] 做题应用已启动: {url}")
     print("[INFO] Ctrl+C 退出")
     if not no_browser:
         threading.Timer(0.9, lambda: webbrowser.open(url)).start()
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    app.run(host=host, port=port, debug=False, use_reloader=False)
 
 
 if __name__ == "__main__":

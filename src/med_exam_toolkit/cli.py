@@ -520,8 +520,9 @@ def inspect(bank, password, filter_modes, filter_units, keyword,
 @click.option("--bank", required=True, type=click.Path(exists=True), help=".mqb 题库路径")
 @click.option("--password", default=None, help="题库密码")
 @click.option("--port", default=5173, type=int, help="本地端口（默认 5173）")
+@click.option("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
 @click.option("--no-browser", is_flag=True, default=False, help="不自动打开浏览器")
-def edit(bank, password, port, no_browser):
+def edit(bank, password, port, host, no_browser):
     """在浏览器中编辑题库（本地 Web 编辑器）
 
     \b
@@ -530,15 +531,16 @@ def edit(bank, password, port, no_browser):
     按 Ctrl+C 退出，Ctrl+S 快速保存
     """
     from med_exam_toolkit.editor import start_editor
-    start_editor(bank, port=port, no_browser=no_browser, password=password)
+    start_editor(bank, port=port, host=host, no_browser=no_browser, password=password)
 
 
 @cli.command()
 @click.option("--bank", required=True, type=click.Path(exists=True), help=".mqb 题库路径")
 @click.option("--password", default=None, help="题库密码")
 @click.option("--port", default=5174, type=int, help="本地端口（默认 5174）")
+@click.option("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
 @click.option("--no-browser", is_flag=True, default=False, help="不自动打开浏览器")
-def quiz(bank, password, port, no_browser):
+def quiz(bank, password, port, host, no_browser):
     """启动医考练习 Web 应用（练习/考试/背题模式）
 
     \b
@@ -547,7 +549,7 @@ def quiz(bank, password, port, no_browser):
     按 Ctrl+C 退出
     """
     from med_exam_toolkit.quiz import start_quiz
-    start_quiz(bank, port=port, no_browser=no_browser, password=password)
+    start_quiz(bank, port=port, host=host, no_browser=no_browser, password=password)
 
 
 def main():
