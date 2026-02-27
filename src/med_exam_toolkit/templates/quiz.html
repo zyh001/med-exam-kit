@@ -51,15 +51,44 @@
 
 /* ── Reset ── */
 *{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html,body{height:100%;overflow:hidden;background:var(--bg);color:var(--text)}
-body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;font-size:15px;line-height:1.6;transition:background .25s,color .25s}
+html{
+  height:100%;
+  /* iOS Safari：必须同时设 html 的 overflow，否则依然可以拖动 */
+  overflow:hidden;
+  overscroll-behavior:none;
+  background:var(--bg);
+}
+body{
+  width:100%;height:100%;
+  overflow:hidden;
+  overscroll-behavior:none;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  font-size:15px;line-height:1.6;
+  transition:background .25s,color .25s;
+}
+/*
+ * #app：position:fixed 是修复 iOS「可滑出边界」的核心。
+ * body 的 overflow:hidden 在 iOS Safari 里对有 transform 的子元素不可靠；
+ * position:fixed 的元素会创建独立的视口容器，Safari 不会把其子元素
+ * 纳入文档滚动区域的计算。
+ */
+#app{position:fixed;inset:0;overflow:hidden;background:var(--bg)}
 button{cursor:pointer;font-family:inherit;border:none;outline:none}
 input,select{font-family:inherit;outline:none}
 
 /* ── Screens ── */
-.screen{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;
-  opacity:0;pointer-events:none;transition:opacity .22s,transform .22s}
-.screen.active{opacity:1;pointer-events:auto;transform:none!important}
+.screen{
+  position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;
+  opacity:0;pointer-events:none;
+  transition:opacity .22s,transform .22s;
+  will-change:transform,opacity;
+  /* visibility:hidden 防止 iOS 将屏外 screen 纳入滚动区域 */
+  visibility:hidden;
+}
+.screen.active{opacity:1;pointer-events:auto;transform:none!important;visibility:visible}
+.screen.sliding{visibility:visible}  /* 过渡期间保持可见 */
 .screen.slide-left{transform:translateX(-100%)}
 .screen.slide-right{transform:translateX(100%)}
 
@@ -116,7 +145,15 @@ input,select{font-family:inherit;outline:none}
 }
 .mode-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
 .mode-card:active{transform:translateY(0)}
-.mode-emoji{font-size:28px;line-height:1}
+.mode-emoji{
+  font-size:28px;
+  line-height:1;
+  width:40px;
+  height:40px;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
 .mode-title{font-size:14px;font-weight:600}
 .mode-desc{font-size:11px;color:var(--muted);line-height:1.4}
 .mode-card.practice{--mc: var(--accent)}
@@ -266,27 +303,37 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .flag-btn.active{background:var(--warn-bg);border-color:var(--warning);color:var(--warning)}
 
 /* Question body */
-.quiz-body{flex:1;overflow:hidden;position:relative}
+.quiz-body{
+  flex:1;position:relative;
+  overflow:hidden;  /* 裁剪 q-stage 动画中飞出的帧，防止撑开视口 */
+}
 /* 每次切题时内容在 q-stage 内滚动 */
 .q-stage{
-  position:absolute;inset:0;overflow-y:auto;-webkit-overflow-scrolling:touch;
+  position:absolute;inset:0;overflow-y:auto;overflow-x:hidden;
+  -webkit-overflow-scrolling:touch;
   will-change:transform,opacity;
 }
 .question-wrap{padding:16px 16px 24px;max-width:720px;margin:0 auto}
 
-/* ── 题目切换动画 ──────────────────────────── */
-@keyframes q-exit-left  {to{transform:translateX(-38%) scale(.96);opacity:0}}
-@keyframes q-exit-right {to{transform:translateX( 38%) scale(.96);opacity:0}}
-@keyframes q-enter-right{from{transform:translateX(38%) scale(.96);opacity:0}}
-@keyframes q-enter-left {from{transform:translateX(-38%) scale(.96);opacity:0}}
+/* ── 题目切换动画 ──────────────────────────────────────────────────
+ * 用 100% 而非 38%：元素始终在 .quiz-body（overflow:hidden）内移动，
+ * 不会超出父容器，Safari 就不会把它计入文档宽度。
+ * ──────────────────────────────────────────────────────────────── */
+@keyframes q-exit-left  {to  {transform:translateX(-100%);opacity:0}}
+@keyframes q-exit-right {to  {transform:translateX( 100%);opacity:0}}
+@keyframes q-enter-right{from{transform:translateX( 100%);opacity:0}}
+@keyframes q-enter-left {from{transform:translateX(-100%);opacity:0}}
 
-.q-stage.exit-left  {animation:q-exit-left  .22s cubic-bezier(.4,0,1,1) forwards;pointer-events:none}
-.q-stage.exit-right {animation:q-exit-right .22s cubic-bezier(.4,0,1,1) forwards;pointer-events:none}
-.q-stage.enter-right{animation:q-enter-right .22s cubic-bezier(0,0,.2,1) forwards}
-.q-stage.enter-left {animation:q-enter-left  .22s cubic-bezier(0,0,.2,1) forwards}
+.q-stage.exit-left  {animation:q-exit-left   .22s cubic-bezier(.4,0,.6,1) forwards;pointer-events:none}
+.q-stage.exit-right {animation:q-exit-right  .22s cubic-bezier(.4,0,.6,1) forwards;pointer-events:none}
+.q-stage.enter-right{animation:q-enter-right .22s cubic-bezier(.2,0,.2,1) forwards}
+.q-stage.enter-left {animation:q-enter-left  .22s cubic-bezier(.2,0,.2,1) forwards}
 
 /* ── 背题卡片滑动 ─────────────────────────── */
-.memo-card-wrap{width:100%;max-width:700px;position:relative;flex-shrink:0;min-height:80px}
+.memo-card-wrap{
+  width:100%;max-width:700px;position:relative;flex-shrink:0;min-height:80px;
+  overflow:hidden;  /* 裁剪卡片滑动动画，同理防止撑开视口 */
+}
 /* 卡片绝对定位在 wrap 内，靠 JS 动态设高度 */
 .memo-card{
   width:100%;
@@ -791,6 +838,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 </style>
 </head>
 <body>
+<div id="app">
 
 <!-- ═══ HOME ═══════════════════════════════════════════════════════ -->
 <div id="s-home" class="screen active">
@@ -1133,19 +1181,29 @@ function renderHome() {
 // Screen transitions
 // ════════════════════════════════════════════
 function showScreen(id, dir = 'forward') {
-  const cur = document.querySelector('.screen.active');
+  const cur  = document.querySelector('.screen.active');
   const next = document.getElementById(id);
   if (!next || next === cur) return;
 
+  // 新屏：先标记为 sliding（visibility:visible），再移除偏移类，最后 active
+  next.classList.add('sliding');
+  next.classList.remove('slide-left', 'slide-right');
+  // 强制 reflow 让初始 transform 生效，否则动画起点不正确
+  next.offsetHeight;
+  next.classList.add('active');
+
   if (cur) {
     cur.classList.remove('active');
+    cur.classList.add('sliding');
     cur.classList.add(dir === 'forward' ? 'slide-left' : 'slide-right');
-    setTimeout(() => cur.classList.remove('slide-left','slide-right'), 250);
+    setTimeout(() => {
+      // 动画结束：旧屏彻底隐藏，不再占据任何视口空间
+      cur.classList.remove('slide-left', 'slide-right', 'sliding');
+    }, 260);
   }
-  next.classList.remove('slide-left','slide-right');
-  next.classList.add('active');
-  // force reflow then re-add to trigger transition
-  next.offsetHeight;
+
+  // 新屏动画结束后清理 sliding 标记
+  setTimeout(() => next.classList.remove('sliding'), 260);
 }
 
 // ════════════════════════════════════════════
@@ -2194,5 +2252,6 @@ document.getElementById('memo-card')?.addEventListener('click', (e) => {
 
 init();
 </script>
+</div>
 </body>
 </html>
