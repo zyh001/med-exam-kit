@@ -1029,8 +1029,8 @@ init();
 # 启动入口
 # ═══════════════════════════════════════════════════════════════════
 
-def start_editor(bank_path: str, port: int = 5173, no_browser: bool = False,
-                 password: str | None = None) -> None:
+def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
+                 no_browser: bool = False, password: str | None = None) -> None:
     from med_exam_toolkit.bank import load_bank
 
     global _questions, _bank_path, _password
@@ -1040,11 +1040,11 @@ def start_editor(bank_path: str, port: int = 5173, no_browser: bool = False,
     _questions = load_bank(_bank_path, password)
     print(f"[INFO] 已加载 {len(_questions)} 道大题")
 
-    url = f"http://127.0.0.1:{port}"
+    url = f"http://{host}:{port}"
     print(f"[INFO] 编辑器启动: {url}")
     print(f"[INFO] 按 Ctrl+C 退出")
 
     if not no_browser:
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()
 
-    app.run(host="127.0.0.1", port=port, debug=False, use_reloader=False)
+    app.run(host=host, port=port, debug=False, use_reloader=False)
