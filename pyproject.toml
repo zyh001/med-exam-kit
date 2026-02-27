@@ -1,6 +1,6 @@
 [project]
 name = "med-exam-toolkit"
-version = "0.1.0-R260225"
+version = "0.1.5-R260227"
 requires-python = ">=3.10"
 
 [project.scripts]
