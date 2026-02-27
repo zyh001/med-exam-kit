@@ -13,6 +13,7 @@
   - [`enrich` - AI 解析补全](#enrich---ai-解析补全)
   - [`inspect` - 查看题库内容](#inspect---查看题库内容)
   - [`edit` - Web 编辑器](#edit---web-编辑器)
+  - [`quiz` - 练习/考试模式](#quiz---web练习考试模式)
 - [配置文件说明](#️-配置文件说明)
 - [典型工作流示例](#-典型工作流示例)
 - [安全提示](#-安全提示)
@@ -419,6 +420,53 @@ med-exam edit --bank data/output/题库.mqb --port 8080 --no-browser
 
 ---
 
+### `quiz` - Web 练习/考试模式
+
+**功能**：启动本地 Web 服务器，在浏览器中进行医考练习，支持三种模式：练习模式、考试模式、背题模式。
+
+> ⚠️ 需要额外安装 Flask：`pip install flask`
+
+```bash
+med-exam quiz [OPTIONS]
+```
+
+#### 核心选项
+
+| 选项 | 说明 | 默认值 |
+|------|------|--------|
+| `--bank PATH` | `.mqb` 题库路径（必填） | — |
+| `--password TEXT` | 题库解密密码 | 无 |
+| `--port INT` | 本地端口 | 5174 |
+| `--no-browser` | 不自动打开浏览器 | 否 |
+
+#### 三种练习模式
+
+| 模式 | 说明 |
+|------|------|
+| 练习模式 | 实时反馈对错，显示答案和解析，适合学习 |
+| 考试模式 | 计时交卷后统一判分，模拟真实考试 |
+| 背题模式 | 一键显示所有答案，随时切换查看解析 |
+
+#### 使用示例
+
+```bash
+# 启动练习应用（自动打开浏览器）
+med-exam quiz --bank data/output/题库.mqb
+
+# 加密题库
+med-exam quiz --bank data/output/题库.mqb --password "secret123"
+
+# 指定端口，不自动打开浏览器
+med-exam quiz --bank data/output/题库.mqb --port 8080 --no-browser
+# 然后手动访问 http://127.0.0.1:8080
+```
+
+> 💡 `edit`（编辑器）运行在 **5173** 端口，`quiz`（练习/考试）运行在 **5174** 端口，两者可同时启动。
+
+> 按 **Ctrl+C** 退出练习服务。
+
+---
+
 ## ⚙️ 配置文件说明 (`config.yaml`)
 
 配置文件可简化命令行参数，推荐结构：
@@ -521,6 +569,23 @@ med-exam export \
   -f docx \
   -o ./teaching/high_accuracy_questions
 ```
+
+### 场景五：启动练习/考试模式进行自测
+
+```bash
+# 启动练习应用（自动打开浏览器，端口 5174）
+med-exam quiz --bank ./data/output/medical_2026.mqb
+
+# 加密题库
+med-exam quiz --bank ./data/output/medical_2026.mqb --password "Exam2026"
+
+# 同时启动编辑器和练习模式（分别运行在 5173 和 5174 端口）
+med-exam edit --bank ./data/output/medical_2026.mqb
+# 新开终端：
+med-exam quiz --bank ./data/output/medical_2026.mqb
+```
+
+> 💡 浏览器访问 http://127.0.0.1:5174 开始练习，支持练习模式、考试模式、背题模式三种学习方式。
 
 ---
 
