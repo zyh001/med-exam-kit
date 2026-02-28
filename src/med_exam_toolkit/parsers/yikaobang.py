@@ -38,16 +38,31 @@ class YikaobangParser(BaseParser):
                 ))
 
         elif "A3" in mode or "A4" in mode or "案例" in mode:
-            q.stem = raw.get("test", "")
-            for sq in raw.get("sub_questions", []):
+            # A3/A4 型题可能是多子题或单题结构
+            if "sub_questions" in raw and raw["sub_questions"]:
+                # 标准多子题结构：有共享题干和多个子题
+                q.stem = raw.get("test", "")
+                for sq in raw["sub_questions"]:
+                    q.sub_questions.append(SubQuestion(
+                        text=sq.get("sub_test", ""),
+                        options=sq.get("option", []),
+                        answer=sq.get("answer", ""),
+                        rate=sq.get("rate", ""),
+                        error_prone=sq.get("error_prone", ""),
+                        discuss=sq.get("discuss", ""),
+                        point=sq.get("point", ""),
+                    ))
+            else:
+                # 单题结构：虽标记为 A3/A4，但实际是单题（fallback 处理）
+                q.stem = raw.get("test", "")
                 q.sub_questions.append(SubQuestion(
-                    text=sq.get("sub_test", ""),
-                    options=sq.get("option", []),
-                    answer=sq.get("answer", ""),
-                    rate=sq.get("rate", ""),
-                    error_prone=sq.get("error_prone", ""),
-                    discuss=sq.get("discuss", ""),
-                    point=sq.get("point", ""),
+                    text="",  # 题干已在 q.stem 中
+                    options=raw.get("option", []),
+                    answer=raw.get("answer", ""),
+                    rate=raw.get("rate", ""),
+                    error_prone=raw.get("error_prone", ""),
+                    discuss=raw.get("discuss", ""),
+                    point=raw.get("point", ""),
                 ))
 
         else:
