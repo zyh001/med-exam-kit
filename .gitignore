@@ -209,3 +209,7 @@ __marimo__/
 # IDEA
 .ieda/
 .DS_Store
+
+# 题目压缩包
+/data/tests.zip
+/data/tests
