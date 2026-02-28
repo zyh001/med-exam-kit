@@ -102,20 +102,25 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
     if bank:
         click.echo("📂 从题库缓存加载...")
         questions = load_bank(Path(bank), password)
+        click.echo(f"   加载完成: {len(questions)} 道大题, {sum(len(q.sub_questions) for q in questions)} 道小题")
     else:
         click.echo("📂 加载题目...")
         questions = load_json_files(input_dir, parser_map)
         if not questions:
             click.echo("未找到任何题目，退出。")
             return
+
+        total_before = len(questions)
+        subq_before = sum(len(q.sub_questions) for q in questions)
+        click.echo(f"   加载完成: {total_before} 道大题, {subq_before} 道小题")
+
+        # 2. 去重
         if dedup:
             click.echo("🔍 去重中...")
             questions = deduplicate(questions, strategy)
-
-    # 2. 去重
-    if dedup:
-        click.echo("🔍 去重中...")
-        questions = deduplicate(questions, strategy)
+            total_after = len(questions)
+            subq_after = sum(len(q.sub_questions) for q in questions)
+            click.echo(f"   去重完成: {total_after} 道大题, {subq_after} 道小题 (去除 {total_before - total_after} 道重复大题)")
 
     # 3. 过滤
     criteria = FilterCriteria(
@@ -206,7 +211,8 @@ def generate(ctx, input_dir, output, title, subtitle, cls, unit, mode, count, co
         if dedup:
             questions = deduplicate(questions, "strict")
 
-    click.echo(f"题库加载完成: {len(questions)} 道题")
+    total_subq = sum(len(q.sub_questions) for q in questions)
+    click.echo(f"题库加载完成: {len(questions)} 道大题, {total_subq} 道小题")
 
     # 解析 per_mode
     mode_dist = {}
@@ -282,7 +288,8 @@ def build(ctx, input_dir, output, password, strategy, rebuild):
     if bank_path.exists() and not rebuild:
         click.echo(f"📦 发现已有题库: {bank_path.name}")
         existing = load_bank(bank_path, password)
-        click.echo(f"   已有 {len(existing)} 题")
+        existing_subq = sum(len(q.sub_questions) for q in existing)
+        click.echo(f"   已有 {len(existing)} 道大题, {existing_subq} 道小题")
 
     click.echo("📂 加载 JSON...")
     new_questions = load_json_files(input_dir, parser_map)
@@ -290,8 +297,9 @@ def build(ctx, input_dir, output, password, strategy, rebuild):
         click.echo("未找到题目。")
         return
 
+    new_subq = sum(len(q.sub_questions) for q in new_questions)
     if existing:
-        click.echo(f"📥 发现 {len(new_questions)} 道待追加题目")
+        click.echo(f"📥 发现 {len(new_questions)} 道待追加大题, {new_subq} 道小题")
         combined = existing + new_questions
     else:
         combined = new_questions
@@ -300,15 +308,18 @@ def build(ctx, input_dir, output, password, strategy, rebuild):
     combined = deduplicate(combined, strategy)
 
     added = len(combined) - len(existing)
+    combined_subq = sum(len(q.sub_questions) for q in combined)
 
     fp = save_bank(combined, bank_path, password)
 
     click.echo(f"\n{'='*40}")
     if existing:
-        click.echo(f"  原有: {len(existing)} 题")
-        click.echo(f"  新增: {added} 题")
-        click.echo(f"  重复跳过: {len(new_questions) - added} 题")
-    click.echo(f"  总计: {len(combined)} 题")
+        existing_subq = sum(len(q.sub_questions) for q in existing)
+        added_subq = combined_subq - existing_subq
+        click.echo(f"  原有: {len(existing)} 道大题, {existing_subq} 道小题")
+        click.echo(f"  新增: {added} 道大题, {added_subq} 道小题")
+        click.echo(f"  重复跳过: {len(new_questions) - added} 道大题")
+    click.echo(f"  总计: {len(combined)} 道大题, {combined_subq} 道小题")
     click.echo(f"  文件: {fp}")
     click.echo(f"{'='*40}")
 
