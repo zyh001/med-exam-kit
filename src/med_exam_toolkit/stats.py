@@ -58,6 +58,7 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
     by_cls = Counter()
     by_difficulty = Counter()
     low_rate_questions = []
+    total_subquestions = 0
 
     for q in questions:
         by_mode[q.mode] += 1
@@ -65,6 +66,7 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
         by_pkg[q.pkg] += 1
         by_cls[q.cls] += 1
         by_difficulty[_classify_difficulty(q)] += 1
+        total_subquestions += len(q.sub_questions)
 
         for sq in q.sub_questions:
             if sq.rate:
@@ -92,6 +94,7 @@ def summarize(questions: list[Question], full: bool = False) -> dict:
 
     return {
         "total": len(questions),
+        "total_subquestions": total_subquestions,
         "by_mode": dict(by_mode.most_common()),
         "by_unit": dict(by_unit.most_common(unit_limit)),
         "by_pkg": dict(by_pkg.most_common()),
@@ -114,7 +117,7 @@ def print_summary(questions: list[Question], full: bool = False) -> None:
     print(f"\n{'='*50}")
     print(f"📊 题目统计")
     print(f"{'='*50}")
-    print(f"总题数: {s['total']}")
+    print(f"总题数: {s['total']} 道大题, {s['total_subquestions']} 道小题")
 
     def _print_section(title: str, data: dict, show_bar: bool = True, show_pct: bool = True):
         print(f"\n{title}:")
