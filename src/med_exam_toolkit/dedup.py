@@ -28,13 +28,18 @@ def compute_fingerprint(q: Question, strategy: str = "strict") -> str:
 
     strategy:
         - content: 仅基于题干/子题文本
-        - strict:  题干 + 选项(排序) + 答案文本
+        - strict:  题干 + 选项(排序) + 答案文本 + 共享选项(B型题)
     """
     parts: list[str] = []
 
     # 共享题干
     if q.stem:
         parts.append(_normalize_text(q.stem))
+
+    # B型题的共享选项（必须参与指纹计算，避免错误去重）
+    if q.shared_options and strategy == "strict":
+        sorted_shared = sorted(_normalize_text(opt) for opt in q.shared_options)
+        parts.extend(sorted_shared)
 
     for sq in q.sub_questions:
         parts.append(_normalize_text(sq.text))
