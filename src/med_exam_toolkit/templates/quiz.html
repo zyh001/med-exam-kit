@@ -1474,11 +1474,13 @@ function _fillQ(wrap, q, isExam, isPractice) {
   tags.className = 'q-tags';
   if (q.mode) tags.innerHTML += `<span class="q-tag mode-tag">${esc(q.mode)}</span>`;
   if (q.unit) tags.innerHTML += `<span class="q-tag unit-tag">${esc(q.unit)}</span>`;
-  if (q.rate != null) {
+  if (q.rate != null && q.rate !== '' && q.rate !== undefined) {
     let rateVal = q.rate;
-    if (typeof rateVal === 'string') rateVal = parseFloat(rateVal.replace('%','')) || 0;
-    const rateClass = rateVal >= 70 ? 'easy' : '';
-    tags.innerHTML += `<span class="q-tag rate-tag ${rateClass}">正确率 ${rateVal.toFixed(0)}%</span>`;
+    if (typeof rateVal === 'string') rateVal = parseFloat(rateVal.replace('%',''));
+    if (!isNaN(rateVal) && rateVal > 0) {
+      const rateClass = rateVal >= 70 ? 'easy' : '';
+      tags.innerHTML += `<span class="q-tag rate-tag ${rateClass}">正确率 ${rateVal.toFixed(0)}%</span>`;
+    }
   }
   wrap.appendChild(tags);
 
