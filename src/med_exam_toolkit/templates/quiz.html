@@ -378,20 +378,21 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 /* Options */
 .options-list{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}
 .opt{
-  display:flex;align-items:flex-start;gap:12px;
+  display:flex;align-items:center;gap:12px;
   background:var(--card);border:2px solid var(--border);border-radius:12px;
-  padding:13px 14px;cursor:pointer;transition:all .18s;text-align:left;width:100%;
+  padding:12px 14px;cursor:pointer;transition:border-color .15s,background .15s;text-align:left;width:100%;
+  touch-action:manipulation;-webkit-user-select:none;user-select:none;
 }
 .opt:hover:not(:disabled){border-color:var(--accent);background:var(--accent-bg)}
-.opt:active:not(:disabled){transform:scale(.99)}
+.opt:active:not(:disabled){transform:scale(.97);transition:transform .08s}
 .opt:disabled{cursor:default}
 .opt-label{
-  width:30px;height:30px;border-radius:8px;flex-shrink:0;
+  width:28px;height:28px;border-radius:7px;flex-shrink:0;
   background:var(--border);color:var(--muted);
   display:flex;align-items:center;justify-content:center;
-  font-size:13px;font-weight:700;transition:all .18s;
+  font-size:12px;font-weight:700;transition:all .18s;
 }
-.opt-text{font-size:15px;line-height:1.65;padding-top:3px;flex:1;text-align:left;color:var(--text)}
+.opt-text{font-size:15px;line-height:1.65;flex:1;text-align:left;color:var(--text)}
 
 /* Option states */
 .opt.selected{border-color:var(--accent);background:var(--accent-bg)}
@@ -835,6 +836,47 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   .mode-grid{grid-template-columns:repeat(3,1fr)}
   .results-layout{padding:32px 40px max(env(safe-area-inset-bottom),32px) 40px}
 }
+
+/* ════════════════════════════════════════════
+   触控手势 CSS
+════════════════════════════════════════════ */
+/* quiz-body touch-action */
+.quiz-body{touch-action:pan-y}
+.q-stage{touch-action:pan-y}
+/* 拖动中禁止 transition */
+.q-stage.is-dragging{transition:none !important}
+/* 边缘滑动提示箭头 */
+.swipe-hint{
+  position:absolute;top:50%;transform:translateY(-50%);
+  width:34px;height:34px;border-radius:50%;
+  background:var(--surface);border:1.5px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  font-size:15px;color:var(--muted);
+  opacity:0;transition:opacity .15s;pointer-events:none;z-index:10;
+}
+.swipe-hint.left{left:10px}
+.swipe-hint.right{right:10px}
+.swipe-hint.visible{opacity:.85}
+.swipe-hint.active{
+  background:var(--accent-bg);border-color:var(--accent);color:var(--accent);
+  opacity:1;
+}
+/* memo 拖拽 */
+.memo-card-wrap{touch-action:pan-y}
+.memo-card.is-dragging{transition:none !important}
+.memo-swipe-overlay{
+  position:absolute;inset:0;border-radius:var(--r);
+  display:flex;align-items:center;justify-content:center;
+  font-size:17px;font-weight:700;
+  opacity:0;pointer-events:none;transition:opacity .1s;z-index:5;
+}
+.memo-swipe-overlay.show-know{background:rgba(63,185,80,.15);color:var(--success);opacity:1}
+.memo-swipe-overlay.show-again{background:rgba(248,81,73,.15);color:var(--danger);opacity:1}
+/* 导航按钮触控优化 */
+.nav-btn{touch-action:manipulation}
+.nav-btn:active:not(:disabled){transform:scale(.94);transition:transform .08s}
+button,a,[role=button],label{touch-action:manipulation}
+
 </style>
 </head>
 <body>
@@ -986,6 +1028,8 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
     <div class="q-grid-inner" id="q-grid-inner"></div>
   </div>
   <div class="quiz-body">
+    <div class="swipe-hint left"  id="swipe-hint-left">‹</div>
+    <div class="swipe-hint right" id="swipe-hint-right">›</div>
     <div class="q-stage" id="q-stage">
       <div class="question-wrap" id="question-wrap">
         <!-- rendered by JS -->
@@ -1030,6 +1074,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
     <!-- 主卡片 -->
     <div class="memo-card-wrap" id="memo-card-wrap">
       <div class="memo-card" id="memo-card">
+        <div class="memo-swipe-overlay" id="memo-swipe-overlay"></div>
         <div class="memo-card-question" id="memo-question-area">
           <!-- rendered by JS -->
         </div>
@@ -1495,7 +1540,9 @@ function _fillQ(wrap, q, isExam, isPractice) {
       if (sel) btn.classList.add(isMulti ? 'multi-selected' : 'selected');
       btn.onclick = () => selectOpt(letter, btn);
     }
-    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(opt)}</span>`;
+    // 剥离选项文本里可能自带的字母前缀（"A." "A、" "A．" 等），避免字母重复显示
+    const cleanOpt = opt.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>`;
     opts.appendChild(btn);
   });
   wrap.appendChild(opts);
@@ -1815,8 +1862,9 @@ function renderMemo(dir = 'forward') {
   const stemHtml = q.stem ? `<div class="memo-stem-block">${esc(q.stem)}</div>` : '';
   const optsHtml = q.options.map((o, i) => {
     const l = String.fromCharCode(65 + i);
+    const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
     return `<div class="memo-opt" id="mopt-${l}">
-      <span class="memo-opt-label">${l}</span><span>${esc(o)}</span>
+      <span class="memo-opt-label">${l}</span><span>${esc(co)}</span>
     </div>`;
   }).join('');
   const explainHtml = q.discuss
@@ -2248,6 +2296,186 @@ document.getElementById('memo-card')?.addEventListener('click', (e) => {
       memoReveal();
     }
   }
+});
+
+
+// ════════════════════════════════════════════
+// 触控手势系统
+// ════════════════════════════════════════════
+function vibrate(p){ try{navigator.vibrate?.(p)}catch(e){} }
+
+function getSwipeDir(dx, dy){
+  const adx=Math.abs(dx), ady=Math.abs(dy);
+  if(adx<6 && ady<6) return null;
+  if(ady > adx*1.3) return 'vertical';
+  return dx>0?'right':'left';
+}
+
+// ── 做题区：左右滑动切题 ─────────────────────
+(function setupQuizSwipe(){
+  const THRESHOLD=70, VELOCITY=0.32, RESIST=0.35;
+  let tx=0,ty=0,t0=0,locked=null,dragging=false;
+
+  const quizScreen = document.getElementById('s-quiz');
+  if(!quizScreen) return;
+  const quizBody = quizScreen.querySelector('.quiz-body');
+  if(!quizBody) return;
+  const hintL = document.getElementById('swipe-hint-left');
+  const hintR = document.getElementById('swipe-hint-right');
+
+  function stage(){ return quizBody.querySelector('.q-stage'); }
+  function canPrev(){ return S.cur>0; }
+  function canNext(){
+    if(S.mode==='exam') return S.cur<S.questions.length-1;
+    return S.revealed.has(S.cur) && S.cur<S.questions.length-1;
+  }
+  function updateHints(dx){
+    hintL?.classList.toggle('visible', dx>10 && canPrev());
+    hintR?.classList.toggle('visible', dx<-10 && canNext());
+    hintL?.classList.toggle('active', Math.abs(dx)>=THRESHOLD && dx>0 && canPrev());
+    hintR?.classList.toggle('active', Math.abs(dx)>=THRESHOLD && dx<0 && canNext());
+  }
+  function resetHints(){
+    hintL?.classList.remove('visible','active');
+    hintR?.classList.remove('visible','active');
+  }
+
+  quizBody.addEventListener('touchstart', e=>{
+    if(document.querySelector('.screen.active')?.id!=='s-quiz') return;
+    const t=e.touches[0]; tx=t.clientX; ty=t.clientY; t0=Date.now();
+    locked=null; dragging=false;
+  },{passive:true});
+
+  quizBody.addEventListener('touchmove', e=>{
+    if(document.querySelector('.screen.active')?.id!=='s-quiz') return;
+    const t=e.touches[0], dx=t.clientX-tx, dy=t.clientY-ty;
+    if(!locked){ const d=getSwipeDir(dx,dy); if(!d) return; locked=d; }
+    if(locked==='vertical') return;
+    e.preventDefault();
+    dragging=true;
+    const s=stage(); if(!s) return;
+    s.classList.add('is-dragging');
+    let move=dx;
+    if((dx>0&&!canPrev())||(dx<0&&!canNext())) move=dx*RESIST;
+    s.style.transform=`translateX(${move}px)`;
+    updateHints(dx);
+  },{passive:false});
+
+  quizBody.addEventListener('touchend', e=>{
+    if(!dragging){dragging=false;return;}
+    dragging=false; resetHints();
+    const s=stage(); if(!s) return;
+    s.classList.remove('is-dragging');
+    s.style.transform='';
+    const dx=e.changedTouches[0].clientX-tx;
+    const dt=Date.now()-t0;
+    const vel=Math.abs(dx)/dt;
+    const ok=Math.abs(dx)>=THRESHOLD||vel>=VELOCITY;
+    if(ok){
+      if(dx>0&&canPrev()){
+        vibrate(10); S.cur--; renderQ('back');
+        if(S.mode==='exam') updateGridDot();
+      } else if(dx<0&&canNext()){
+        vibrate(10); S.cur++; renderQ('forward');
+        if(S.mode==='exam') updateGridDot();
+      } else {
+        s.style.transition='transform .22s cubic-bezier(.25,.46,.45,.94)';
+        s.style.transform=`translateX(${dx>0?5:-5}px)`;
+        setTimeout(()=>{s.style.transition='';s.style.transform='';},230);
+        vibrate([6,30,6]);
+      }
+    } else if(Math.abs(dx)>8){
+      s.style.transition='transform .2s cubic-bezier(.25,.46,.45,.94)';
+      setTimeout(()=>{s.style.transition='';},220);
+    }
+  },{passive:true});
+})();
+
+// ── 背题卡片：左划=已掌握，右划=再练 ──────────
+(function setupMemoSwipe(){
+  const THRESHOLD=80, VELOCITY=0.38, RESIST=0.38;
+  let tx=0,ty=0,t0=0,locked=null,dragging=false;
+
+  function card(){ return document.getElementById('memo-card'); }
+  function overlay(){ return document.getElementById('memo-swipe-overlay'); }
+
+  function setOverlay(dx){
+    const o=overlay(); if(!o||!S.memoRevealed) return;
+    const pct=Math.min(Math.abs(dx)/THRESHOLD,1);
+    const trig=Math.abs(dx)>=THRESHOLD;
+    if(dx<-20){
+      o.className='memo-swipe-overlay'+(trig?' show-know':'');
+      o.innerHTML=trig?'✓ 已掌握':'';
+      o.style.opacity=pct*0.85;
+    } else if(dx>20){
+      o.className='memo-swipe-overlay'+(trig?' show-again':'');
+      o.innerHTML=trig?'↺ 再练':'';
+      o.style.opacity=pct*0.85;
+    } else {
+      o.className='memo-swipe-overlay'; o.innerHTML=''; o.style.opacity=0;
+    }
+  }
+  function resetOverlay(){
+    const o=overlay(); if(o){o.className='memo-swipe-overlay';o.innerHTML='';o.style.opacity=0;}
+  }
+
+  const memoBody = document.querySelector('#s-memo .memo-body');
+  if(!memoBody) return;
+
+  memoBody.addEventListener('touchstart', e=>{
+    if(document.querySelector('.screen.active')?.id!=='s-memo') return;
+    if(e.target.closest('.memo-reveal-btn')||e.target.closest('.memo-rate-row')) return;
+    const t=e.touches[0]; tx=t.clientX; ty=t.clientY; t0=Date.now();
+    locked=null; dragging=false;
+  },{passive:true});
+
+  memoBody.addEventListener('touchmove', e=>{
+    if(document.querySelector('.screen.active')?.id!=='s-memo') return;
+    const t=e.touches[0], dx=t.clientX-tx, dy=t.clientY-ty;
+    if(!locked){const d=getSwipeDir(dx,dy);if(!d) return;locked=d;}
+    if(locked==='vertical') return;
+    if(!S.memoRevealed) return;
+    e.preventDefault(); dragging=true;
+    const c=card(); if(!c) return;
+    c.classList.add('is-dragging');
+    c.style.transform=`translateX(${dx}px) rotate(${dx*0.018}deg)`;
+    setOverlay(dx);
+  },{passive:false});
+
+  memoBody.addEventListener('touchend', e=>{
+    resetOverlay();
+    const dx=e.changedTouches[0].clientX-tx;
+    const dy=e.changedTouches[0].clientY-ty;
+    const dt=Date.now()-t0;
+    const vel=Math.abs(dx)/dt;
+    const c=card();
+    if(c){c.classList.remove('is-dragging');c.style.transform='';}
+
+    if(!S.memoRevealed){
+      if(Math.abs(dx)<25&&Math.abs(dy)<25){
+        if(!e.target.closest('.memo-rate-row')&&!e.target.closest('.memo-reveal-btn'))
+          memoReveal();
+      }
+      dragging=false; return;
+    }
+    if(!dragging){dragging=false;return;}
+    dragging=false;
+    const ok=Math.abs(dx)>=THRESHOLD||vel>=VELOCITY;
+    if(ok){
+      if(dx<0){vibrate(10);memoKnow();}
+      else{vibrate([6,30,6]);memoAgain();}
+    } else if(Math.abs(dx)>8){
+      if(c){c.style.transition='transform .2s cubic-bezier(.25,.46,.45,.94)';setTimeout(()=>{c.style.transition='';},220);}
+    }
+  },{passive:true});
+})();
+
+// 背题点击卡片揭示（保留原有逻辑）
+document.addEventListener('click', e=>{
+  if(document.querySelector('.screen.active')?.id!=='s-memo') return;
+  if(S.memoRevealed) return;
+  if(e.target.closest('.memo-rate-row')||e.target.closest('.memo-reveal-btn')) return;
+  if(e.target.closest('.memo-card')) memoReveal();
 });
 
 init();
