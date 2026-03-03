@@ -109,7 +109,7 @@ def start_quiz(bank_path: str, port: int = 5174, host: str = "127.0.0.1",
     _questions = load_bank(_bank_path, password)
     sq_total = sum(len(q.sub_questions) for q in _questions)
     print(f"[INFO] 共 {len(_questions)} 大题 / {sq_total} 小题")
-    url = f"http://{host}:{port}"
+    url = f"http://127.0.0.1:{port}"
     print(f"[INFO] 做题应用已启动: {url}")
     print("[INFO] Ctrl+C 退出")
     if not no_browser:

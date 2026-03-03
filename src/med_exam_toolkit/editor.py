@@ -236,7 +236,7 @@ def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
     _questions = load_bank(_bank_path, password)
     print(f"[INFO] 已加载 {len(_questions)} 道大题")
 
-    url = f"http://{host}:{port}"
+    url = f"http://127.0.0.1:{port}"
     print(f"[INFO] 编辑器启动: {url}")
     print(f"[INFO] 按 Ctrl+C 退出")
 
