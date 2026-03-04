@@ -2,6 +2,47 @@
 name = "med-exam-toolkit"
 version = "0.1.5-R260227"
 requires-python = ">=3.10"
+description = "医学考试题目处理工具，支持题目去重、过滤、题库构建、自动组卷及多格式导出"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [{name = "med-exam-toolkit"}]
+keywords = ["medical", "exam", "question-bank", "education"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Education",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+
+dependencies = [
+    "click>=8.0",
+    "openpyxl>=3.0",
+    "python-docx>=0.8",
+    "reportlab>=3.6",
+    "cryptography>=41.0",
+    "sqlalchemy>=2.0",
+    "pyyaml>=6.0",
+    "openai>=2.0.0",
+    "flask>=3.0.0",
+    "tqdm>=4.65",
+    "termcolor>=2.0",
+    "lxml>=4.9",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0",
+]
 
 [project.scripts]
 med-exam = "med_exam_toolkit.cli:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
