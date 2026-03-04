@@ -78,7 +78,6 @@ def test_db_export():
         questions = _setup(Path(tmpdir))
         questions = deduplicate(questions)
         out = Path(tmpdir) / "output" / "test"
-        out.parent.mkdir(parents=True, exist_ok=True)  # 确保输出目录存在
         get_exporter("db").export(questions, out)
         assert out.with_suffix(".db").exists()
 
