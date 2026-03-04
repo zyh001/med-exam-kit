@@ -3,6 +3,9 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>题库编辑器</title>
 <style>
 :root,[data-theme="dark"]{
@@ -878,6 +881,11 @@ async function selectQuestion(qi, si) {
   openMobileEditor();
 }
 
+function stripOptionPrefix(opt) {
+  if (!opt) return '';
+  return opt.replace(/^[A-Z]\.\s*/, '');
+}
+
 function renderEditor(data, activeSi = 0) {
   const ed = document.getElementById('editor');
   ed.innerHTML = '';
@@ -944,7 +952,7 @@ function renderEditor(data, activeSi = 0) {
   const optHtml = sq.options.map((o, i) =>
     `<div class="option-row">
       <span class="option-label">${String.fromCharCode(65+i)}</span>
-      <input class="option-input" value="${esc(o)}" data-oi="${i}">
+      <input class="option-input" value="${esc(stripOptionPrefix(o))}" data-oi="${i}">
       <button class="btn-icon" onclick="removeOption(${i})" title="删除">✕</button>
     </div>`
   ).join('');
@@ -1000,10 +1008,16 @@ function mkSection(title, bodyHtml) {
 
 async function selectSub(qi, si) {
   const data = await fetch(`/api/question/${qi}`).then(r => r.json());
+  currentQi = qi;
+  currentSi = si;
   renderEditor(data, si);
 }
 
-function getOptions() { return [...document.querySelectorAll('.option-input')].map(i => i.value); }
+function getOptions() {
+  return [...document.querySelectorAll('.option-input')].map((input, i) => {
+    return stripOptionPrefix(input.value.trim());
+  });
+}
 function addOption() {
   const list = document.getElementById('optionsList');
   const i = list.children.length;
@@ -1039,8 +1053,15 @@ async function saveSubQuestion() {
   const res = await fetch(`/api/subquestion/${currentQi}/${currentSi}`, {
     method: 'PUT', headers: {'Content-Type':'application/json'}, body: JSON.stringify(payload),
   }).then(r => r.json());
-  if (res.ok) { info.dirty = true; updateTopStats(); loadList(); toast('✓ 已保存'); }
-  else toast('保存失败: ' + (res.error || ''), true);
+  if (res.ok) {
+    info.dirty = true;
+    updateTopStats();
+    loadList();
+    toast('✓ 已保存');
+    selectSub(currentQi, currentSi);
+  } else {
+    toast('保存失败：' + (res.error || ''), true);
+  }
 }
 
 function openDelete(qi) { deleteTarget = qi; document.getElementById('deleteModal').style.display = 'flex'; }
