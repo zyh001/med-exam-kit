@@ -37,12 +37,6 @@ class DbExporter(BaseExporter):
 
     def export(self, questions: list[Question], output_path: Path, **kwargs) -> None:
         db_url = kwargs.get("db_url", f"sqlite:///{output_path.with_suffix('.db')}")
-        
-        # 确保输出目录存在（特别是对于 SQLite 文件数据库）
-        if db_url.startswith("sqlite:///"):
-            db_file_path = Path(db_url.replace("sqlite:///", ""))
-            db_file_path.parent.mkdir(parents=True, exist_ok=True)
-        
         engine   = create_engine(db_url, echo=False)
         metadata = MetaData()
         table    = _build_table(metadata)
@@ -79,8 +73,5 @@ class DbExporter(BaseExporter):
             if new_rows:
                 conn.execute(table.insert(), new_rows)
             session.commit()
-        
-        # 关闭引擎连接，释放 SQLite 文件锁
-        engine.dispose()
 
-        print(f"[INFO] 数据库导出完成：{db_url} (新增 {len(new_rows)}/{len(rows)} 行)")
+        print(f"[INFO] 数据库导出完成: {db_url} (新增 {len(new_rows)}/{len(rows)} 行)")
