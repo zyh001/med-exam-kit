@@ -877,6 +877,86 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .nav-btn:active:not(:disabled){transform:scale(.94);transition:transform .08s}
 button,a,[role=button],label{touch-action:manipulation}
 
+/* ════════════════════════════════════════════
+   考试恢复弹窗
+════════════════════════════════════════════ */
+.resume-box{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:20px;max-width:380px;width:100%;padding:28px 24px 22px;
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  box-shadow:0 16px 48px rgba(0,0,0,.5);
+}
+.resume-icon{font-size:36px;line-height:1}
+.resume-title{font-size:17px;font-weight:700;color:var(--text)}
+.resume-desc{font-size:13px;color:var(--muted);line-height:1.75;text-align:center}
+.resume-desc strong{color:var(--accent)}
+.resume-meta{
+  width:100%;background:var(--card);border:1px solid var(--border);
+  border-radius:10px;padding:12px 16px;
+  display:flex;flex-direction:column;gap:6px;
+}
+.resume-meta-row{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:12px;
+}
+.resume-meta-row .label{color:var(--muted)}
+.resume-meta-row .val{font-weight:600;color:var(--text)}
+.resume-meta-row .val.warn{color:var(--warning)}
+.resume-btns{display:flex;gap:10px;width:100%;margin-top:4px}
+.resume-btn{
+  flex:1;padding:11px;border-radius:10px;font-size:14px;font-weight:700;
+  border:none;transition:all .15s;cursor:pointer;
+}
+.resume-btn.discard{background:var(--card);color:var(--muted);border:1px solid var(--border)}
+.resume-btn.discard:hover{color:var(--danger);border-color:var(--danger)}
+.resume-btn.restore{
+  background:linear-gradient(135deg,var(--accent),#6177f9);
+  color:#fff;box-shadow:0 3px 10px rgba(68,147,248,.4);
+}
+.resume-btn.restore:hover{opacity:.9}
+
+/* ════════════════════════════════════════════
+   题型切换确认弹窗
+════════════════════════════════════════════ */
+.modal-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.65);
+  z-index:500;display:flex;align-items:center;justify-content:center;
+  backdrop-filter:blur(6px);padding:24px;
+}
+.gtm-box{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:20px;max-width:360px;width:100%;padding:28px 24px 22px;
+  display:flex;flex-direction:column;align-items:center;gap:14px;
+  box-shadow:0 16px 48px rgba(0,0,0,.5);
+}
+.gtm-icon{font-size:36px;line-height:1}
+.gtm-title{font-size:17px;font-weight:700;color:var(--text)}
+.gtm-desc{
+  font-size:13px;color:var(--muted);line-height:1.75;text-align:center;
+}
+.gtm-desc strong{color:var(--warning)}
+.gtm-btns{display:flex;gap:10px;width:100%;margin-top:4px}
+.gtm-btn{
+  flex:1;padding:11px;border-radius:10px;font-size:14px;font-weight:700;
+  border:none;transition:all .15s;cursor:pointer;
+}
+.gtm-btn.cancel{background:var(--card);color:var(--text);border:1px solid var(--border)}
+.gtm-btn.cancel:hover{border-color:var(--muted)}
+.gtm-btn.confirm{
+  background:linear-gradient(135deg,var(--warning),#e8882a);
+  color:#fff;box-shadow:0 3px 10px rgba(210,153,34,.4);
+}
+.gtm-btn.confirm:hover{opacity:.9}
+
+/* ── 题目列表：题型分组标签 ── */
+.q-grid-group-label{
+  width:100%;font-size:10px;font-weight:700;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.06em;
+  padding:4px 2px 2px;margin-top:4px;
+  border-top:1px solid var(--border);
+}
+.q-grid-group-label:first-child{border-top:none;margin-top:0}
+
 </style>
 </head>
 <body>
@@ -1166,6 +1246,54 @@ button,a,[role=button],label{touch-action:manipulation}
   <div class="review-list" id="review-list"></div>
 </div>
 
+<!-- ═══ 考试进度恢复弹窗 ══════════════════════════════════════════════ -->
+<div class="modal-backdrop" id="resume-modal" style="display:none">
+  <div class="resume-box">
+    <div class="resume-icon">📋</div>
+    <div class="resume-title">发现未完成的考试</div>
+    <div class="resume-desc">检测到上次考试未提交，是否继续作答？</div>
+    <div class="resume-meta" id="resume-meta">
+      <div class="resume-meta-row">
+        <span class="label">已答题数</span>
+        <span class="val" id="rm-answered">—</span>
+      </div>
+      <div class="resume-meta-row">
+        <span class="label">总题数</span>
+        <span class="val" id="rm-total">—</span>
+      </div>
+      <div class="resume-meta-row">
+        <span class="label">剩余时间</span>
+        <span class="val warn" id="rm-time">—</span>
+      </div>
+      <div class="resume-meta-row">
+        <span class="label">保存时间</span>
+        <span class="val" id="rm-saved">—</span>
+      </div>
+    </div>
+    <div class="resume-btns">
+      <button class="resume-btn discard" onclick="discardSession()">放弃重新开始</button>
+      <button class="resume-btn restore" onclick="restoreSession()">继续作答 →</button>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ 题型切换确认弹窗 ══════════════════════════════════════════════ -->
+<div class="modal-backdrop" id="group-transition-modal" style="display:none"
+     onclick="if(event.target===this)dismissGroupModal()">
+  <div class="gtm-box">
+    <div class="gtm-icon">⚠️</div>
+    <div class="gtm-title">即将切换题型</div>
+    <div class="gtm-desc">
+      下一题型为<strong id="gtm-mode"></strong>。<br>
+      进入后<strong>不能返回</strong>当前题型，请确认已完成本题型所有作答。
+    </div>
+    <div class="gtm-btns">
+      <button class="gtm-btn cancel" onclick="dismissGroupModal()">暂不切换</button>
+      <button class="gtm-btn confirm" onclick="confirmGroupModal()">确认进入 →</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast"></div>
 
 <script>
@@ -1189,6 +1317,11 @@ const S = {
   bankInfo: null,
   results: null,
   history: [],      // stored in localStorage
+  // ── 考试模式题型分组 ──
+  modeGroups: [],          // [{mode, startIdx, endIdx, allowBack}, ...]
+  currentGroupIdx: 0,      // 当前所在题型组索引（只增不减）
+  caseMaxReached: {},      // 案例分析组内已到达的最远题目索引
+  _groupModalCb: null,     // 题型切换确认框回调
 };
 
 const CFG = {
@@ -1200,14 +1333,148 @@ const CFG = {
 };
 
 // ════════════════════════════════════════════
+// 考试进度持久化
+// ════════════════════════════════════════════
+const EXAM_SESSION_KEY = 'quiz_exam_session_v1';
+
+/** 序列化 S.ans（值可能是 Set） */
+function _serializeAns(ans) {
+  const out = {};
+  for (const [k, v] of Object.entries(ans)) {
+    out[k] = (v instanceof Set) ? { __set: true, v: [...v] } : v;
+  }
+  return out;
+}
+
+/** 反序列化 ans */
+function _deserializeAns(raw) {
+  const out = {};
+  for (const [k, v] of Object.entries(raw)) {
+    out[k] = (v && v.__set) ? new Set(v.v) : v;
+  }
+  return out;
+}
+
+/** 保存当前考试状态到 localStorage */
+function saveExamSession() {
+  if (S.mode !== 'exam' || !S.questions.length) return;
+  const elapsedSec = Math.floor((Date.now() - S.examStart) / 1000);
+  const remaining  = Math.max(0, S.examLimit - elapsedSec);
+  const session = {
+    v: 1,
+    savedAt:       Date.now(),
+    remaining,
+    examLimit:     S.examLimit,
+    cur:           S.cur,
+    questions:     S.questions,
+    ans:           _serializeAns(S.ans),
+    marked:        [...S.marked],
+    modeGroups:    S.modeGroups,
+    currentGroupIdx: S.currentGroupIdx,
+    caseMaxReached:  S.caseMaxReached,
+  };
+  try {
+    localStorage.setItem(EXAM_SESSION_KEY, JSON.stringify(session));
+  } catch(e) {
+    console.warn('[Quiz] 保存考试进度失败（可能 localStorage 已满）', e);
+  }
+}
+
+/** 清除已保存的考试进度 */
+function clearExamSession() {
+  localStorage.removeItem(EXAM_SESSION_KEY);
+}
+
+/** 读取已保存的考试进度，返回 session 对象或 null */
+function _loadRawSession() {
+  try {
+    const raw = localStorage.getItem(EXAM_SESSION_KEY);
+    if (!raw) return null;
+    const s = JSON.parse(raw);
+    // 基本合法性校验
+    if (!s || !Array.isArray(s.questions) || !s.questions.length) return null;
+    return s;
+  } catch(e) { return null; }
+}
+
+/** 格式化秒数为 mm:ss */
+function _fmtSec(sec) {
+  const m = String(Math.floor(sec / 60)).padStart(2, '0');
+  const s = String(sec % 60).padStart(2, '0');
+  return `${m}:${s}`;
+}
+
+/** 格式化存档时间 */
+function _fmtSavedAt(ts) {
+  const d = new Date(ts);
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getMonth()+1}/${d.getDate()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+/** init 时检测是否有未完成的考试，有则弹出恢复弹窗 */
+function checkResumeSession() {
+  const s = _loadRawSession();
+  if (!s) return false;
+
+  // 若剩余时间已耗尽（超时超过 10 秒缓冲），丢弃
+  const elapsed = Math.floor((Date.now() - s.savedAt) / 1000);
+  const remaining = s.remaining - elapsed;
+  if (remaining <= -10) { clearExamSession(); return false; }
+
+  // 填充弹窗数据
+  const answered = Object.keys(s.ans).length;
+  document.getElementById('rm-answered').textContent = answered;
+  document.getElementById('rm-total').textContent    = s.questions.length;
+  document.getElementById('rm-time').textContent     = remaining > 0 ? _fmtSec(remaining) : '已超时';
+  document.getElementById('rm-saved').textContent    = _fmtSavedAt(s.savedAt);
+  document.getElementById('resume-modal').style.display = 'flex';
+  return true;
+}
+
+/** 用户选择「放弃」 */
+function discardSession() {
+  clearExamSession();
+  document.getElementById('resume-modal').style.display = 'none';
+}
+
+/** 用户选择「继续作答」——从 localStorage 恢复完整考试状态 */
+function restoreSession() {
+  const s = _loadRawSession();
+  document.getElementById('resume-modal').style.display = 'none';
+  if (!s) return;
+
+  const elapsed   = Math.floor((Date.now() - s.savedAt) / 1000);
+  const remaining = Math.max(0, s.remaining - elapsed);
+
+  // 恢复状态
+  S.mode             = 'exam';
+  S.questions        = s.questions;
+  S.ans              = _deserializeAns(s.ans);
+  S.marked           = new Set(s.marked || []);
+  S.modeGroups       = s.modeGroups       || buildModeGroups(s.questions);
+  S.currentGroupIdx  = s.currentGroupIdx  ?? 0;
+  S.caseMaxReached   = s.caseMaxReached   || {};
+  S.examLimit        = s.examLimit;
+  S.revealed         = new Set();
+  S.cur              = s.cur ?? 0;
+  // examStart 反推，让计时器正确
+  S.examStart        = Date.now() - (S.examLimit - remaining) * 1000;
+
+  startQuiz(remaining);
+}
+
+// ════════════════════════════════════════════
 // Init
 // ════════════════════════════════════════════
 async function init() {
   loadTheme();
   loadHistory();
+  // 先检测是否有未完成的考试（弹窗优先于主界面渲染）
+  const hasSession = checkResumeSession();
   try {
     S.bankInfo = await fetch('/api/info').then(r => r.json());
-    renderHome();
+    if (!hasSession) renderHome();
+    else renderHome(); // 主界面也渲染，弹窗在最上层覆盖
   } catch(e) {
     document.getElementById('home-bank-name').textContent = '无法连接到服务器';
   }
@@ -1334,6 +1601,64 @@ function updateCount(v) {
 }
 
 // ════════════════════════════════════════════
+// 题型分组工具（考试模式导航限制核心）
+// ════════════════════════════════════════════
+
+/**
+ * 根据题目列表构建题型分组信息。
+ * allowBack: 组内是否允许回退（案例分析题不允许）
+ */
+function buildModeGroups(questions) {
+  const groups = [];
+  questions.forEach((q, i) => {
+    const mode = q.mode || '';
+    if (groups.length === 0 || groups[groups.length - 1].mode !== mode) {
+      const allowBack = !mode.includes('案例');
+      groups.push({ mode, startIdx: i, endIdx: i, allowBack });
+    } else {
+      groups[groups.length - 1].endIdx = i;
+    }
+  });
+  return groups;
+}
+
+/** 返回题目索引 qIdx 所在的组索引 */
+function getGroupIdxForQ(qIdx) {
+  for (let i = 0; i < S.modeGroups.length; i++) {
+    if (qIdx >= S.modeGroups[i].startIdx && qIdx <= S.modeGroups[i].endIdx) return i;
+  }
+  return 0;
+}
+
+/**
+ * 考试模式：判断能否向前（+1）导航。
+ * 跨题型组时不能直接导航——需要弹窗确认（由调用方处理）。
+ */
+function examCanGoBack(fromIdx) {
+  if (fromIdx <= 0) return false;
+  const gIdx    = getGroupIdxForQ(fromIdx);
+  const prevGIdx= getGroupIdxForQ(fromIdx - 1);
+  if (prevGIdx !== gIdx) return false;            // 跨组禁止
+  if (!S.modeGroups[gIdx].allowBack) return false; // 案例分析禁止
+  return true;
+}
+
+/** 弹出题型切换确认框，cb 为用户点「确认」后的回调 */
+function showGroupTransitionDialog(targetMode, cb) {
+  S._groupModalCb = cb;
+  document.getElementById('gtm-mode').textContent = targetMode || '下一题型';
+  document.getElementById('group-transition-modal').style.display = 'flex';
+}
+function confirmGroupModal() {
+  document.getElementById('group-transition-modal').style.display = 'none';
+  if (S._groupModalCb) { S._groupModalCb(); S._groupModalCb = null; }
+}
+function dismissGroupModal() {
+  document.getElementById('group-transition-modal').style.display = 'none';
+  S._groupModalCb = null;
+}
+
+// ════════════════════════════════════════════
 // Start session
 // ════════════════════════════════════════════
 async function startSession() {
@@ -1354,15 +1679,23 @@ async function startSession() {
   S.marked = new Set();
   S.revealed = new Set();
   S.examStart = Date.now();
+  // 考试模式题型分组（练习/背题模式也预建，不影响逻辑）
+  S.modeGroups       = buildModeGroups(S.questions);
+  S.currentGroupIdx  = 0;
+  S.caseMaxReached   = {};
 
   if (S.mode === 'memo') startMemo();
-  else                   startQuiz();
+  else {
+    startQuiz();
+    // 考试模式：进入后立即保存初始快照，确保题目有记录
+    if (S.mode === 'exam') saveExamSession();
+  }
 }
 
 // ════════════════════════════════════════════
 // QUIZ (practice + exam)
 // ════════════════════════════════════════════
-function startQuiz() {
+function startQuiz(remainingSeconds) {
   const isExam = S.mode === 'exam';
   clearInterval(S.timerInterval);
 
@@ -1371,12 +1704,16 @@ function startQuiz() {
   const fill = document.getElementById('progress-fill');
 
   if (isExam) {
-    S.examLimit = CFG.examTime * 60;
+    // 若未传入 remainingSeconds（首次开始），从 CFG 计算完整时长
+    if (remainingSeconds === undefined) {
+      S.examLimit = CFG.examTime * 60;
+      remainingSeconds = S.examLimit;
+    }
     timer.style.display = '';
     timer.classList.remove('urgent');
     gridToggle.style.display = '';
     fill.className = 'progress-fill exam-fill';
-    startTimer(S.examLimit);
+    startTimer(remainingSeconds);
     buildGrid();
   } else {
     timer.style.display = 'none';
@@ -1391,41 +1728,52 @@ function startQuiz() {
 
 // ─── 通用滑动切题助手 ─────────────────────────────────────────────
 // dir: 'forward'(→) | 'back'(←) | 'none'(无动画，初次渲染)
-function _slideQ(dir, buildFn) {
-  const body     = document.querySelector('.quiz-body');
-  const oldStage = body.querySelector('.q-stage');
+let _slideCleanTimer = null;   // 追踪上一次动画的清理 setTimeout
 
-  // 新 stage
+function _slideQ(dir, buildFn) {
+  const body = document.querySelector('.quiz-body');
+
+  // ① 若上一次动画还没结束，立即取消清理计划并强制移除所有旧 stage，
+  //    防止快速连点时多个 stage 堆叠。
+  if (_slideCleanTimer) {
+    clearTimeout(_slideCleanTimer);
+    _slideCleanTimer = null;
+  }
+  body.querySelectorAll('.q-stage').forEach(el => el.remove());
+
+  // ② 构建新 stage
   const newStage = document.createElement('div');
   newStage.className = 'q-stage';
   const wrap = document.createElement('div');
   wrap.className = 'question-wrap';
   wrap.id = 'question-wrap';
   newStage.appendChild(wrap);
-  buildFn(wrap);  // 向 wrap 内填充题目内容
+  buildFn(wrap);
 
-  if (!oldStage || dir === 'none') {
-    body.innerHTML = '';
+  if (dir === 'none') {
     body.appendChild(newStage);
     return;
   }
 
-  // 同时挂到 body（绝对定位叠在一起）
+  // ③ 构建一个纯用于退出动画的"幽灵"占位 stage（空内容，仅负责滑出）
+  //    这样新 stage 的内容就绝对不会和旧内容混在一起。
+  const ghostStage = document.createElement('div');
+  ghostStage.className = 'q-stage';
+  ghostStage.style.background = 'var(--bg)';   // 用背景色盖住，干净退出
+  body.appendChild(ghostStage);
   body.appendChild(newStage);
 
-  // 旧的滑出，新的滑入
-  const exitCls  = dir === 'forward' ? 'exit-left'   : 'exit-right';
-  const enterCls = dir === 'forward' ? 'enter-right'  : 'enter-left';
-  oldStage.classList.add(exitCls);
+  // ④ 旧内容（ghost）滑出，新 stage 从对侧滑入
+  const exitCls  = dir === 'forward' ? 'exit-left'  : 'exit-right';
+  const enterCls = dir === 'forward' ? 'enter-right' : 'enter-left';
+  ghostStage.classList.add(exitCls);
   newStage.classList.add(enterCls);
 
-  // 动画结束后清理
   const DUR = 230;
-  setTimeout(() => {
-    oldStage.remove();
+  _slideCleanTimer = setTimeout(() => {
+    ghostStage.remove();
     newStage.classList.remove(enterCls);
-    // 新 stage 拿到正常定位
-    newStage.style.position = '';
+    _slideCleanTimer = null;
   }, DUR);
 }
 
@@ -1447,12 +1795,14 @@ function renderQ(dir = 'none') {
   // ── Footer 按钮 ──
   const btnPrev = document.getElementById('btn-prev');
   const btnNext = document.getElementById('btn-next');
-  btnPrev.disabled = S.cur === 0;
   if (isExam) {
+    // 上一题：受题型分组规则约束
+    btnPrev.disabled = !examCanGoBack(S.cur);
     btnNext.textContent = S.cur === total - 1 ? '交卷 ✓' : '下一题 →';
     btnNext.className = 'nav-btn primary exam';
     btnNext.disabled  = false;
   } else {
+    btnPrev.disabled = S.cur === 0;
     const isRevealed = S.revealed.has(S.cur);
     btnNext.textContent = S.cur === total - 1 ? '完成 ✓' : '下一题 →';
     btnNext.className = 'nav-btn primary';
@@ -1474,7 +1824,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
   tags.className = 'q-tags';
   if (q.mode) tags.innerHTML += `<span class="q-tag mode-tag">${esc(q.mode)}</span>`;
   if (q.unit) tags.innerHTML += `<span class="q-tag unit-tag">${esc(q.unit)}</span>`;
-  if (q.rate != null && q.rate !== '' && q.rate !== undefined) {
+  if (q.rate != null && q.rate !== '' && q.rate !== undefined && !isExam) {
     let rateVal = q.rate;
     if (typeof rateVal === 'string') rateVal = parseFloat(rateVal.replace('%',''));
     if (!isNaN(rateVal) && rateVal > 0) {
@@ -1606,11 +1956,29 @@ function selectOpt(letter, btn) {
       btn.classList.add('selected');
       const dot = document.querySelector(`.q-dot[data-idx="${S.cur}"]`);
       if (dot) { dot.classList.add('answered'); }
+      saveExamSession();   // 答题后立即保存
       // 自动前进（短暂延迟让用户看到选中态）
       setTimeout(() => {
         const total = S.questions.length;
-        if (S.cur < total - 1) { S.cur++; renderQ('forward'); updateGridDot(); }
-        else { document.getElementById('btn-next').textContent = '交卷 ✓'; document.getElementById('btn-next').disabled = false; }
+        if (S.cur < total - 1) {
+          const nextIdx  = S.cur + 1;
+          const curGIdx  = getGroupIdxForQ(S.cur);
+          const nextGIdx = getGroupIdxForQ(nextIdx);
+          const curGroup = S.modeGroups[curGIdx];
+          if (!curGroup.allowBack) {
+            S.caseMaxReached[curGIdx] = Math.max(S.caseMaxReached[curGIdx] ?? nextIdx, nextIdx);
+          }
+          if (nextGIdx !== curGIdx) {
+            const nextGroup = S.modeGroups[nextGIdx];
+            showGroupTransitionDialog(nextGroup.mode, () => {
+              S.currentGroupIdx = nextGIdx;
+              if (!nextGroup.allowBack) S.caseMaxReached[nextGIdx] = S.caseMaxReached[nextGIdx] ?? nextIdx;
+              S.cur = nextIdx; renderQ('forward'); updateGridDot();
+            });
+          } else {
+            S.cur++; renderQ('forward'); updateGridDot();
+          }
+        } else { document.getElementById('btn-next').textContent = '交卷 ✓'; document.getElementById('btn-next').disabled = false; }
       }, 250);
 
     } else {
@@ -1655,10 +2023,29 @@ function submitMulti() {
     // 考试模式：标记已答，更新小地图，直接跳下一题
     const dot = document.querySelector(`.q-dot[data-idx="${S.cur}"]`);
     if (dot) dot.classList.add('answered');
+    saveExamSession();   // 多选提交后立即保存
     setTimeout(() => {
       const total = S.questions.length;
-      if (S.cur < total - 1) { S.cur++; renderQ('forward'); updateGridDot(); }
-      else { document.getElementById('btn-next').textContent = '交卷 ✓'; document.getElementById('btn-next').disabled = false; }
+      if (S.cur < total - 1) {
+        const nextIdx  = S.cur + 1;
+        const curGIdx  = getGroupIdxForQ(S.cur);
+        const nextGIdx = getGroupIdxForQ(nextIdx);
+        // 案例分析组内推进：记录最远到达
+        const curGroup = S.modeGroups[curGIdx];
+        if (!curGroup.allowBack) {
+          S.caseMaxReached[curGIdx] = Math.max(S.caseMaxReached[curGIdx] ?? nextIdx, nextIdx);
+        }
+        if (nextGIdx !== curGIdx) {
+          const nextGroup = S.modeGroups[nextGIdx];
+          showGroupTransitionDialog(nextGroup.mode, () => {
+            S.currentGroupIdx = nextGIdx;
+            if (!nextGroup.allowBack) S.caseMaxReached[nextGIdx] = S.caseMaxReached[nextGIdx] ?? nextIdx;
+            S.cur = nextIdx; renderQ('forward'); updateGridDot();
+          });
+        } else {
+          S.cur++; renderQ('forward'); updateGridDot();
+        }
+      } else { document.getElementById('btn-next').textContent = '交卷 ✓'; document.getElementById('btn-next').disabled = false; }
     }, 120);
 
   } else {
@@ -1731,16 +2118,54 @@ function nextOrSubmit() {
   const total = S.questions.length;
   if (S.mode === 'exam' && S.cur === total - 1) { submitExam(); return; }
   if (S.mode === 'practice' && S.cur === total - 1) { finishPractice(); return; }
+
+  if (S.mode === 'exam') {
+    const nextIdx  = S.cur + 1;
+    const curGIdx  = getGroupIdxForQ(S.cur);
+    const nextGIdx = getGroupIdxForQ(nextIdx);
+
+    if (nextGIdx !== curGIdx) {
+      // 跨题型组——弹窗提示
+      const nextGroup = S.modeGroups[nextGIdx];
+      showGroupTransitionDialog(nextGroup.mode, () => {
+        S.currentGroupIdx = nextGIdx;
+        // 案例分析组：记录最远到达位置
+        if (!nextGroup.allowBack) {
+          S.caseMaxReached[nextGIdx] = S.caseMaxReached[nextGIdx] ?? nextIdx;
+        }
+        S.cur = nextIdx;
+        renderQ('forward');
+        updateGridDot();
+      });
+      return;
+    }
+
+    // 同组内：若为案例分析，更新最远到达位置
+    const curGroup = S.modeGroups[curGIdx];
+    if (!curGroup.allowBack) {
+      S.caseMaxReached[curGIdx] = Math.max(S.caseMaxReached[curGIdx] ?? nextIdx, nextIdx);
+    }
+  }
+
   S.cur++;
   renderQ('forward');
-  if (S.mode === 'exam') updateGridDot();
+  if (S.mode === 'exam') { updateGridDot(); saveExamSession(); }
 }
 
 function prevQ() {
+  if (S.mode === 'exam') {
+    if (!examCanGoBack(S.cur)) {
+      const gIdx = getGroupIdxForQ(S.cur);
+      const g    = S.modeGroups[gIdx];
+      if (!g.allowBack) toast('案例分析题不能回退');
+      else               toast('已进入「' + g.mode + '」，不能返回上一题型');
+      return;
+    }
+  }
   if (S.cur > 0) {
     S.cur--;
     renderQ('back');
-    if (S.mode === 'exam') updateGridDot();
+    if (S.mode === 'exam') { updateGridDot(); saveExamSession(); }
   }
 }
 
@@ -1748,12 +2173,19 @@ function toggleFlag() {
   if (S.marked.has(S.cur)) S.marked.delete(S.cur); else S.marked.add(S.cur);
   document.getElementById('flag-btn').classList.toggle('active', S.marked.has(S.cur));
   updateGridDot();
+  if (S.mode === 'exam') saveExamSession();
 }
 
 function quitQuiz() {
   clearInterval(S.timerInterval);
   if (S.mode === 'exam') {
-    if (!confirm('确认退出考试？本次记录不会保存')) return;
+    if (!confirm('确认退出考试？本次记录不会保存')) {
+      // 用户取消，重启计时器
+      const elapsed = Math.floor((Date.now() - S.examStart) / 1000);
+      startTimer(Math.max(0, S.examLimit - elapsed));
+      return;
+    }
+    clearExamSession();   // 用户主动放弃，清除存档
   }
   showScreen('s-home', 'back');
 }
@@ -1779,16 +2211,49 @@ function updateTimerDisp(sec) {
 function buildGrid() {
   const inner = document.getElementById('q-grid-inner');
   inner.innerHTML = '';
+  let lastGIdx = -1;
   S.questions.forEach((_, i) => {
+    const gIdx = getGroupIdxForQ(i);
+    // 插入题型分组标签
+    if (gIdx !== lastGIdx) {
+      lastGIdx = gIdx;
+      const lbl = document.createElement('div');
+      lbl.className = 'q-grid-group-label';
+      lbl.textContent = S.modeGroups[gIdx].mode || '题目';
+      inner.appendChild(lbl);
+    }
     const dot = document.createElement('div');
     dot.className = `q-dot${i === 0 ? ' cur' : ''}`;
     dot.dataset.idx = i;
     dot.textContent = i + 1;
     dot.onclick = () => {
+      if (S.mode === 'exam') {
+        const curGIdx    = getGroupIdxForQ(S.cur);
+        const targetGIdx = getGroupIdxForQ(i);
+        const targetG    = S.modeGroups[targetGIdx];
+        // 不能回到之前的题型组
+        if (targetGIdx < S.currentGroupIdx) { toast('不能返回已完成的题型'); return; }
+        // 案例分析组内不能回退
+        if (!targetG.allowBack && i < S.cur && targetGIdx === curGIdx) { toast('案例分析题不能回退'); return; }
+        // 案例分析组只能到达已解锁的题目（已到达+1）
+        if (!targetG.allowBack && i > (S.caseMaxReached[targetGIdx] ?? targetG.startIdx)) {
+          toast('请按顺序作答案例分析题'); return;
+        }
+        // 跨组前进需要弹窗
+        if (targetGIdx > curGIdx) {
+          const captured = i;
+          showGroupTransitionDialog(targetG.mode, () => {
+            S.currentGroupIdx = targetGIdx;
+            if (!targetG.allowBack) S.caseMaxReached[targetGIdx] = S.caseMaxReached[targetGIdx] ?? captured;
+            S.cur = captured;
+            renderQ('forward'); updateGridDot();
+          });
+          return;
+        }
+      }
       const dir = i > S.cur ? 'forward' : i < S.cur ? 'back' : 'none';
-      S.cur = i;
-      renderQ(dir);
-      updateGridDot();
+      S.cur = i; renderQ(dir);
+      if (S.mode === 'exam') updateGridDot();
     };
     inner.appendChild(dot);
   });
@@ -1806,9 +2271,20 @@ function toggleGrid() {
   document.getElementById('q-grid-panel').classList.toggle('open');
 }
 
+// 点击题目列表区域外自动折叠
+document.addEventListener('click', e => {
+  const panel = document.getElementById('q-grid-panel');
+  if (!panel || !panel.classList.contains('open')) return;
+  const toggle = document.getElementById('grid-toggle');
+  if (!panel.contains(e.target) && !toggle.contains(e.target)) {
+    panel.classList.remove('open');
+  }
+});
+
 // ── Submit ──────────────────────────────────
 function submitExam() {
   clearInterval(S.timerInterval);
+  clearExamSession();   // 正常交卷，清除存档
   calculateResults();
   showScreen('s-results');
 }
@@ -2326,10 +2802,20 @@ function getSwipeDir(dx, dy){
   const hintR = document.getElementById('swipe-hint-right');
 
   function stage(){ return quizBody.querySelector('.q-stage'); }
-  function canPrev(){ return S.cur>0; }
+  function canPrev(){
+    if(S.cur<=0) return false;
+    if(S.mode==='exam') return examCanGoBack(S.cur);
+    return true;
+  }
   function canNext(){
-    if(S.mode==='exam') return S.cur<S.questions.length-1;
-    return S.revealed.has(S.cur) && S.cur<S.questions.length-1;
+    if(S.mode==='exam'){
+      if(S.cur>=S.questions.length-1) return false;
+      // 跨题型组时不允许滑动（需按钮弹窗确认）
+      const nextGIdx=getGroupIdxForQ(S.cur+1);
+      const curGIdx =getGroupIdxForQ(S.cur);
+      return nextGIdx===curGIdx;
+    }
+    return S.revealed.has(S.cur)&&S.cur<S.questions.length-1;
   }
   function updateHints(dx){
     hintL?.classList.toggle('visible', dx>10 && canPrev());
@@ -2479,6 +2965,16 @@ document.addEventListener('click', e=>{
   if(e.target.closest('.memo-rate-row')||e.target.closest('.memo-reveal-btn')) return;
   if(e.target.closest('.memo-card')) memoReveal();
 });
+
+// 页面关闭/刷新时兜底保存
+window.addEventListener('beforeunload', () => {
+  saveExamSession();
+});
+
+// 每 20 秒自动保存一次（防止仅修改标记/位置未及时保存）
+setInterval(() => {
+  if (S.mode === 'exam' && S.questions.length) saveExamSession();
+}, 20000);
 
 init();
 </script>
