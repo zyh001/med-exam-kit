@@ -1,30 +1,52 @@
 from __future__ import annotations
 import json
+import logging
+import time
 from pathlib import Path
+from typing import Iterator
 from med_exam_toolkit.models import Question
 from med_exam_toolkit.parsers import get_parser, discover
 
+logger = logging.getLogger(__name__)
 
-def load_json_files(input_dir: str | Path, parser_map: dict[str, str]) -> list[Question]:
+
+def load_json_files(
+    input_dir: str | Path,
+    parser_map: dict[str, str],
+    *,
+    progress_interval: int = 100
+) -> list[Question]:
     """
     扫描目录下所有 .json 文件，根据 pkg 字段分发到对应 parser。
 
-    parser_map: {"com.ahuxueshu": "ahuyikao", "com.yikaobang.yixue": "yikaobang"}
+    Args:
+        input_dir: 输入目录路径
+        parser_map: {"com.ahuxueshu": "ahuyikao", "com.yikaobang.yixue": "yikaobang"}
+        progress_interval: 每处理多少个文件打印一次进度
+
+    Returns:
+        Question 对象列表
     """
     discover()  # 确保所有内置 parser 已注册
 
     input_path = Path(input_dir)
     if not input_path.exists():
-        raise FileNotFoundError(f"输入目录不存在: {input_path}")
+        raise FileNotFoundError(f"输入目录不存在：{input_path}")
 
     questions: list[Question] = []
     skipped = 0
+    processed = 0
+    start_time = time.time()
 
-    for fp in sorted(input_path.rglob("*.json")):
+    json_files = list(sorted(input_path.rglob("*.json")))
+    total_files = len(json_files)
+    print(f"[INFO] 开始处理 {total_files} 个文件...")
+
+    for file_idx, fp in enumerate(json_files, 1):
         try:
             raw = json.loads(fp.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            print(f"[WARN] 跳过无法解析的文件 {fp}: {e}")
+            logger.warning(f"跳过无法解析的文件 {fp}: {e}")
             skipped += 1
             continue
 
@@ -32,14 +54,13 @@ def load_json_files(input_dir: str | Path, parser_map: dict[str, str]) -> list[Q
         parser_name = parser_map.get(pkg)
 
         if parser_name is None:
-            # 尝试模糊匹配
             for key, name in parser_map.items():
                 if key in pkg or pkg in key:
                     parser_name = name
                     break
 
         if parser_name is None:
-            print(f"[WARN] 未知 pkg={pkg}，跳过文件 {fp.name}")
+            logger.warning(f"未知 pkg={pkg}，跳过文件 {fp.name}")
             skipped += 1
             continue
 
@@ -47,10 +68,83 @@ def load_json_files(input_dir: str | Path, parser_map: dict[str, str]) -> list[Q
             parser = get_parser(parser_name)
             q = parser.parse(raw)
             q.source_file = str(fp.resolve())
+            processed += 1
             questions.append(q)
+
+            if file_idx % progress_interval == 0 or file_idx == total_files:
+                elapsed = time.time() - start_time
+                rate = file_idx / elapsed if elapsed > 0 else 0
+                print(f"[INFO] 进度：{file_idx}/{total_files} ({file_idx/total_files*100:.1f}%), "
+                      f"处理 {processed} 题，跳过 {skipped} 个，速度：{rate:.1f} 文件/秒")
         except Exception as e:
-            print(f"[WARN] 解析失败 {fp.name}: {e}")
+            logger.warning(f"解析失败 {fp.name}: {e}")
             skipped += 1
 
-    print(f"[INFO] 加载完成: {len(questions)} 题, 跳过 {skipped} 个文件")
+    elapsed = time.time() - start_time
+    print(f"[INFO] 加载完成：{len(questions)} 题，跳过 {skipped} 个文件，耗时 {elapsed:.2f} 秒")
     return questions
+
+
+def load_json_files_streaming(
+    input_dir: str | Path,
+    parser_map: dict[str, str],
+    *,
+    progress_interval: int = 100
+) -> Iterator[Question]:
+    """
+    流式加载 JSON 文件，逐个产生 Question 对象，适用于大型题库。
+    """
+    discover()
+
+    input_path = Path(input_dir)
+    if not input_path.exists():
+        raise FileNotFoundError(f"输入目录不存在：{input_path}")
+
+    skipped = 0
+    processed = 0
+    start_time = time.time()
+
+    json_files = list(sorted(input_path.rglob("*.json")))
+    total_files = len(json_files)
+    logger.info(f"开始流式处理 {total_files} 个文件...")
+
+    for file_idx, fp in enumerate(json_files, 1):
+        try:
+            raw = json.loads(fp.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, UnicodeDecodeError) as e:
+            logger.warning(f"跳过无法解析的文件 {fp}: {e}")
+            skipped += 1
+            continue
+
+        pkg = raw.get("pkg", "")
+        parser_name = parser_map.get(pkg)
+
+        if parser_name is None:
+            for key, name in parser_map.items():
+                if key in pkg or pkg in key:
+                    parser_name = name
+                    break
+
+        if parser_name is None:
+            logger.warning(f"未知 pkg={pkg}，跳过文件 {fp.name}")
+            skipped += 1
+            continue
+
+        try:
+            parser = get_parser(parser_name)
+            q = parser.parse(raw)
+            q.source_file = str(fp.resolve())
+            processed += 1
+            yield q
+
+            if file_idx % progress_interval == 0 or file_idx == total_files:
+                elapsed = time.time() - start_time
+                rate = file_idx / elapsed if elapsed > 0 else 0
+                logger.info(f"进度：{file_idx}/{total_files} ({file_idx/total_files*100:.1f}%), "
+                            f"处理 {processed} 题，跳过 {skipped} 个，速度：{rate:.1f} 文件/秒")
+        except Exception as e:
+            logger.warning(f"解析失败 {fp.name}: {e}")
+            skipped += 1
+
+    elapsed = time.time() - start_time
+    logger.info(f"流式加载完成：处理 {processed} 题，跳过 {skipped} 个文件，耗时 {elapsed:.2f} 秒")
