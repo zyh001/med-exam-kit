@@ -1,11 +1,7 @@
 from __future__ import annotations
 import hashlib
 import re
-import logging
-from typing import Iterator
 from med_exam_toolkit.models import Question
-
-logger = logging.getLogger(__name__)
 
 
 def _normalize_text(text: str) -> str:
@@ -59,21 +55,17 @@ def compute_fingerprint(q: Question, strategy: str = "strict") -> str:
 
 
 def deduplicate(
-    questions: list[Question] | Iterator[Question],
+    questions: list[Question],
     strategy: str = "strict",
 ) -> list[Question]:
     """
     去重，返回去重后的列表。
     保留首次出现的题目，后续重复的丢弃。
-    
-    支持 list 和 Iterator 输入。
     """
     seen: dict[str, Question] = {}
     duplicates = 0
-    total = 0
 
     for q in questions:
-        total += 1
         fp = compute_fingerprint(q, strategy)
         q.fingerprint = fp
         if fp in seen:
@@ -86,5 +78,5 @@ def deduplicate(
             seen[fp] = q
 
     result = list(seen.values())
-    print(f"[INFO] 去重完成：{total} -> {len(result)} (去除 {duplicates} 条重复)")
+    print(f"[INFO] 去重完成: {len(questions)} -> {len(result)} (去除 {duplicates} 条重复)")
     return result
