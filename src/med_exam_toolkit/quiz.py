@@ -73,22 +73,88 @@ def api_questions():
         if grp:
             groups.append(grp)
 
-    # 打乱以大题为单位，子题顺序保持不变
-    if shuffle:
-        rng = random.Random(int(seed)) if seed else random.Random()
-        rng.shuffle(groups)
+    # ── 按题型分组 ──────────────────────────────────────────────────
+    # mode_order 保持题型在题库中的原始出现顺序（单选→共用题干→案例…）
+    mode_order: list[str] = []
+    mode_map: dict[str, list[list[dict]]] = {}
+    for grp in groups:
+        mode_key = grp[0]["mode"] if grp else ""
+        if mode_key not in mode_map:
+            mode_map[mode_key] = []
+            mode_order.append(mode_key)
+        mode_map[mode_key].append(grp)
 
-    # 展平
-    rows = [sq for grp in groups for sq in grp]
+    rng = random.Random(int(seed)) if seed else random.Random()
 
-    # 限量：按小题数截断，但不拆散一道大题（取到当前大题结束）
-    if limit > 0:
-        cut = []
-        for grp in groups:
-            cut.extend(grp)
-            if len(cut) >= limit:
-                break
-        rows = cut
+    if shuffle and limit > 0:
+        # ── 按比例从每个题型抽取，保证每种题型都有题目 ──────────────
+        # 各题型的小题总数
+        mode_sq_total = {
+            mk: sum(len(g) for g in mode_map[mk]) for mk in mode_order
+        }
+        total_sq_all = sum(mode_sq_total.values())
+
+        # 第一步：按比例分配配额（向下取整），至少为 1
+        quotas: dict[str, int] = {}
+        remaining = limit
+        for mk in mode_order:
+            if total_sq_all == 0:
+                q_quota = 1
+            else:
+                q_quota = max(1, int(limit * mode_sq_total[mk] / total_sq_all))
+            # 不能超过该题型实际小题数
+            q_quota = min(q_quota, mode_sq_total[mk])
+            quotas[mk] = q_quota
+            remaining -= q_quota
+
+        # 第二步：把剩余配额按比例补充给各题型（还有空间的话）
+        if remaining > 0:
+            for mk in mode_order:
+                if remaining <= 0:
+                    break
+                available = mode_sq_total[mk] - quotas[mk]
+                add = min(remaining, available)
+                quotas[mk] += add
+                remaining -= add
+
+        # 第三步：按配额从每个题型随机抽大题（不拆散子题）
+        result_groups: list[list[dict]] = []
+        for mk in mode_order:
+            pool = list(mode_map[mk])   # 该题型所有大题
+            rng.shuffle(pool)
+            picked: list[list[dict]] = []
+            picked_sq = 0
+            for grp in pool:
+                if picked_sq + len(grp) > quotas[mk]:
+                    # 若这道大题加进去超额，且已有题目了，跳过（避免拆散子题）
+                    if picked_sq > 0:
+                        continue
+                # 第一道大题无论多少子题都放进去（保证至少有 1 大题）
+                picked.append(grp)
+                picked_sq += len(grp)
+                if picked_sq >= quotas[mk]:
+                    break
+            result_groups.extend(picked)
+
+        rows = [sq for grp in result_groups for sq in grp]
+
+    else:
+        # ── 不限量 或 不随机：按题型顺序输出 ─────────────────────────
+        if shuffle:
+            for mk in mode_order:
+                rng.shuffle(mode_map[mk])
+        groups = [g for mk in mode_order for g in mode_map[mk]]
+
+        rows = [sq for grp in groups for sq in grp]
+
+        # 不随机时的限量：顺序截断（不拆散大题）
+        if limit > 0:
+            cut: list[dict] = []
+            for grp in groups:
+                cut.extend(grp)
+                if len(cut) >= limit:
+                    break
+            rows = cut
 
     return jsonify({"total": len(rows), "items": rows})
 
