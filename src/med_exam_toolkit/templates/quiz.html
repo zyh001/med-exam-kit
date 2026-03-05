@@ -948,6 +948,27 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .gtm-btn.confirm:hover{opacity:.9}
 
+/* ── 练习模式题目网格：对错颜色 ── */
+.q-dot.correct  {background:var(--success-bg);border-color:var(--success);color:var(--success)}
+.q-dot.wrong    {background:var(--danger-bg);border-color:var(--danger);color:var(--danger)}
+.q-dot.revealed {background:var(--warn-bg);border-color:var(--warning);color:var(--warning)}
+
+/* ── 最近记录：可点击 + 进行中徽章 ── */
+.recent-item{cursor:pointer}
+.recent-item:hover{border-color:var(--accent)}
+.recent-item:active{transform:scale(.98)}
+.recent-badge{
+  display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:5px;
+  margin-left:6px;vertical-align:middle;
+}
+.recent-badge.ongoing{background:var(--accent-bg);color:var(--accent)}
+.recent-badge.done   {background:var(--success-bg);color:var(--success)}
+.recent-resume-btn{
+  font-size:12px;font-weight:700;color:var(--accent);
+  background:var(--accent-bg);border:1px solid var(--accent);
+  border-radius:7px;padding:4px 10px;white-space:nowrap;flex-shrink:0;
+}
+
 /* ── 题目列表：题型分组标签 ── */
 .q-grid-group-label{
   width:100%;font-size:10px;font-weight:700;color:var(--muted);
@@ -956,6 +977,74 @@ button,a,[role=button],label{touch-action:manipulation}
   border-top:1px solid var(--border);
 }
 .q-grid-group-label:first-child{border-top:none;margin-top:0}
+
+/* ════════════════════════════════════════════
+   Config 增强 UI
+════════════════════════════════════════════ */
+/* section header = label + 右侧小控件 */
+.cfg-section-head{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:10px;
+}
+/* 当前选中数量徽章 */
+.cfg-meta-badge{
+  font-size:11px;font-weight:600;color:var(--accent);
+  background:var(--accent-bg);padding:2px 8px;border-radius:5px;flex-shrink:0;
+}
+/* 章节搜索框 */
+.unit-search-input{
+  width:100%;background:var(--card);border:1.5px solid var(--border);
+  border-radius:9px;padding:7px 12px;font-size:13px;color:var(--text);
+  margin-bottom:8px;
+}
+.unit-search-input:focus{border-color:var(--accent);outline:none}
+.unit-search-input::placeholder{color:var(--muted)}
+/* 限高可滚动 chip 容器 */
+.chip-scroll{max-height:160px;overflow-y:auto;padding-right:2px}
+/* section 内小型切换标签 */
+.cfg-toggle-inline{
+  display:flex;align-items:center;gap:5px;cursor:pointer;
+  font-size:12px;color:var(--muted);user-select:none;flex-shrink:0;
+}
+.cfg-toggle-inline input[type="checkbox"]{accent-color:var(--accent);cursor:pointer}
+.cfg-toggle-inline:hover{color:var(--accent)}
+
+/* ── 精细配置 ── */
+.mode-quota-list{display:flex;flex-direction:column;gap:10px}
+.mode-quota-row{display:flex;align-items:center;gap:10px}
+.mode-quota-label{flex:1;font-size:13px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.mode-quota-avail{font-size:11px;color:var(--muted);flex-shrink:0;width:58px;text-align:right}
+.mode-quota-input{
+  width:68px;text-align:center;background:var(--card);
+  border:1.5px solid var(--border);border-radius:8px;
+  padding:5px 6px;font-size:15px;font-weight:700;color:var(--text);flex-shrink:0;
+}
+.mode-quota-input:focus{border-color:var(--accent);outline:none}
+.mode-quota-total-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 0 0;border-top:1px solid var(--border);margin-top:4px;
+  font-size:12px;color:var(--muted);
+}
+.mode-quota-total-row strong{color:var(--accent);font-size:15px}
+
+/* ── 难度分布 ── */
+.difficulty-presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
+.diff-preset{
+  padding:5px 12px;border-radius:8px;font-size:12px;font-weight:600;
+  background:var(--card);border:1.5px solid var(--border);color:var(--muted);
+  cursor:pointer;transition:all .15s;
+}
+.diff-preset:hover{border-color:var(--accent);color:var(--accent)}
+.diff-preset.active{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+.difficulty-sliders{display:flex;flex-direction:column;gap:10px}
+.diff-row{display:flex;align-items:center;gap:10px}
+.diff-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0}
+.diff-dot.easy   {background:var(--success)}
+.diff-dot.medium {background:var(--accent)}
+.diff-dot.hard   {background:var(--warning)}
+.diff-dot.extreme{background:var(--danger)}
+.diff-label{width:36px;font-size:12px;color:var(--muted);flex-shrink:0}
+.diff-pct{width:36px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;flex-shrink:0}
 
 </style>
 </head>
@@ -1036,18 +1125,49 @@ button,a,[role=button],label{touch-action:manipulation}
     <span class="mode-badge" id="cfg-badge"></span>
   </div>
   <div class="config-body" id="config-body">
-    <!-- 章节 -->
+
+    <!-- ── 章节筛选（可搜索 + 限高滚动）── -->
     <div class="config-section">
-      <div class="config-section-label">章节筛选</div>
-      <div class="chip-wrap" id="unit-chips"></div>
+      <div class="cfg-section-head">
+        <span class="config-section-label">章节筛选</span>
+        <span class="cfg-meta-badge" id="unit-sel-count">全部</span>
+      </div>
+      <input class="unit-search-input" id="unit-search"
+             placeholder="🔍 搜索章节名称…" oninput="filterUnitChips(this.value)">
+      <div class="chip-wrap chip-scroll" id="unit-chips"></div>
     </div>
-    <!-- 题型 -->
+
+    <!-- ── 题型配置（筛选 / 精细配额 切换）── -->
     <div class="config-section">
-      <div class="config-section-label">题型筛选</div>
-      <div class="chip-wrap" id="mode-chips"></div>
+      <div class="cfg-section-head">
+        <span class="config-section-label">题型配置</span>
+        <label class="cfg-toggle-inline">
+          <input type="checkbox" id="cfg-per-mode" onchange="togglePerMode()">
+          精细配置
+        </label>
+      </div>
+      <!-- 普通筛选 -->
+      <div id="mode-filter-panel">
+        <div class="chip-wrap" id="mode-chips"></div>
+      </div>
+      <!-- 精细配置（每种题型单独设置数量）-->
+      <div id="mode-quota-panel" style="display:none"></div>
     </div>
-    <!-- 数量 -->
+
+    <!-- ── 难度分布 ── -->
     <div class="config-section">
+      <div class="cfg-section-head">
+        <span class="config-section-label">难度分布</span>
+        <label class="cfg-toggle-inline">
+          <input type="checkbox" id="cfg-difficulty" onchange="toggleDifficulty()">
+          按正确率抽题
+        </label>
+      </div>
+      <div id="difficulty-panel" style="display:none"></div>
+    </div>
+
+    <!-- ── 数量 ── -->
+    <div class="config-section" id="count-section">
       <div class="config-section-label">题目数量</div>
       <div class="count-row">
         <div class="count-val" id="count-display">50</div>
@@ -1057,20 +1177,22 @@ button,a,[role=button],label{touch-action:manipulation}
         </div>
       </div>
     </div>
-    <!-- 考试专属 -->
+
+    <!-- ── 考试专属 ── -->
     <div id="exam-opts" style="display:none">
       <div class="config-section">
         <div class="config-section-label">考试时长（分钟）</div>
         <div class="chip-wrap" id="time-chips">
-          <button class="chip exam-chip" data-val="60" onclick="selectTime(this,60)">60分钟</button>
+          <button class="chip exam-chip" data-val="60"  onclick="selectTime(this,60)">60分钟</button>
           <button class="chip exam-chip active" data-val="90" onclick="selectTime(this,90)">90分钟</button>
           <button class="chip exam-chip" data-val="120" onclick="selectTime(this,120)">120分钟</button>
           <button class="chip exam-chip" data-val="150" onclick="selectTime(this,150)">150分钟</button>
         </div>
       </div>
     </div>
-    <!-- 随机顺序 -->
-    <div class="config-section">
+
+    <!-- ── 随机顺序 ── -->
+    <div class="config-section" id="shuffle-section">
       <div class="toggle-row">
         <div>
           <div>随机顺序</div>
@@ -1083,6 +1205,7 @@ button,a,[role=button],label{touch-action:manipulation}
         </label>
       </div>
     </div>
+
   </div>
   <div class="config-footer">
     <button class="start-btn" id="start-btn" onclick="startSession()">开始练习</button>
@@ -1322,6 +1445,7 @@ const S = {
   currentGroupIdx: 0,      // 当前所在题型组索引（只增不减）
   caseMaxReached: {},      // 案例分析组内已到达的最远题目索引
   _groupModalCb: null,     // 题型切换确认框回调
+  practiceSessionId: null, // 当前练习进度 ID
 };
 
 const CFG = {
@@ -1330,7 +1454,90 @@ const CFG = {
   count: 50,
   shuffle: true,
   examTime: 90,
+  perMode:    null,   // null = 关闭；{mode: sqCount} = 精细配额
+  difficulty: null,   // null = 关闭；{easy,medium,hard,extreme} = 权重
 };
+
+// ════════════════════════════════════════════
+// 练习进度持久化
+// ════════════════════════════════════════════
+const PRACTICE_SESSIONS_KEY = 'quiz_practice_sessions_v1';
+const MAX_PRACTICE_SESSIONS = 5;
+
+function _getPracticeSessions() {
+  try { return JSON.parse(localStorage.getItem(PRACTICE_SESSIONS_KEY) || '[]'); }
+  catch { return []; }
+}
+function _setPracticeSessions(arr) {
+  try { localStorage.setItem(PRACTICE_SESSIONS_KEY, JSON.stringify(arr)); } catch(e) {}
+}
+
+/** 生成当前练习的可读标题 */
+function _practiceTitle() {
+  const units = [...new Set(S.questions.map(q => q.unit).filter(Boolean))];
+  const unitLabel = units.length === 0 ? '全部章节'
+                  : units.length <= 2  ? units.join('、')
+                  : units.slice(0,2).join('、') + ' 等';
+  return `${unitLabel} · ${S.questions.length} 题`;
+}
+
+/** 保存当前练习进度 */
+function savePracticeSession() {
+  if (S.mode !== 'practice' || !S.questions.length) return;
+  const sessions = _getPracticeSessions();
+  const existIdx = sessions.findIndex(s => s.id === S.practiceSessionId);
+
+  const answered = Object.keys(S.ans).length;
+  const session = {
+    v:         1,
+    id:        S.practiceSessionId,
+    savedAt:   Date.now(),
+    mode:      'practice',
+    cur:       S.cur,
+    questions: S.questions,
+    ans:       _serializeAns(S.ans),
+    revealed:  [...S.revealed],
+    marked:    [...S.marked],
+    title:     _practiceTitle(),
+    answered,
+    total:     S.questions.length,
+    startedAt: S.examStart,
+  };
+
+  if (existIdx >= 0) sessions[existIdx] = session;
+  else sessions.unshift(session);
+
+  _setPracticeSessions(sessions.slice(0, MAX_PRACTICE_SESSIONS));
+}
+
+/** 练习完成时清除该进度（或标记为已完成） */
+function clearPracticeSession() {
+  if (!S.practiceSessionId) return;
+  const sessions = _getPracticeSessions().filter(s => s.id !== S.practiceSessionId);
+  _setPracticeSessions(sessions);
+  S.practiceSessionId = null;
+}
+
+/** 从存档恢复练习进度 */
+function resumePracticeSession(id) {
+  const sessions = _getPracticeSessions();
+  const s = sessions.find(s => s.id === id);
+  if (!s) return;
+
+  S.mode             = 'practice';
+  S.questions        = s.questions;
+  S.ans              = _deserializeAns(s.ans);
+  S.revealed         = new Set(s.revealed || []);
+  S.marked           = new Set(s.marked   || []);
+  S.cur              = s.cur ?? 0;
+  S.examStart        = s.startedAt || Date.now();
+  S.modeGroups       = buildModeGroups(s.questions);
+  S.currentGroupIdx  = 0;
+  S.caseMaxReached   = {};
+  S.practiceSessionId= id;
+
+  startQuiz();
+}
 
 // ════════════════════════════════════════════
 // 考试进度持久化
@@ -1536,12 +1743,33 @@ function openConfig(mode) {
 
   document.getElementById('exam-opts').style.display = mode === 'exam' ? '' : 'none';
 
-  // Chips
-  buildChips('unit-chips', S.bankInfo.units, 'unit', mode);
-  buildChips('mode-chips', S.bankInfo.modes, 'mode', mode);
-
+  // 重置所有可选项
   CFG.units = new Set(['__all__']);
   CFG.modes = new Set(['__all__']);
+  CFG.perMode    = null;
+  CFG.difficulty = null;
+
+  // 重置精细配额 / 难度面板开关
+  const pmCk = document.getElementById('cfg-per-mode');
+  if (pmCk) pmCk.checked = false;
+  document.getElementById('mode-filter-panel').style.display = '';
+  document.getElementById('mode-quota-panel').style.display = 'none';
+  document.getElementById('mode-quota-panel').innerHTML = '';
+  document.getElementById('count-section').style.display = '';
+
+  const diffCk = document.getElementById('cfg-difficulty');
+  if (diffCk) diffCk.checked = false;
+  document.getElementById('difficulty-panel').style.display = 'none';
+  document.getElementById('difficulty-panel').innerHTML = '';
+
+  // 清空章节搜索
+  const search = document.getElementById('unit-search');
+  if (search) search.value = '';
+
+  // 构建 chips
+  buildUnitChips(S.bankInfo.units, mode);
+  buildModeChips(S.bankInfo.modes, mode);
+  updateUnitSelCount();
 
   const maxQ = S.bankInfo.total_sq;
   const slider = document.getElementById('count-slider');
@@ -1552,23 +1780,59 @@ function openConfig(mode) {
   showScreen('s-config');
 }
 
-function buildChips(containerId, items, type, mode) {
-  const wrap = document.getElementById(containerId);
+// ── 章节 chips（带搜索 + 选中计数）──────────────────────────────────
+function buildUnitChips(items, mode) {
+  const wrap = document.getElementById('unit-chips');
   wrap.innerHTML = '';
   const all = document.createElement('button');
   all.className = 'chip active';
   all.textContent = '全部';
   all.dataset.val = '__all__';
-  all.onclick = () => toggleChip(all, type, mode);
+  all.onclick = () => toggleChip(all, 'unit', mode);
   wrap.appendChild(all);
   items.forEach(item => {
     const btn = document.createElement('button');
-    btn.className = `chip`;
+    btn.className = 'chip';
     btn.textContent = item;
     btn.dataset.val = item;
-    btn.onclick = () => toggleChip(btn, type, mode);
+    btn.onclick = () => toggleChip(btn, 'unit', mode);
     wrap.appendChild(btn);
   });
+}
+
+function buildModeChips(items, mode) {
+  const wrap = document.getElementById('mode-chips');
+  wrap.innerHTML = '';
+  const all = document.createElement('button');
+  all.className = 'chip active';
+  all.textContent = '全部';
+  all.dataset.val = '__all__';
+  all.onclick = () => toggleChip(all, 'mode', mode);
+  wrap.appendChild(all);
+  items.forEach(item => {
+    const btn = document.createElement('button');
+    btn.className = 'chip';
+    btn.textContent = item;
+    btn.dataset.val = item;
+    btn.onclick = () => toggleChip(btn, 'mode', mode);
+    wrap.appendChild(btn);
+  });
+}
+
+/** 章节搜索实时过滤 */
+function filterUnitChips(query) {
+  const q = query.trim().toLowerCase();
+  document.querySelectorAll('#unit-chips .chip').forEach(c => {
+    if (c.dataset.val === '__all__') { c.style.display = ''; return; }
+    c.style.display = c.textContent.toLowerCase().includes(q) ? '' : 'none';
+  });
+}
+
+/** 更新章节已选数量徽章 */
+function updateUnitSelCount() {
+  const el = document.getElementById('unit-sel-count');
+  if (!el) return;
+  el.textContent = CFG.units.has('__all__') ? '全部' : `已选 ${CFG.units.size} 个`;
 }
 
 function toggleChip(btn, type, mode) {
@@ -1584,9 +1848,156 @@ function toggleChip(btn, type, mode) {
     set.delete('__all__');
     if (set.has(val)) { set.delete(val); btn.classList.remove('active'); }
     else              { set.add(val);    btn.classList.add('active'); }
-    if (set.size === 0) { set.add('__all__'); chips.forEach(c => c.classList.toggle('active', c.dataset.val === '__all__')); }
-    else { chips.forEach(c => c.classList.toggle('active', c.dataset.val !== '__all__' && set.has(c.dataset.val))); document.querySelector(`#${container} .chip[data-val="__all__"]`).classList.remove('active'); }
+    if (set.size === 0) {
+      set.add('__all__');
+      chips.forEach(c => c.classList.toggle('active', c.dataset.val === '__all__'));
+    } else {
+      chips.forEach(c => c.classList.toggle('active',
+        c.dataset.val !== '__all__' && set.has(c.dataset.val)));
+      document.querySelector(`#${container} .chip[data-val="__all__"]`)?.classList.remove('active');
+    }
   }
+  if (type === 'unit') updateUnitSelCount();
+}
+
+// ── 精细配额 ──────────────────────────────────────────────────────
+function togglePerMode() {
+  const on = document.getElementById('cfg-per-mode').checked;
+  document.getElementById('mode-filter-panel').style.display = on ? 'none' : '';
+  document.getElementById('mode-quota-panel').style.display  = on ? '' : 'none';
+  document.getElementById('count-section').style.display     = on ? 'none' : '';
+  if (on) {
+    CFG.perMode = {};
+    buildModeQuota();
+  } else {
+    CFG.perMode = null;
+  }
+}
+
+function buildModeQuota() {
+  const panel = document.getElementById('mode-quota-panel');
+  panel.innerHTML = '';
+  const modes  = S.bankInfo.modes;
+  const sqMap  = S.bankInfo.mode_counts_sq || {};
+
+  const list = document.createElement('div');
+  list.className = 'mode-quota-list';
+
+  modes.forEach(mode => {
+    const available = sqMap[mode] || 0;
+    const def = Math.max(1, Math.round(available * 0.4)); // 默认 40%
+    CFG.perMode[mode] = def;
+
+    const row = document.createElement('div');
+    row.className = 'mode-quota-row';
+    row.innerHTML = `
+      <span class="mode-quota-label" title="${esc(mode)}">${esc(mode)}</span>
+      <span class="mode-quota-avail">共 ${available}</span>
+      <input class="mode-quota-input" type="number" min="0" max="${available}"
+             value="${def}" data-mode="${esc(mode)}"
+             oninput="updatePerModeCount(this)">`;
+    list.appendChild(row);
+  });
+
+  const totalRow = document.createElement('div');
+  totalRow.className = 'mode-quota-total-row';
+  totalRow.innerHTML = `<span>合计小题数</span><strong id="mode-quota-total-val">0</strong>`;
+  list.appendChild(totalRow);
+
+  panel.appendChild(list);
+  updatePerModeTotal();
+}
+
+function updatePerModeCount(input) {
+  const mode = input.dataset.mode;
+  const max  = parseInt(input.max) || 9999;
+  const val  = Math.max(0, Math.min(parseInt(input.value) || 0, max));
+  input.value = val;
+  if (CFG.perMode) CFG.perMode[mode] = val;
+  updatePerModeTotal();
+}
+
+function updatePerModeTotal() {
+  if (!CFG.perMode) return;
+  const total = Object.values(CFG.perMode).reduce((a, b) => a + b, 0);
+  const el = document.getElementById('mode-quota-total-val');
+  if (el) el.textContent = total;
+}
+
+// ── 难度分布 ──────────────────────────────────────────────────────
+const DIFF_PRESETS = [
+  { label:'均衡', v:{easy:25, medium:45, hard:20, extreme:10} },
+  { label:'偏易', v:{easy:45, medium:35, hard:15, extreme:5}  },
+  { label:'偏难', v:{easy:10, medium:30, hard:40, extreme:20} },
+  { label:'拉满', v:{easy:5,  medium:15, hard:40, extreme:40} },
+];
+const DIFF_INFO = [
+  {key:'easy',    label:'简单', cls:'easy',    desc:'正确率 ≥80%'},
+  {key:'medium',  label:'中等', cls:'medium',  desc:'60–80%'},
+  {key:'hard',    label:'较难', cls:'hard',    desc:'40–60%'},
+  {key:'extreme', label:'困难', cls:'extreme', desc:'＜40%'},
+];
+
+function toggleDifficulty() {
+  const on = document.getElementById('cfg-difficulty').checked;
+  document.getElementById('difficulty-panel').style.display = on ? '' : 'none';
+  if (!on) { CFG.difficulty = null; return; }
+  if (!document.getElementById('difficulty-panel').hasChildNodes()) buildDifficultyPanel();
+  else CFG.difficulty = CFG.difficulty || {easy:25, medium:45, hard:20, extreme:10};
+}
+
+function buildDifficultyPanel() {
+  CFG.difficulty = {easy:25, medium:45, hard:20, extreme:10};
+  const panel = document.getElementById('difficulty-panel');
+  panel.innerHTML = '';
+
+  // 预设按钮
+  const presets = document.createElement('div');
+  presets.className = 'difficulty-presets';
+  DIFF_PRESETS.forEach((p, i) => {
+    const btn = document.createElement('button');
+    btn.className = 'diff-preset' + (i === 0 ? ' active' : '');
+    btn.textContent = p.label;
+    btn.onclick = () => applyDiffPreset(p.v, btn);
+    presets.appendChild(btn);
+  });
+  panel.appendChild(presets);
+
+  // 四档滑杆
+  const sliders = document.createElement('div');
+  sliders.className = 'difficulty-sliders';
+  DIFF_INFO.forEach(d => {
+    const row = document.createElement('div');
+    row.className = 'diff-row';
+    row.innerHTML = `
+      <span class="diff-dot ${d.cls}"></span>
+      <span class="diff-label" title="${d.desc}">${d.label}</span>
+      <input type="range" min="0" max="100" value="${CFG.difficulty[d.key]}"
+             style="flex:1" data-key="${d.key}" oninput="updateDiffSlider(this)">
+      <span class="diff-pct" id="diff-pct-${d.key}">${CFG.difficulty[d.key]}%</span>`;
+    sliders.appendChild(row);
+  });
+  panel.appendChild(sliders);
+}
+
+function applyDiffPreset(v, btn) {
+  CFG.difficulty = {...v};
+  document.querySelectorAll('.diff-preset').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  DIFF_INFO.forEach(d => {
+    const slider = document.querySelector(`input[data-key="${d.key}"]`);
+    if (slider) slider.value = v[d.key];
+    const pct = document.getElementById(`diff-pct-${d.key}`);
+    if (pct) pct.textContent = v[d.key] + '%';
+  });
+}
+
+function updateDiffSlider(input) {
+  if (!CFG.difficulty) CFG.difficulty = {};
+  CFG.difficulty[input.dataset.key] = parseInt(input.value);
+  const pct = document.getElementById(`diff-pct-${input.dataset.key}`);
+  if (pct) pct.textContent = input.value + '%';
+  document.querySelectorAll('.diff-preset').forEach(b => b.classList.remove('active'));
 }
 
 function selectTime(btn, val) {
@@ -1663,12 +2074,38 @@ function dismissGroupModal() {
 // ════════════════════════════════════════════
 async function startSession() {
   const params = new URLSearchParams();
-  if (!CFG.units.has('__all__')) CFG.units.forEach(u => params.append('unit', u));
-  if (!CFG.modes.has('__all__')) CFG.modes.forEach(m => params.append('mode', m));
-  params.set('shuffle', document.getElementById('cfg-shuffle').checked ? '1' : '0');
 
-  const maxSlider = Number(document.getElementById('count-slider').max);
-  if (CFG.count < maxSlider) params.set('limit', CFG.count);
+  // 章节筛选
+  if (!CFG.units.has('__all__')) CFG.units.forEach(u => params.append('unit', u));
+
+  const isPM   = document.getElementById('cfg-per-mode')?.checked;
+  const isDiff = document.getElementById('cfg-difficulty')?.checked;
+
+  if (isPM && CFG.perMode) {
+    // ── 精细配额模式：传 per_mode JSON，忽略题型 chips 和数量滑杆 ──
+    const nonZero = Object.fromEntries(
+      Object.entries(CFG.perMode).filter(([, v]) => v > 0)
+    );
+    if (!Object.keys(nonZero).length) { toast('请至少为一种题型设置题目数量'); return; }
+    params.set('per_mode', JSON.stringify(nonZero));
+    params.set('shuffle', '1');
+  } else {
+    // ── 普通模式 ──
+    if (!CFG.modes.has('__all__')) CFG.modes.forEach(m => params.append('mode', m));
+    params.set('shuffle', document.getElementById('cfg-shuffle').checked ? '1' : '0');
+    const maxSlider = Number(document.getElementById('count-slider').max);
+    if (CFG.count < maxSlider) params.set('limit', CFG.count);
+  }
+
+  // 难度分布（两种模式均可叠加）
+  if (isDiff && CFG.difficulty) {
+    const nonZeroDiff = Object.fromEntries(
+      Object.entries(CFG.difficulty).filter(([, v]) => v > 0)
+    );
+    if (Object.keys(nonZeroDiff).length) {
+      params.set('difficulty', JSON.stringify(nonZeroDiff));
+    }
+  }
 
   const data = await fetch('/api/questions?' + params).then(r => r.json());
   if (!data.items.length) { toast('没有符合条件的题目'); return; }
@@ -1679,10 +2116,11 @@ async function startSession() {
   S.marked = new Set();
   S.revealed = new Set();
   S.examStart = Date.now();
-  // 考试模式题型分组（练习/背题模式也预建，不影响逻辑）
   S.modeGroups       = buildModeGroups(S.questions);
   S.currentGroupIdx  = 0;
   S.caseMaxReached   = {};
+  // 练习模式：生成唯一 session ID 用于持久化
+  S.practiceSessionId = S.mode === 'practice' ? String(Date.now()) : null;
 
   if (S.mode === 'memo') startMemo();
   else {
@@ -1704,7 +2142,6 @@ function startQuiz(remainingSeconds) {
   const fill = document.getElementById('progress-fill');
 
   if (isExam) {
-    // 若未传入 remainingSeconds（首次开始），从 CFG 计算完整时长
     if (remainingSeconds === undefined) {
       S.examLimit = CFG.examTime * 60;
       remainingSeconds = S.examLimit;
@@ -1717,9 +2154,11 @@ function startQuiz(remainingSeconds) {
     buildGrid();
   } else {
     timer.style.display = 'none';
-    gridToggle.style.display = 'none';
+    // 练习模式也显示题目列表按钮
+    gridToggle.style.display = '';
     fill.className = 'progress-fill';
     document.getElementById('q-grid-panel').classList.remove('open');
+    buildGrid();
   }
 
   showScreen('s-quiz');
@@ -1796,17 +2235,17 @@ function renderQ(dir = 'none') {
   const btnPrev = document.getElementById('btn-prev');
   const btnNext = document.getElementById('btn-next');
   if (isExam) {
-    // 上一题：受题型分组规则约束
     btnPrev.disabled = !examCanGoBack(S.cur);
     btnNext.textContent = S.cur === total - 1 ? '交卷 ✓' : '下一题 →';
     btnNext.className = 'nav-btn primary exam';
     btnNext.disabled  = false;
   } else {
+    // 练习模式：完全自由导航，两端禁用即可
     btnPrev.disabled = S.cur === 0;
-    const isRevealed = S.revealed.has(S.cur);
     btnNext.textContent = S.cur === total - 1 ? '完成 ✓' : '下一题 →';
     btnNext.className = 'nav-btn primary';
-    btnNext.disabled  = !isRevealed;
+    btnNext.disabled  = false;
+    updateGridDot();  // 练习模式也更新网格颜色
   }
 
   // ── 滑动切换，实际渲染在回调里 ──
@@ -1982,30 +2421,23 @@ function selectOpt(letter, btn) {
       }, 250);
 
     } else {
-      // 练习：立即揭示答案
+      // 练习：立即揭示答案，原地重渲
       document.querySelectorAll('.opt').forEach(b => b.disabled = true);
       S.revealed.add(S.cur);
-      const isCorrect = letter === q.answer;
+      savePracticeSession();  // 每次答题立即保存进度
       setTimeout(() => {
-        renderQ('none');  // 揭示答案原地重渲，不滑动
-        // 答对则 1.4s 后自动跳下一题，答错不自动跳
-        if (isCorrect) {
+        renderQ('none');
+        if (letter === q.answer) {
           setTimeout(() => {
-            const explain = document.getElementById('explain-panel');
-            if (explain) explain.scrollIntoView({ behavior:'smooth', block:'nearest' });
-            setTimeout(() => {
-              const total = S.questions.length;
-              if (S.cur < total - 1) { S.cur++; renderQ('forward'); }
-              else finishPractice();
-            }, 1400);
-          }, 100);
-        } else {
-          setTimeout(() => {
-            const explain = document.getElementById('explain-panel');
-            if (explain) explain.scrollIntoView({ behavior:'smooth', block:'nearest' });
-          }, 100);
-          document.getElementById('btn-next').disabled = false;
+            const total = S.questions.length;
+            if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
+            else finishPractice();
+          }, 1400);
         }
+        setTimeout(() => {
+          const explain = document.getElementById('explain-panel');
+          if (explain) explain.scrollIntoView({ behavior:'smooth', block:'nearest' });
+        }, 100);
       }, 180);
     }
   }
@@ -2051,13 +2483,13 @@ function submitMulti() {
   } else {
     // 练习模式：揭示答案，原地重渲
     S.revealed.add(S.cur);
+    savePracticeSession();  // 保存进度
     setTimeout(() => {
       renderQ('none');
       setTimeout(() => {
         const explain = document.getElementById('explain-panel');
         if (explain) explain.scrollIntoView({ behavior:'smooth', block:'nearest' });
       }, 100);
-      // 揭示后不自动跳，让用户手动点下一题
       document.getElementById('btn-next').disabled = false;
     }, 180);
   }
@@ -2150,6 +2582,7 @@ function nextOrSubmit() {
   S.cur++;
   renderQ('forward');
   if (S.mode === 'exam') { updateGridDot(); saveExamSession(); }
+  else                     savePracticeSession();
 }
 
 function prevQ() {
@@ -2166,6 +2599,7 @@ function prevQ() {
     S.cur--;
     renderQ('back');
     if (S.mode === 'exam') { updateGridDot(); saveExamSession(); }
+    else                     savePracticeSession();
   }
 }
 
@@ -2180,12 +2614,15 @@ function quitQuiz() {
   clearInterval(S.timerInterval);
   if (S.mode === 'exam') {
     if (!confirm('确认退出考试？本次记录不会保存')) {
-      // 用户取消，重启计时器
       const elapsed = Math.floor((Date.now() - S.examStart) / 1000);
       startTimer(Math.max(0, S.examLimit - elapsed));
       return;
     }
-    clearExamSession();   // 用户主动放弃，清除存档
+    clearExamSession();
+  } else if (S.mode === 'practice') {
+    // 练习模式：自动保存进度，直接退出
+    savePracticeSession();
+    toast('练习进度已保存，下次可继续作答');
   }
   showScreen('s-home', 'back');
 }
@@ -2211,60 +2648,89 @@ function updateTimerDisp(sec) {
 function buildGrid() {
   const inner = document.getElementById('q-grid-inner');
   inner.innerHTML = '';
+  const isPractice = S.mode === 'practice';
   let lastGIdx = -1;
+
   S.questions.forEach((_, i) => {
-    const gIdx = getGroupIdxForQ(i);
-    // 插入题型分组标签
-    if (gIdx !== lastGIdx) {
+    const gIdx = isPractice ? -1 : getGroupIdxForQ(i);
+
+    // 考试模式插入题型分组标签
+    if (!isPractice && gIdx !== lastGIdx) {
       lastGIdx = gIdx;
       const lbl = document.createElement('div');
       lbl.className = 'q-grid-group-label';
-      lbl.textContent = S.modeGroups[gIdx].mode || '题目';
+      lbl.textContent = S.modeGroups[gIdx]?.mode || '题目';
       inner.appendChild(lbl);
     }
+
     const dot = document.createElement('div');
     dot.className = `q-dot${i === 0 ? ' cur' : ''}`;
     dot.dataset.idx = i;
     dot.textContent = i + 1;
+
     dot.onclick = () => {
-      if (S.mode === 'exam') {
+      if (!isPractice) {
+        // 考试模式：保留原有限制
         const curGIdx    = getGroupIdxForQ(S.cur);
         const targetGIdx = getGroupIdxForQ(i);
         const targetG    = S.modeGroups[targetGIdx];
-        // 不能回到之前的题型组
         if (targetGIdx < S.currentGroupIdx) { toast('不能返回已完成的题型'); return; }
-        // 案例分析组内不能回退
         if (!targetG.allowBack && i < S.cur && targetGIdx === curGIdx) { toast('案例分析题不能回退'); return; }
-        // 案例分析组只能到达已解锁的题目（已到达+1）
-        if (!targetG.allowBack && i > (S.caseMaxReached[targetGIdx] ?? targetG.startIdx)) {
-          toast('请按顺序作答案例分析题'); return;
-        }
-        // 跨组前进需要弹窗
+        if (!targetG.allowBack && i > (S.caseMaxReached[targetGIdx] ?? targetG.startIdx)) { toast('请按顺序作答案例分析题'); return; }
         if (targetGIdx > curGIdx) {
           const captured = i;
           showGroupTransitionDialog(targetG.mode, () => {
             S.currentGroupIdx = targetGIdx;
             if (!targetG.allowBack) S.caseMaxReached[targetGIdx] = S.caseMaxReached[targetGIdx] ?? captured;
-            S.cur = captured;
-            renderQ('forward'); updateGridDot();
+            S.cur = captured; renderQ('forward'); updateGridDot();
           });
           return;
         }
       }
+      // 练习模式：自由跳转
       const dir = i > S.cur ? 'forward' : i < S.cur ? 'back' : 'none';
-      S.cur = i; renderQ(dir);
-      if (S.mode === 'exam') updateGridDot();
+      S.cur = i;
+      renderQ(dir);
+      if (!isPractice) updateGridDot();
     };
     inner.appendChild(dot);
   });
 }
 function updateGridDot() {
+  const isPractice = S.mode === 'practice';
   document.querySelectorAll('.q-dot').forEach((dot, i) => {
-    const sel = S.ans[i];
-    const hasAns = sel !== undefined && !(sel instanceof Set && sel.size === 0);
-    dot.classList.toggle('cur',      i === S.cur);
-    dot.classList.toggle('answered', hasAns && i !== S.cur);
-    dot.classList.toggle('flagged',  S.marked.has(i) && i !== S.cur);
+    const sel     = S.ans[i];
+    const hasAns  = sel !== undefined && !(sel instanceof Set && sel.size === 0);
+    const revealed= S.revealed.has(i);
+    dot.classList.toggle('cur', i === S.cur);
+
+    if (isPractice) {
+      // 练习模式：对绿错红，未作答灰
+      dot.classList.remove('answered', 'correct', 'wrong', 'revealed', 'flagged');
+      if (i !== S.cur) {
+        if (revealed && hasAns) {
+          const q = S.questions[i];
+          const isMulti = q?.answer?.length > 1;
+          let ok = false;
+          if (isMulti) {
+            const correctSet = new Set(q.answer.split(''));
+            const selSet = sel instanceof Set ? sel : new Set();
+            ok = selSet.size === correctSet.size && [...correctSet].every(l => selSet.has(l));
+          } else {
+            ok = sel === q?.answer;
+          }
+          dot.classList.add(ok ? 'correct' : 'wrong');
+        } else if (revealed) {
+          dot.classList.add('revealed');
+        }
+        if (S.marked.has(i)) dot.classList.add('flagged');
+      }
+    } else {
+      // 考试模式：原有逻辑
+      dot.classList.remove('correct', 'wrong', 'revealed');
+      dot.classList.toggle('answered', hasAns && i !== S.cur);
+      dot.classList.toggle('flagged',  S.marked.has(i) && i !== S.cur);
+    }
   });
 }
 function toggleGrid() {
@@ -2289,6 +2755,7 @@ function submitExam() {
   showScreen('s-results');
 }
 function finishPractice() {
+  clearPracticeSession();  // 完成则删除进度
   calculateResults();
   showScreen('s-results');
 }
@@ -2518,6 +2985,7 @@ function calculateResults() {
   const record = {
     mode: S.mode, total: qs.length, correct,
     pct: Math.round(correct / qs.length * 100),
+    skip,
     timeSec: S.results.timeSec,
     date: new Date().toLocaleDateString('zh-CN'),
     units: [...new Set(qs.map(q => q.unit).filter(Boolean))].slice(0,2).join('、'),
@@ -2677,19 +3145,87 @@ function loadHistory() {
 }
 
 function renderHistorySection() {
-  const sec = document.getElementById('recent-section');
+  const sec  = document.getElementById('recent-section');
   const list = document.getElementById('recent-list');
-  if (!S.history.length) { sec.style.display = 'none'; return; }
+
+  const practiceSessions = _getPracticeSessions();
+  const history          = S.history;
+
+  if (!practiceSessions.length && !history.length) {
+    sec.style.display = 'none';
+    return;
+  }
   sec.style.display = '';
+
   const modeIcon = { practice:'✏️', exam:'⏱', memo:'🧠' };
-  list.innerHTML = S.history.slice(0, 5).map(h => `
-    <div class="recent-item">
-      <div class="recent-info">
-        <div class="recent-name">${modeIcon[h.mode]||''} ${h.date} · ${h.units || '全部章节'}</div>
-        <div class="recent-meta">${h.total} 题 · 用时 ${formatTime(h.timeSec)}</div>
-      </div>
-      <div class="recent-score">${h.pct}%</div>
-    </div>`).join('');
+  const items = [];
+
+  // ── 进行中的练习（优先显示）──────────────────────
+  practiceSessions.forEach(s => {
+    const pct = s.total > 0 ? Math.round(s.answered / s.total * 100) : 0;
+    const ago = _fmtAgo(s.savedAt);
+    items.push(`
+      <div class="recent-item" onclick="resumePracticeSession('${s.id}')">
+        <div class="recent-info" style="min-width:0;flex:1">
+          <div class="recent-name">
+            ✏️ ${esc(s.title)}
+            <span class="recent-badge ongoing">进行中</span>
+          </div>
+          <div class="recent-meta">已答 ${s.answered}/${s.total} 题 · ${ago}</div>
+        </div>
+        <button class="recent-resume-btn">继续 →</button>
+      </div>`);
+  });
+
+  // ── 已完成的历史记录 ──────────────────────────────
+  history.slice(0, 5).forEach((h, idx) => {
+    items.push(`
+      <div class="recent-item" onclick="openHistoryResult(${idx})">
+        <div class="recent-info">
+          <div class="recent-name">
+            ${modeIcon[h.mode]||''} ${esc(h.date)} · ${esc(h.units || '全部章节')}
+            <span class="recent-badge done">已完成</span>
+          </div>
+          <div class="recent-meta">${h.total} 题 · 用时 ${formatTime(h.timeSec)}</div>
+        </div>
+        <div class="recent-score">${h.pct}%</div>
+      </div>`);
+  });
+
+  list.innerHTML = items.join('');
+}
+
+function _fmtAgo(ts) {
+  const sec = Math.floor((Date.now() - ts) / 1000);
+  if (sec < 60)  return '刚刚';
+  if (sec < 3600) return Math.floor(sec/60) + ' 分钟前';
+  if (sec < 86400) return Math.floor(sec/3600) + ' 小时前';
+  return Math.floor(sec/86400) + ' 天前';
+}
+
+/** 点击已完成记录 → 查看结果页（若结果数据还在 S.results 则直接跳，否则只显示摘要） */
+function openHistoryResult(idx) {
+  const h = S.history[idx];
+  if (!h) return;
+  // 若 S.results 刚好是这条记录（mode+date 匹配），直接跳结果页
+  if (S.results && S.results.mode === h.mode) {
+    showScreen('s-results');
+    return;
+  }
+  // 否则用摘要构建一个精简结果页
+  S.results = {
+    mode: h.mode,
+    total: h.total,
+    correct: h.correct,
+    wrong: h.total - h.correct - (h.skip || 0),
+    skip: h.skip || 0,
+    timeSec: h.timeSec,
+    byUnit: null,
+    qs: null,
+    ans: null,
+  };
+  renderResults();
+  showScreen('s-results');
 }
 
 // ════════════════════════════════════════════
