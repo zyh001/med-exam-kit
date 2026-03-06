@@ -135,6 +135,7 @@ class XlsxExporter(BaseExporter):
         ws.auto_filter.ref = f"A1:{last_col}{len(rows) + 1}"
 
         wb.save(fp)
+        wb.close()
 
         ai_cnt = sum(1 for r in rows if r.get("ai_discuss") or r.get("ai_answer"))
         hidden_note = f", 隐藏空列: {hidden}" if hidden else ""
