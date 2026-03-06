@@ -71,6 +71,8 @@ body{
   font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
   font-size:15px;line-height:1.6;
   transition:background .25s,color .25s;
+  user-select:none;
+  -webkit-user-select:none;
 }
 /*
  * #app：position:fixed 是修复 iOS「可滑出边界」的核心。
@@ -776,8 +778,8 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .review-ans{font-size:12px;font-weight:700;width:20px;text-align:center;flex-shrink:0}
 .review-ans.ok{color:var(--success)}
 .review-ans.err{color:var(--danger)}
-.review-expand{max-height:0;overflow:hidden;transition:max-height .35s;border-top:0 solid var(--border)}
-.review-expand.open{max-height:600px;border-top-width:1px}
+.review-expand{max-height:0;overflow:hidden;transition:max-height .35s cubic-bezier(.4,0,.2,1);border-top:0 solid var(--border)}
+.review-expand.open{border-top-width:1px}
 .review-expand-inner{padding:14px}
 .review-opts-list{display:flex;flex-direction:column;gap:5px;margin-bottom:10px}
 .review-opt{
@@ -794,7 +796,11 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 }
 .review-opt.is-correct .review-opt-lbl{background:var(--success);color:#fff}
 .review-opt.is-selected.wrong .review-opt-lbl{background:var(--danger);color:#fff}
-.review-discuss{font-size:13px;line-height:1.85;color:var(--text);padding:12px 14px;background:var(--surface);border-radius:8px}
+.review-discuss{
+  font-size:13px;line-height:1.85;color:var(--text);padding:12px 14px;
+  background:var(--surface);border-radius:8px;
+  white-space:pre-wrap;word-break:break-word;
+}
 .review-discuss strong{color:var(--text)}
 
 /* ════════════════════════════════════════════
@@ -1066,6 +1072,28 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .mode-quota-total-row strong{color:var(--accent);font-size:15px}
 
+/* ── 数量精细比例面板 ── */
+.count-ratio-list{display:flex;flex-direction:column;gap:10px;margin-top:12px}
+.count-ratio-row{display:flex;align-items:center;gap:8px}
+.count-ratio-label{
+  flex:1;font-size:13px;color:var(--text);
+  min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.count-ratio-pct{
+  width:38px;text-align:right;font-size:13px;font-weight:700;
+  color:var(--accent);font-variant-numeric:tabular-nums;flex-shrink:0;
+}
+.count-ratio-expected{
+  width:46px;text-align:right;font-size:11px;color:var(--muted);
+  flex-shrink:0;
+}
+.count-ratio-total-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 0 0;border-top:1px solid var(--border);margin-top:4px;
+  font-size:12px;color:var(--muted);
+}
+.count-ratio-total-row strong{color:var(--accent);font-size:15px}
+
 /* ── 难度分布 ── */
 .difficulty-presets{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px}
 .diff-preset{
@@ -1207,7 +1235,13 @@ button,a,[role=button],label{touch-action:manipulation}
 
     <!-- ── 数量 ── -->
     <div class="config-section" id="count-section">
-      <div class="config-section-label">题目数量</div>
+      <div class="cfg-section-head">
+        <span class="config-section-label">题目数量</span>
+        <label class="cfg-toggle-inline" id="count-ratio-toggle-wrap">
+          <input type="checkbox" id="cfg-count-ratio" onchange="toggleCountRatio()">
+          精细比例
+        </label>
+      </div>
       <div class="count-row">
         <div class="count-val" id="count-display">50</div>
         <div class="slider-wrap">
@@ -1215,6 +1249,7 @@ button,a,[role=button],label{touch-action:manipulation}
                  oninput="updateCount(this.value)">
         </div>
       </div>
+      <div id="count-ratio-panel" style="display:none"></div>
     </div>
 
     <!-- ── 考试专属 ── -->
@@ -1385,7 +1420,7 @@ button,a,[role=button],label{touch-action:manipulation}
         <div class="unit-breakdown fade-up" id="unit-breakdown" style="display:none"></div>
         <div class="results-actions fade-up">
           <button class="res-btn primary" onclick="showReview()">📖 查看解析</button>
-          <button class="res-btn ghost"   onclick="openConfig(S.mode)">🔁 再练一次</button>
+          <button class="res-btn ghost"   onclick="retryQuiz()">🔁 再练一次</button>
           <button class="res-btn ghost"   onclick="showScreen('s-home')">🏠 回到主页</button>
         </div>
       </div>
@@ -1495,6 +1530,7 @@ const CFG = {
   examTime: 90,
   perMode:    null,   // null = 关闭；{mode: sqCount} = 精细配额
   difficulty: null,   // null = 关闭；{easy,medium,hard,extreme} = 权重
+  countRatio: null,   // null = 关闭；{mode: weight} = 数量精细比例（与 perMode 互斥）
 };
 
 // ════════════════════════════════════════════
@@ -1787,6 +1823,7 @@ function openConfig(mode) {
   CFG.modes = new Set(['__all__']);
   CFG.perMode    = null;
   CFG.difficulty = null;
+  CFG.countRatio = null;
 
   // 重置精细配额 / 难度面板开关
   const pmCk = document.getElementById('cfg-per-mode');
@@ -1795,6 +1832,12 @@ function openConfig(mode) {
   document.getElementById('mode-quota-panel').style.display = 'none';
   document.getElementById('mode-quota-panel').innerHTML = '';
   document.getElementById('count-section').style.display = '';
+
+  // 重置数量精细比例
+  const crCk = document.getElementById('cfg-count-ratio');
+  if (crCk) crCk.checked = false;
+  document.getElementById('count-ratio-panel').style.display = 'none';
+  document.getElementById('count-ratio-panel').innerHTML = '';
 
   const diffCk = document.getElementById('cfg-difficulty');
   if (diffCk) diffCk.checked = false;
@@ -1902,16 +1945,117 @@ function toggleChip(btn, type, mode) {
 // ── 精细配额 ──────────────────────────────────────────────────────
 function togglePerMode() {
   const on = document.getElementById('cfg-per-mode').checked;
+
+  // 互斥：关闭数量精细比例
+  if (on) {
+    const crCk = document.getElementById('cfg-count-ratio');
+    if (crCk) { crCk.checked = false; toggleCountRatio(); }
+  }
+
   document.getElementById('mode-filter-panel').style.display = on ? 'none' : '';
   document.getElementById('mode-quota-panel').style.display  = on ? '' : 'none';
   document.getElementById('count-section').style.display     = on ? 'none' : '';
   if (on) {
-    CFG.perMode = {};
+    CFG.perMode    = {};
+    CFG.countRatio = null;
     buildModeQuota();
   } else {
     CFG.perMode = null;
   }
 }
+
+function toggleCountRatio() {
+  const on = document.getElementById('cfg-count-ratio').checked;
+
+  // 互斥：关闭题型精细配额
+  if (on) {
+    const pmCk = document.getElementById('cfg-per-mode');
+    if (pmCk && pmCk.checked) {
+      pmCk.checked = false;
+      togglePerMode();
+    }
+  }
+
+  document.getElementById('count-ratio-panel').style.display = on ? '' : 'none';
+  if (on) {
+    CFG.countRatio = {};
+    CFG.perMode    = null;
+    buildCountRatioPanel();
+  } else {
+    CFG.countRatio = null;
+  }
+}
+
+function buildCountRatioPanel() {
+  const panel = document.getElementById('count-ratio-panel');
+  panel.innerHTML = '';
+  const modes  = S.bankInfo.modes;
+  if (!modes.length) return;
+
+  // 默认等比例
+  const equalPct = Math.floor(100 / modes.length);
+  modes.forEach((m, i) => {
+    CFG.countRatio[m] = i < modes.length - 1 ? equalPct : 100 - equalPct * (modes.length - 1);
+  });
+
+  const list = document.createElement('div');
+  list.className = 'count-ratio-list';
+
+  modes.forEach(mode => {
+    const pct = CFG.countRatio[mode];
+    const row = document.createElement('div');
+    row.className = 'count-ratio-row';
+    row.innerHTML = `
+      <span class="count-ratio-label" title="${esc(mode)}">${esc(mode)}</span>
+      <input type="range" min="0" max="100" value="${pct}" style="flex:1.5"
+             data-mode="${esc(mode)}" oninput="updateCountRatio(this)">
+      <span class="count-ratio-pct" id="crp-pct-${_modeId(mode)}">${pct}%</span>
+      <span class="count-ratio-expected" id="crp-exp-${_modeId(mode)}">~0</span>`;
+    list.appendChild(row);
+  });
+
+  const totalRow = document.createElement('div');
+  totalRow.className = 'count-ratio-total-row';
+  totalRow.innerHTML = `<span>合计比例 <span id="cr-total-pct" style="color:var(--text)">0%</span></span>
+    <span>预计 <strong id="cr-total-exp">0</strong> 题</span>`;
+  list.appendChild(totalRow);
+
+  panel.appendChild(list);
+  _refreshCountRatioDisplay();
+}
+
+/** mode 名称转安全 id 片段 */
+function _modeId(mode) {
+  return mode.replace(/[^a-zA-Z0-9\u4e00-\u9fff]/g, '_');
+}
+
+function updateCountRatio(slider) {
+  const mode = slider.dataset.mode;
+  CFG.countRatio[mode] = parseInt(slider.value);
+  _refreshCountRatioDisplay();
+}
+
+function _refreshCountRatioDisplay() {
+  const total = CFG.count;
+  const ratioSum = Object.values(CFG.countRatio).reduce((a, b) => a + b, 0);
+  document.getElementById('cr-total-pct').textContent = ratioSum + '%';
+  document.getElementById('cr-total-pct').style.color =
+    ratioSum === 100 ? 'var(--success)' : ratioSum > 100 ? 'var(--danger)' : 'var(--warning)';
+
+  let totalExp = 0;
+  S.bankInfo.modes.forEach(mode => {
+    const pct = CFG.countRatio[mode] || 0;
+    const exp = ratioSum > 0 ? Math.round(total * pct / ratioSum) : 0;
+    totalExp += exp;
+    const pctEl = document.getElementById(`crp-pct-${_modeId(mode)}`);
+    const expEl = document.getElementById(`crp-exp-${_modeId(mode)}`);
+    if (pctEl) pctEl.textContent = pct + '%';
+    if (expEl) expEl.textContent = '~' + exp;
+  });
+  const totalEl = document.getElementById('cr-total-exp');
+  if (totalEl) totalEl.textContent = totalExp;
+}
+
 
 function buildModeQuota() {
   const panel = document.getElementById('mode-quota-panel');
@@ -2048,6 +2192,7 @@ function updateCount(v) {
   CFG.count = Number(v);
   const display = document.getElementById('count-display');
   display.textContent = v >= Number(document.getElementById('count-slider').max) ? '全部' : v;
+  if (CFG.countRatio) _refreshCountRatioDisplay();
 }
 
 // ════════════════════════════════════════════
@@ -2058,6 +2203,14 @@ function updateCount(v) {
  * 根据题目列表构建题型分组信息。
  * allowBack: 组内是否允许回退（案例分析题不允许）
  */
+/** 判断是否为多选题：X型题 / 案例分析 强制多选；其他题型看答案长度 */
+function isMultiQ(q) {
+  if (!q) return false;
+  const mode = (q.mode || '').trim();
+  if (mode.includes('X型') || mode.includes('不定项') || mode.includes('案例分析')) return true;
+  return q.answer && q.answer.length > 1;
+}
+
 function buildModeGroups(questions) {
   const groups = [];
   questions.forEach((q, i) => {
@@ -2117,17 +2270,38 @@ async function startSession() {
   // 章节筛选
   if (!CFG.units.has('__all__')) CFG.units.forEach(u => params.append('unit', u));
 
-  const isPM   = document.getElementById('cfg-per-mode')?.checked;
-  const isDiff = document.getElementById('cfg-difficulty')?.checked;
+  const isPM    = document.getElementById('cfg-per-mode')?.checked;
+  const isCR    = document.getElementById('cfg-count-ratio')?.checked;
+  const isDiff  = document.getElementById('cfg-difficulty')?.checked;
 
   if (isPM && CFG.perMode) {
-    // ── 精细配额模式：传 per_mode JSON，忽略题型 chips 和数量滑杆 ──
+    // ── 题型精细配额：传 per_mode JSON，忽略题型 chips 和数量滑杆 ──
     const nonZero = Object.fromEntries(
       Object.entries(CFG.perMode).filter(([, v]) => v > 0)
     );
     if (!Object.keys(nonZero).length) { toast('请至少为一种题型设置题目数量'); return; }
     params.set('per_mode', JSON.stringify(nonZero));
     params.set('shuffle', '1');
+
+  } else if (isCR && CFG.countRatio) {
+    // ── 数量精细比例：按比例换算为 per_mode 传给后端 ──
+    const total    = CFG.count;
+    const ratioSum = Object.values(CFG.countRatio).reduce((a, b) => a + b, 0);
+    if (!ratioSum) { toast('请至少为一种题型设置比例'); return; }
+    const perMode = {};
+    const modes   = Object.keys(CFG.countRatio).filter(m => CFG.countRatio[m] > 0);
+    let allocated = 0;
+    modes.forEach((m, i) => {
+      const n = i < modes.length - 1
+        ? Math.round(total * CFG.countRatio[m] / ratioSum)
+        : total - allocated;
+      if (n > 0) perMode[m] = n;
+      allocated += n;
+    });
+    if (!Object.keys(perMode).length) { toast('请调整比例后重试'); return; }
+    params.set('per_mode', JSON.stringify(perMode));
+    params.set('shuffle', '1');
+
   } else {
     // ── 普通模式 ──
     if (!CFG.modes.has('__all__')) CFG.modes.forEach(m => params.append('mode', m));
@@ -2292,7 +2466,7 @@ function renderQ(dir = 'none') {
 }
 
 function _fillQ(wrap, q, isExam, isPractice) {
-  const isMulti    = q.answer && q.answer.length > 1;
+  const isMulti    = isMultiQ(q);
   const correctSet = new Set(isMulti ? q.answer.split('') : [q.answer]);
   const curSel     = S.ans[S.cur];
   const isRevealed = S.revealed.has(S.cur);
@@ -2343,7 +2517,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
   if (isMulti) {
     const badge = document.createElement('div');
     badge.className = 'multi-badge';
-    badge.innerHTML = '多选题';
+    badge.innerHTML = 'X型选择题';
     wrap.appendChild(badge);
   }
 
@@ -2405,7 +2579,7 @@ function selectOpt(letter, btn) {
   const q = S.questions[S.cur];
   const isExam    = S.mode === 'exam';
   const isPractice= S.mode === 'practice';
-  const isMulti   = q.answer && q.answer.length > 1;
+  const isMulti   = isMultiQ(q);
 
   if (isMulti) {
     // ── 多选：toggle 当前项，更新视觉，激活确认按钮 ──
@@ -2537,7 +2711,7 @@ function submitMulti() {
 }
 
 function buildExplain(q, selected) {
-  const isMulti   = q.answer && q.answer.length > 1;
+  const isMulti   = isMultiQ(q);
   const correctSet= new Set(isMulti ? q.answer.split('') : [q.answer]);
   // 判断是否完全正确
   let isCorrect;
@@ -2751,7 +2925,7 @@ function updateGridDot() {
       if (i !== S.cur) {
         if (revealed && hasAns) {
           const q = S.questions[i];
-          const isMulti = q?.answer?.length > 1;
+          const isMulti = isMultiQ(q);
           let ok = false;
           if (isMulti) {
             const correctSet = new Set(q.answer.split(''));
@@ -2795,6 +2969,29 @@ function submitExam() {
   calculateResults();
   showScreen('s-results');
 }
+function retryQuiz() {
+  // 如果题目还在内存，直接重置状态重新做一遍
+  if (S.questions && S.questions.length) {
+    S.cur = 0;
+    S.ans = {};
+    S.revealed = new Set();
+    S.marked = new Set();
+    S.examStart = Date.now();
+    S.modeGroups = buildModeGroups(S.questions);
+    S.currentGroupIdx = 0;
+    S.caseMaxReached = {};
+    S.practiceSessionId = S.mode === 'practice' ? String(Date.now()) : null;
+    if (S.mode === 'memo') startMemo();
+    else {
+      startQuiz();
+      if (S.mode === 'exam') saveExamSession();
+    }
+  } else {
+    // 题目已被清理，回到配置页重新出题
+    openConfig(S.mode || 'practice');
+  }
+}
+
 function finishPractice() {
   clearPracticeSession();  // 完成则删除进度
   calculateResults();
@@ -2998,7 +3195,7 @@ function calculateResults() {
       ans[k] = v;
     }
   }
-  
+
   let correct = 0, wrong = 0, skip = 0;
   const byUnit = {};
 
@@ -3008,7 +3205,7 @@ function calculateResults() {
     if (!byUnit[unit]) byUnit[unit] = { correct: 0, total: 0 };
     byUnit[unit].total++;
 
-    const isMulti = q.answer && q.answer.length > 1;
+    const isMulti = isMultiQ(q);
     let isCorrect = false;
     if (!sel || (sel instanceof Set && sel.size === 0)) {
       skip++;
@@ -3145,7 +3342,7 @@ function filterReview(type, tabEl) {
     if (sel && sel.__set) {
       sel = new Set(sel.v);
     }
-    const isMulti   = q.answer && q.answer.length > 1;
+    const isMulti   = isMultiQ(q);
     const correctSet= new Set(isMulti ? q.answer.split('') : [q.answer]);
 
     // 判断空/对/错
@@ -3192,7 +3389,7 @@ function filterReview(type, tabEl) {
       </div>`;
     }).join('');
 
-    const multiTag = isMulti ? `<span style="font-size:10px;color:var(--warning);margin-left:4px">[多选]</span>` : '';
+    const multiTag = isMulti ? `<span style="font-size:10px;color:var(--warning);margin-left:4px">[不定项选择]</span>` : '';
 
     item.innerHTML = `
       <div class="review-item-head">
@@ -3211,7 +3408,21 @@ function filterReview(type, tabEl) {
       </div>`;
 
     item.querySelector('.review-item-head').onclick = () => {
-      document.getElementById(`rexp-${i}`).classList.toggle('open');
+      const el = document.getElementById(`rexp-${i}`);
+      const qEl = item.querySelector('.review-item-q');
+      const isOpen = el.classList.toggle('open');
+      if (isOpen) {
+        // 展开：移除行数限制，让题目完整显示
+        qEl.style.webkitLineClamp = 'unset';
+        qEl.style.overflow = 'visible';
+        el.style.maxHeight = el.scrollHeight + 'px';
+        setTimeout(() => { if (el.classList.contains('open')) el.style.maxHeight = el.scrollHeight + 'px'; }, 360);
+      } else {
+        // 收起：恢复截断
+        qEl.style.webkitLineClamp = '';
+        qEl.style.overflow = '';
+        el.style.maxHeight = '0';
+      }
     };
     list.appendChild(item);
   });
