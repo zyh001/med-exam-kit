@@ -89,8 +89,9 @@ def _distribute_by_ratio(total: int, weights: dict) -> dict:
 
 def _greedy_fill(pool: list, target: int) -> list:
     """
-    从 pool（每项为一组子题 list）中贪心抽取，使子题总数尽量逼近 target。
-    不拆散大题（子题组）。三轮策略：顺序塞满 → 最优匹配 → 截断兜底。
+    从 pool（每项为一组子题 list）中贪心抽取，使子题总数尽量逼近但不超过 target。
+    绝不拆散大题（子题组）。两轮策略：顺序贪心 → 最优匹配（找放得下的最大题）。
+    宁可略少于 target，也不截断多子题大题。
     """
     available = list(pool)
     picked: list = []
@@ -121,21 +122,7 @@ def _greedy_fill(pool: list, target: int) -> list:
             picked.append(remaining.pop(best_idx))
             total += best_c
         else:
-            break
-
-    # 第三轮：截断兜底（尽量精确匹配，否则截最小超量题）
-    if total < target and remaining:
-        gap = target - total
-        for i, grp in enumerate(remaining):
-            if len(grp) == gap:
-                picked.append(grp)
-                return picked
-        over = sorted(
-            [(i, g) for i, g in enumerate(remaining) if len(g) > gap],
-            key=lambda x: len(x[1]),
-        )
-        if over:
-            picked.append(over[0][1][:gap])
+            break  # 剩余的每题都超过 gap，宁可停在这里
 
     return picked
 
@@ -263,9 +250,20 @@ def api_questions():
 
         # 按比例分配，每种至少 1 题（前提是该题型有题）
         quotas = _distribute_by_ratio(total_need, mode_sq_total)
+        # 强制每种题型至少 1 小题（若该题型有题目的话）
         for mk in mode_order:
             if mode_sq_total[mk] > 0:
                 quotas[mk] = min(max(quotas[mk], 1), mode_sq_total[mk])
+        # 强制 min 后总量可能溢出，从最大配额的题型依次缩减
+        overflow = sum(quotas.values()) - total_need
+        if overflow > 0:
+            for mk in sorted(mode_order, key=lambda k: -quotas[k]):
+                if overflow <= 0:
+                    break
+                reducible = max(0, quotas[mk] - 1)  # 至少保留 1
+                cut = min(reducible, overflow)
+                quotas[mk] -= cut
+                overflow   -= cut
 
         result_groups = []
         for mk in mode_order:
