@@ -1,4 +1,5 @@
 from __future__ import annotations
+import logging
 from pathlib import Path
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill
@@ -6,6 +7,8 @@ from openpyxl.utils import get_column_letter
 from med_exam_toolkit.models import Question
 from med_exam_toolkit.exporters import register
 from med_exam_toolkit.exporters.base import BaseExporter
+
+logger = logging.getLogger(__name__)
 
 # 中文表头映射
 HEADER_LABELS = {
@@ -25,10 +28,10 @@ HEADER_LABELS = {
     "discuss":        "解析",
     "discuss_source": "解析来源",
     "point":          "考点",
-    "ai_answer":      "AI答案",
-    "ai_discuss":     "AI解析",
-    "ai_confidence":  "AI置信度",
-    "ai_model":       "AI模型",
+    "ai_answer":      "AI 答案",
+    "ai_discuss":     "AI 解析",
+    "ai_confidence":  "AI 置信度",
+    "ai_model":       "AI 模型",
 }
 for i in range(10):
     HEADER_LABELS[f"option_{chr(65 + i)}"] = f"选项{chr(65 + i)}"
@@ -70,73 +73,74 @@ class XlsxExporter(BaseExporter):
 
     def export(self, questions: list[Question], output_path: Path, **kwargs) -> None:
         split_options = kwargs.get("split_options", True)
-        output_path.parent.mkdir(parents=True, exist_ok=True)
-        fp = output_path.with_suffix(".xlsx")
+        wb = None
+        
+        try:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            fp = output_path.with_suffix(".xlsx")
 
-        rows, columns = self.flatten(questions, split_options=split_options)
+            rows, columns = self.flatten(questions, split_options=split_options)
 
-        # ── 剔除全空列（_ALWAYS_KEEP 中的列强制保留）──
-        active_columns = [
-            col for col in columns
-            if col in _ALWAYS_KEEP
-            or any(row.get(col) not in (None, "", 0) for row in rows)
-        ]
-        hidden = len(columns) - len(active_columns)
+            active_columns = [
+                col for col in columns
+                if col in _ALWAYS_KEEP
+                or any(row.get(col) not in (None, "", 0) for row in rows)
+            ]
+            hidden = len(columns) - len(active_columns)
 
-        wb = Workbook()
-        ws = wb.active
-        ws.title = "题目"
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "题目"
 
-        header_font    = Font(bold=True, color="FFFFFF")
-        ai_header_font = Font(bold=True, color="1F6B2E")
+            header_font = Font(bold=True, color="FFFFFF")
+            ai_header_font = Font(bold=True, color="1F6B2E")
 
-        col_index = {key: i + 1 for i, key in enumerate(active_columns)}
+            col_index = {key: i + 1 for i, key in enumerate(active_columns)}
 
-        # 表头
-        for col_idx, col_key in enumerate(active_columns, 1):
-            cell = ws.cell(
-                row=1, column=col_idx,
-                value=HEADER_LABELS.get(col_key, col_key),
-            )
-            if col_key in _AI_COLS:
-                cell.font = ai_header_font
-                cell.fill = _AI_COL_FILL
-            else:
-                cell.font = header_font
-                cell.fill = _HEADER_FILL
-            cell.alignment = Alignment(horizontal="center")
-
-        # 数据行
-        for row_idx, row in enumerate(rows, 2):
             for col_idx, col_key in enumerate(active_columns, 1):
-                cell = ws.cell(row=row_idx, column=col_idx, value=row.get(col_key, ""))
-                cell.alignment = Alignment(wrap_text=True, vertical="top")
+                cell = ws.cell(row=1, column=col_idx, value=HEADER_LABELS.get(col_key, col_key))
+                if col_key in _AI_COLS:
+                    cell.font = ai_header_font
+                    cell.fill = _AI_COL_FILL
+                else:
+                    cell.font = header_font
+                    cell.fill = _HEADER_FILL
+                cell.alignment = Alignment(horizontal="center")
 
-            # 有效答案/解析来自 AI → 浅黄背景
-            if row.get("answer_source") == "ai" and "answer" in col_index:
-                ws.cell(row=row_idx, column=col_index["answer"]).fill = _AI_FILL
-            if row.get("discuss_source") == "ai" and "discuss" in col_index:
-                ws.cell(row=row_idx, column=col_index["discuss"]).fill = _AI_FILL
+            for row_idx, row in enumerate(rows, 2):
+                for col_idx, col_key in enumerate(active_columns, 1):
+                    cell = ws.cell(row=row_idx, column=col_idx, value=row.get(col_key, ""))
+                    cell.alignment = Alignment(wrap_text=True, vertical="top")
 
-            # AI 原始列有内容 → 浅黄背景
-            if row.get("ai_discuss") and "ai_discuss" in col_index:
-                ws.cell(row=row_idx, column=col_index["ai_discuss"]).fill = _AI_FILL
-            if row.get("ai_answer") and "ai_answer" in col_index:
-                ws.cell(row=row_idx, column=col_index["ai_answer"]).fill = _AI_FILL
+                if row.get("answer_source") == "ai" and "answer" in col_index:
+                    ws.cell(row=row_idx, column=col_index["answer"]).fill = _AI_FILL
+                if row.get("discuss_source") == "ai" and "discuss" in col_index:
+                    ws.cell(row=row_idx, column=col_index["discuss"]).fill = _AI_FILL
+                if row.get("ai_discuss") and "ai_discuss" in col_index:
+                    ws.cell(row=row_idx, column=col_index["ai_discuss"]).fill = _AI_FILL
+                if row.get("ai_answer") and "ai_answer" in col_index:
+                    ws.cell(row=row_idx, column=col_index["ai_answer"]).fill = _AI_FILL
 
-        # 列宽
-        for col_idx, col_key in enumerate(active_columns, 1):
-            letter = get_column_letter(col_idx)
-            ws.column_dimensions[letter].width = COL_WIDTHS.get(col_key, 14)
+            for col_idx, col_key in enumerate(active_columns, 1):
+                letter = get_column_letter(col_idx)
+                ws.column_dimensions[letter].width = COL_WIDTHS.get(col_key, 14)
 
-        # 冻结首行
-        ws.freeze_panes = "A2"
-        last_col = get_column_letter(len(active_columns))
-        ws.auto_filter.ref = f"A1:{last_col}{len(rows) + 1}"
+            ws.freeze_panes = "A2"
+            last_col = get_column_letter(len(active_columns))
+            ws.auto_filter.ref = f"A1:{last_col}{len(rows) + 1}"
 
-        wb.save(fp)
-        wb.close()
+            wb.save(fp)
 
-        ai_cnt = sum(1 for r in rows if r.get("ai_discuss") or r.get("ai_answer"))
-        hidden_note = f", 隐藏空列: {hidden}" if hidden else ""
-        print(f"[INFO] XLSX 导出完成: {fp} ({len(rows)} 行, {len(active_columns)} 列{hidden_note}, 含AI内容: {ai_cnt} 行)")
+            ai_cnt = sum(1 for r in rows if r.get("ai_discuss") or r.get("ai_answer"))
+            hidden_note = f", 隐藏空列：{hidden}" if hidden else ""
+            print(f"[INFO] XLSX 导出完成：{fp} ({len(rows)} 行，{len(active_columns)} 列{hidden_note}, 含 AI 内容：{ai_cnt} 行)")
+            
+        except OSError as e:
+            logger.error(f"XLSX 文件操作失败：{e}")
+            raise
+        except Exception as e:
+            logger.error(f"XLSX 导出失败：{e}")
+            raise
+        finally:
+            if wb is not None:
+                wb.close()
