@@ -26,6 +26,8 @@
   --danger-bg:  rgba(248,81,73,.12);
   --warning:    #d29922;
   --warn-bg:    rgba(210,153,34,.12);
+  --info:       #ffa9a3;
+  --info-bg:    rgba(252,171,166,.12);
   --shadow:     0 8px 32px rgba(0,0,0,.5);
   --shadow-sm:  0 2px 8px rgba(0,0,0,.4);
   --r:          14px;
@@ -45,6 +47,8 @@
   --danger-bg:  rgba(207,34,46,.1);
   --warning:    #9a6700;
   --warn-bg:    rgba(154,103,0,.1);
+  --info:       #fa837a;
+  --info-bg:    rgba(248,171,165,.1);
   --shadow:     0 4px 16px rgba(0,0,0,.12);
   --shadow-sm:  0 2px 6px rgba(0,0,0,.08);
 }
@@ -368,6 +372,17 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 }
 
 .q-text{font-size:16px;line-height:1.8;color:var(--text);margin-bottom:18px;font-weight:500;letter-spacing:.01em}
+/* 诱导性关键词高亮 */
+.inductive-word{
+  color:var(--info);
+  font-weight:700;
+  text-decoration:underline;
+  text-decoration-thickness:2px;
+  text-underline-offset:2px;
+  padding:0 2px;
+  border-radius:3px;
+  background:var(--info-bg);
+}
 .q-num{
   display:inline-flex;align-items:center;justify-content:center;
   width:24px;height:24px;border-radius:6px;background:var(--accent);
@@ -409,7 +424,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   transition:max-height .4s cubic-bezier(.4,0,.2,1),opacity .3s;
   opacity:0;
 }
-.explain-panel.open{max-height:600px;opacity:1}
+.explain-panel.open{max-height:none;opacity:1}
 
 .explain-inner{
   background:var(--card);border:1px solid var(--border);border-radius:12px;
@@ -673,12 +688,36 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   font-size:12px;font-weight:700;color:var(--muted);
   text-transform:uppercase;letter-spacing:.08em;margin-bottom:14px;
 }
-.unit-row{display:flex;align-items:center;gap:10px;margin-bottom:10px}
+.unit-row{
+  display:grid;
+  grid-template-columns: minmax(0,1fr) 70px 38px;
+  gap:8px;
+  align-items:center;
+  margin-bottom:10px;
+}
 .unit-row:last-child{margin-bottom:0}
-.unit-name{font-size:13px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text)}
-.unit-bar-wrap{width:80px;height:5px;background:var(--border);border-radius:3px;flex-shrink:0}
+.unit-name{
+  font-size:13px;
+  overflow:hidden;
+  text-overflow:ellipsis;
+  white-space:nowrap;
+  color:var(--text);
+  min-width:0;
+}
+.unit-bar-wrap{
+  width:70px;
+  height:5px;
+  background:var(--border);
+  border-radius:3px;
+}
 .unit-bar{height:100%;border-radius:3px;transition:width .8s ease}
-.unit-pct{font-size:12px;font-weight:700;width:38px;text-align:right;flex-shrink:0;font-variant-numeric:tabular-nums}
+.unit-pct{
+  font-size:12px;
+  font-weight:700;
+  width:38px;
+  text-align:right;
+  font-variant-numeric:tabular-nums;
+}
 
 .results-actions{display:flex;flex-direction:column;gap:10px}
 .res-btn{
@@ -2295,7 +2334,9 @@ function _fillQ(wrap, q, isExam, isPractice) {
   const qtxt = document.createElement('div');
   qtxt.className = 'q-text';
   const qContent = q.text || (q.options?.length ? '（请查看下方选项）' : '题目内容为空');
-  qtxt.innerHTML = `<span class="q-num">${S.cur + 1}</span>${esc(qContent)}`;
+  // 应用诱导性关键词高亮
+  const highlightedContent = highlightInductiveWords(esc(qContent));
+  qtxt.innerHTML = `<span class="q-num">${S.cur + 1}</span>${highlightedContent}`;
   wrap.appendChild(qtxt);
 
   // Multi badge
@@ -2652,10 +2693,10 @@ function buildGrid() {
   let lastGIdx = -1;
 
   S.questions.forEach((_, i) => {
-    const gIdx = isPractice ? -1 : getGroupIdxForQ(i);
+    const gIdx = getGroupIdxForQ(i);
 
-    // 考试模式插入题型分组标签
-    if (!isPractice && gIdx !== lastGIdx) {
+    // 插入题型分组标签（练习模式和考试模式都支持）
+    if (gIdx !== lastGIdx) {
       lastGIdx = gIdx;
       const lbl = document.createElement('div');
       lbl.className = 'q-grid-group-label';
@@ -2946,12 +2987,23 @@ function showMemoResults() {
 // Results
 // ════════════════════════════════════════════
 function calculateResults() {
-  const qs = S.questions;
+  // 深拷贝题目数据，防止后续修改影响结果页面
+  const qs = JSON.parse(JSON.stringify(S.questions));
+  // 深拷贝答案数据
+  const ans = {};
+  for (const [k, v] of Object.entries(S.ans)) {
+    if (v instanceof Set) {
+      ans[k] = { __set: true, v: [...v] };
+    } else {
+      ans[k] = v;
+    }
+  }
+  
   let correct = 0, wrong = 0, skip = 0;
   const byUnit = {};
 
   qs.forEach((q, i) => {
-    const sel  = S.ans[i];
+    const sel  = ans[i];
     const unit = q.unit || '其他';
     if (!byUnit[unit]) byUnit[unit] = { correct: 0, total: 0 };
     byUnit[unit].total++;
@@ -2978,7 +3030,7 @@ function calculateResults() {
     total: qs.length, correct, wrong, skip,
     timeSec: Math.floor((Date.now() - S.examStart) / 1000),
     byUnit,
-    qs, ans: { ...S.ans },
+    qs, ans,
   };
 
   // Save to history
@@ -3042,11 +3094,38 @@ function renderResults() {
 }
 
 // ════════════════════════════════════════════
-// Review
+// Utils
 // ════════════════════════════════════════════
+function esc(s) {
+  return (s||'').replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>')
+                .replace(/"/g,'"').replace(/'/g,'&#39;');
+}
+
+function highlightInductiveWords(text) {
+  // 诱导性关键词列表（按长度降序排列，优先匹配长词）
+  const keywords = [
+    '不恰当', '不合适', '不正确', '不包括', '错误的', '不属于',
+    '除外', '除了', '不是', '无需', '不必', '禁止', '不得',
+    '不可', '排除', '不对的', '相反', '例外', '无关', '不得不',
+    '不应', '不可', '不宜', '欠妥', '不妥', '不当', '错误的是',
+    '不常见'
+  ];
+
+  let result = text;
+  keywords.forEach(word => {
+    // 使用不区分大小写的正则，全局匹配
+    const regex = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
+    result = result.replace(regex, `<span class="inductive-word">${word}</span>`);
+  });
+  return result;
+}
+
 function showReview() {
-  filterReview('all', document.querySelector('.rtab'));
   showScreen('s-review');
+  // 默认显示全部题目
+  setTimeout(() => {
+    filterReview('all', document.querySelector('.rtab.active') || document.querySelector('.rtab'));
+  }, 250);
 }
 
 function filterReview(type, tabEl) {
@@ -3060,7 +3139,12 @@ function filterReview(type, tabEl) {
   list.innerHTML = '';
 
   R.qs.forEach((q, i) => {
-    const sel = R.ans ? R.ans[i] : S.ans[i];
+    // 获取答案（处理序列化的 Set）
+    let sel = R.ans ? R.ans[i] : S.ans[i];
+    // 反序列化：将 { __set: true, v: [...] } 转回 Set
+    if (sel && sel.__set) {
+      sel = new Set(sel.v);
+    }
     const isMulti   = q.answer && q.answer.length > 1;
     const correctSet= new Set(isMulti ? q.answer.split('') : [q.answer]);
 
@@ -3351,7 +3435,8 @@ function getSwipeDir(dx, dy){
       const curGIdx =getGroupIdxForQ(S.cur);
       return nextGIdx===curGIdx;
     }
-    return S.revealed.has(S.cur)&&S.cur<S.questions.length-1;
+    // 练习模式：自由滑动，只要不是最后一题
+    return S.cur < S.questions.length - 1;
   }
   function updateHints(dx){
     hintL?.classList.toggle('visible', dx>10 && canPrev());
