@@ -679,6 +679,55 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .stat-cell-val.accent{color:var(--accent)}
 .stat-cell-val.warn{color:var(--warning)}
 
+/* ── 计分区块（结果页）── */
+.score-block{
+  background:var(--surface);border:1px solid var(--border);border-radius:var(--r);
+  overflow:hidden;margin-top:0;
+}
+.score-block-header{
+  display:flex;align-items:baseline;justify-content:space-between;
+  padding:16px 20px 12px;border-bottom:1px solid var(--border);
+}
+.score-block-title{font-size:14px;font-weight:700;color:var(--text)}
+.score-block-total{font-size:22px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+.score-block-total span{font-size:13px;font-weight:400;color:var(--muted);margin-left:2px}
+.score-mode-row{
+  display:flex;align-items:center;gap:10px;
+  padding:10px 20px;border-bottom:1px solid var(--border);
+}
+.score-mode-row:last-child{border-bottom:none}
+.score-mode-name{flex:1;font-size:13px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.score-mode-bar-wrap{flex:1.5;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.score-mode-bar{height:100%;border-radius:3px;background:var(--accent);transition:width .6s cubic-bezier(.4,0,.2,1)}
+.score-mode-val{font-size:12px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}
+
+/* ── 计分配置面板（config 页）── */
+.scoring-panel{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.scoring-rule-row{
+  display:flex;align-items:center;gap:8px;
+  padding:10px 14px;background:var(--surface);border-radius:10px;
+  border:1.5px solid var(--border);
+}
+.scoring-rule-label{flex:1;font-size:13px;color:var(--text)}
+.scoring-rule-input{
+  width:54px;text-align:center;background:var(--card);
+  border:1.5px solid var(--border);border-radius:8px;
+  padding:5px 4px;font-size:15px;font-weight:700;color:var(--text);flex-shrink:0;
+}
+.scoring-rule-input:focus{border-color:var(--accent);outline:none}
+.scoring-rule-unit{font-size:11px;color:var(--muted);flex-shrink:0}
+.scoring-multi-rule{
+  padding:12px 14px;background:var(--surface);border-radius:10px;
+  border:1.5px solid var(--accent);
+}
+.scoring-multi-rule-title{font-size:12px;font-weight:700;color:var(--accent);margin-bottom:10px}
+.scoring-multi-chips{display:flex;gap:8px;flex-wrap:wrap}
+.scoring-multi-chip{
+  padding:6px 14px;border-radius:8px;font-size:12px;font-weight:600;
+  background:var(--card);border:1.5px solid var(--border);color:var(--muted);cursor:pointer;
+}
+.scoring-multi-chip.active{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
+
 /* 右栏 */
 .results-right{display:flex;flex-direction:column;gap:16px}
 
@@ -1265,6 +1314,24 @@ button,a,[role=button],label{touch-action:manipulation}
       </div>
     </div>
 
+    <!-- ── 计分设置（考试专属）── -->
+    <div id="scoring-section" style="display:none">
+      <div class="config-section">
+        <div class="toggle-row">
+          <div>
+            <div>计分模式</div>
+            <div class="desc">按题型配分，结束后显示得分</div>
+          </div>
+          <label class="toggle">
+            <input type="checkbox" id="cfg-scoring" onchange="toggleScoring()">
+            <div class="toggle-track"></div>
+            <div class="toggle-thumb"></div>
+          </label>
+        </div>
+        <div id="scoring-panel" style="display:none"></div>
+      </div>
+    </div>
+
     <!-- ── 随机顺序 ── -->
     <div class="config-section" id="shuffle-section">
       <div class="toggle-row">
@@ -1418,6 +1485,7 @@ button,a,[role=button],label{touch-action:manipulation}
       <!-- 右栏：章节分析 + 操作 -->
       <div class="results-right">
         <div class="unit-breakdown fade-up" id="unit-breakdown" style="display:none"></div>
+        <div class="score-block fade-up" id="score-block" style="display:none"></div>
         <div class="results-actions fade-up">
           <button class="res-btn primary" onclick="showReview()">📖 查看解析</button>
           <button class="res-btn ghost"   onclick="retryQuiz()">🔁 再练一次</button>
@@ -1531,6 +1599,9 @@ const CFG = {
   perMode:    null,   // null = 关闭；{mode: sqCount} = 精细配额
   difficulty: null,   // null = 关闭；{easy,medium,hard,extreme} = 权重
   countRatio: null,   // null = 关闭；{mode: weight} = 数量精细比例（与 perMode 互斥）
+  scoring:    false,  // 是否开启计分
+  scorePerMode: {},   // {mode: 每小题分值}
+  multiScoreMode: 'strict', // 'strict' | 'loose' — 案例/X型计分规则
 };
 
 // ════════════════════════════════════════════
@@ -1816,7 +1887,8 @@ function openConfig(mode) {
   startBtn.textContent = examLabel[mode];
   startBtn.className = `start-btn ${mode}-start`;
 
-  document.getElementById('exam-opts').style.display = mode === 'exam' ? '' : 'none';
+  document.getElementById('exam-opts').style.display    = mode === 'exam' ? '' : 'none';
+  document.getElementById('scoring-section').style.display = mode === 'exam' ? '' : 'none';
 
   // 重置所有可选项
   CFG.units = new Set(['__all__']);
@@ -1824,6 +1896,15 @@ function openConfig(mode) {
   CFG.perMode    = null;
   CFG.difficulty = null;
   CFG.countRatio = null;
+  CFG.scoring    = false;
+  CFG.scorePerMode = {};
+  CFG.multiScoreMode = 'strict';
+
+  // 重置计分开关
+  const scCk = document.getElementById('cfg-scoring');
+  if (scCk) scCk.checked = false;
+  document.getElementById('scoring-panel').style.display = 'none';
+  document.getElementById('scoring-panel').innerHTML = '';
 
   // 重置精细配额 / 难度面板开关
   const pmCk = document.getElementById('cfg-per-mode');
@@ -1943,6 +2024,110 @@ function toggleChip(btn, type, mode) {
 }
 
 // ── 精细配额 ──────────────────────────────────────────────────────
+// ── 计分配置 ──────────────────────────────────────────────────────
+function toggleScoring() {
+  CFG.scoring = document.getElementById('cfg-scoring').checked;
+  const panel = document.getElementById('scoring-panel');
+  panel.style.display = CFG.scoring ? '' : 'none';
+  if (!CFG.scoring) { panel.innerHTML = ''; return; }
+
+  // 开启计分时强制打开题型精细配额（精确分配才能准确计分）
+  const pmCk = document.getElementById('cfg-per-mode');
+  if (pmCk && !pmCk.checked) {
+    pmCk.checked = true;
+    togglePerMode();
+  }
+  buildScoringPanel();
+}
+
+function buildScoringPanel() {
+  const panel = document.getElementById('scoring-panel');
+  panel.innerHTML = '';
+  const modes = S.bankInfo.modes;
+  if (!modes.length) return;
+
+  // 判断是否有需要多选规则的题型
+  const hasMultiMode = modes.some(m =>
+    m.includes('X型') || m.includes('不定项') || m.includes('案例分析')
+  );
+
+  const wrap = document.createElement('div');
+  wrap.className = 'scoring-panel';
+
+  // 每题型分值输入
+  modes.forEach(mode => {
+    if (!CFG.scorePerMode[mode]) CFG.scorePerMode[mode] = 1;
+    const row = document.createElement('div');
+    row.className = 'scoring-rule-row';
+    row.innerHTML = `
+      <span class="scoring-rule-label">${esc(mode)}</span>
+      <input class="scoring-rule-input" type="number" min="0.5" max="99" step="0.5"
+             value="${CFG.scorePerMode[mode]}" data-mode="${esc(mode)}"
+             oninput="updateScorePerMode(this)">
+      <span class="scoring-rule-unit">分/小题</span>`;
+    wrap.appendChild(row);
+  });
+
+  // 多选 / 案例分析计分规则
+  if (hasMultiMode) {
+    const ruleBox = document.createElement('div');
+    ruleBox.className = 'scoring-multi-rule';
+    ruleBox.innerHTML = `
+      <div class="scoring-multi-rule-title">⚡ 案例分析 / X型题计分规则</div>
+      <div class="scoring-multi-chips">
+        <button class="scoring-multi-chip${CFG.multiScoreMode==='strict'?' active':''}"
+                onclick="setMultiScoreMode('strict',this)">
+          严格计分<br><span style="font-size:10px;font-weight:400">全对才得分</span>
+        </button>
+        <button class="scoring-multi-chip${CFG.multiScoreMode==='loose'?' active':''}"
+                onclick="setMultiScoreMode('loose',this)">
+          宽松计分<br><span style="font-size:10px;font-weight:400">按选项比例得分</span>
+        </button>
+      </div>`;
+    wrap.appendChild(ruleBox);
+  }
+
+  // 总分预览行
+  const totalRow = document.createElement('div');
+  totalRow.className = 'mode-quota-total-row';
+  totalRow.style.padding = '10px 14px 2px';
+  totalRow.innerHTML = `<span>预计总分</span><strong id="scoring-total-val" style="font-size:18px">—</strong>`;
+  wrap.appendChild(totalRow);
+
+  panel.appendChild(wrap);
+  _refreshScoringTotal();
+}
+
+function _refreshScoringTotal() {
+  const el = document.getElementById('scoring-total-val');
+  if (!el) return;
+  if (!CFG.perMode || !Object.keys(CFG.perMode).length) {
+    el.textContent = '—';
+    el.style.color = 'var(--muted)';
+    return;
+  }
+  let total = 0;
+  Object.entries(CFG.perMode).forEach(([mode, sqCount]) => {
+    total += sqCount * (CFG.scorePerMode[mode] || 1);
+  });
+  total = Math.round(total * 10) / 10;
+  el.textContent = total + ' 分';
+  el.style.color = 'var(--accent)';
+}
+
+function updateScorePerMode(input) {
+  const mode = input.dataset.mode;
+  const val  = Math.max(0.5, parseFloat(input.value) || 1);
+  CFG.scorePerMode[mode] = val;
+  _refreshScoringTotal();
+}
+
+function setMultiScoreMode(mode, btn) {
+  CFG.multiScoreMode = mode;
+  btn.closest('.scoring-multi-chips').querySelectorAll('.scoring-multi-chip')
+     .forEach(b => b.classList.toggle('active', b === btn));
+}
+
 function togglePerMode() {
   const on = document.getElementById('cfg-per-mode').checked;
 
@@ -2098,6 +2283,7 @@ function updatePerModeCount(input) {
   input.value = val;
   if (CFG.perMode) CFG.perMode[mode] = val;
   updatePerModeTotal();
+  _refreshScoringTotal();
 }
 
 function updatePerModeTotal() {
@@ -2517,7 +2703,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
   if (isMulti) {
     const badge = document.createElement('div');
     badge.className = 'multi-badge';
-    badge.innerHTML = 'X型选择题';
+    badge.innerHTML = '多选题';
     wrap.appendChild(badge);
   }
 
@@ -3228,7 +3414,69 @@ function calculateResults() {
     timeSec: Math.floor((Date.now() - S.examStart) / 1000),
     byUnit,
     qs, ans,
+    scoring: false,
   };
+
+  // ── 计分 ──────────────────────────────────────────────────────────
+  if (CFG.scoring && S.mode === 'exam') {
+    S.results.scoring      = true;
+    S.results.scorePerMode = { ...CFG.scorePerMode };
+    S.results.multiScoreMode = CFG.multiScoreMode;
+
+    let totalScore = 0, earnedScore = 0;
+    const scoreByMode = {};  // {mode: {earned, total}}
+
+    qs.forEach((q, i) => {
+      const mode      = q.mode || '';
+      const perSq     = CFG.scorePerMode[mode] || 1;
+      const sel       = S.ans[i];
+      const isEmpty   = !sel || (sel instanceof Set && sel.size === 0);
+      const isMulti   = isMultiQ(q);
+      const correctSet= new Set((q.answer || '').split(''));
+
+      if (!scoreByMode[mode]) scoreByMode[mode] = { earned: 0, total: 0 };
+      scoreByMode[mode].total += perSq;
+      totalScore += perSq;
+
+      if (isEmpty) return;
+
+      if (!isMulti) {
+        // 普通单选：全对得满分
+        if (sel === q.answer) {
+          earnedScore += perSq;
+          scoreByMode[mode].earned += perSq;
+        }
+      } else {
+        const selSet = sel instanceof Set ? sel : new Set([sel]);
+        if (CFG.multiScoreMode === 'strict') {
+          // 严格：完全正确才得分
+          const allCorrect = selSet.size === correctSet.size &&
+            [...correctSet].every(l => selSet.has(l));
+          if (allCorrect) {
+            earnedScore += perSq;
+            scoreByMode[mode].earned += perSq;
+          }
+        } else {
+          // 宽松：每个正确选项得 perSq/总正确数，每个错选倒扣同额，最低0
+          const optScore = perSq / correctSet.size;
+          let got = 0;
+          // 正确选中
+          selSet.forEach(l => { if (correctSet.has(l))  got += optScore; });
+          // 错误选中（多选 / 选了不在正确答案里的）
+          selSet.forEach(l => { if (!correctSet.has(l)) got -= optScore; });
+          got = Math.max(0, got);
+          // 保留一位小数避免浮点噪声
+          got = Math.round(got * 10) / 10;
+          earnedScore += got;
+          scoreByMode[mode].earned += got;
+        }
+      }
+    });
+
+    S.results.totalScore  = Math.round(totalScore  * 10) / 10;
+    S.results.earnedScore = Math.round(earnedScore * 10) / 10;
+    S.results.scoreByMode = scoreByMode;
+  }
 
   // Save to history
   const record = {
@@ -3288,6 +3536,36 @@ function renderResults() {
   } else {
     bk.style.display = 'none';
   }
+
+  // ── 计分区块 ──────────────────────────────────────────────────────
+  const sb = document.getElementById('score-block');
+  if (R.scoring && R.scoreByMode) {
+    const pctScore = R.totalScore > 0
+      ? Math.round(R.earnedScore / R.totalScore * 100) : 0;
+    const modeRows = Object.entries(R.scoreByMode).map(([mode, d]) => {
+      const barPct = d.total > 0 ? Math.round(d.earned / d.total * 100) : 0;
+      return `<div class="score-mode-row">
+        <span class="score-mode-name">${esc(mode)}</span>
+        <div class="score-mode-bar-wrap">
+          <div class="score-mode-bar" style="width:${barPct}%"></div>
+        </div>
+        <span class="score-mode-val">${d.earned}/${d.total}</span>
+      </div>`;
+    }).join('');
+    sb.innerHTML = `
+      <div class="score-block-header">
+        <span class="score-block-title">📊 得分详情
+          <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:6px">
+            ${R.multiScoreMode === 'loose' ? '宽松计分' : '严格计分'}
+          </span>
+        </span>
+        <span class="score-block-total">${R.earnedScore}<span>/ ${R.totalScore} 分（${pctScore}%）</span></span>
+      </div>
+      ${modeRows}`;
+    sb.style.display = '';
+  } else {
+    sb.style.display = 'none';
+  }
 }
 
 // ════════════════════════════════════════════
@@ -3301,12 +3579,12 @@ function esc(s) {
 function highlightInductiveWords(text) {
   // 诱导性关键词列表（按长度降序排列，优先匹配长词）
   const keywords = [
-    '不恰当', '不合适', '不正确', '不包括', '错误的', '不属于',
+    '不恰当', '不合适', '不正确', '不包括', '错误的是', '不属于',
     '除外', '除了', '不是', '无需', '不必', '禁止', '不得',
-    '不可', '排除', '不对的', '相反', '例外', '无关', '不得不',
-    '不应', '不可', '不宜', '欠妥', '不妥', '不当', '错误的是',
-    '不常见'
-  ];
+    '不可能', '排除', '不对的', '相反', '例外', '无关', '不得不',
+    '不应', '不可', '不宜', '欠妥', '不妥', '不当', '错误的',
+    '不常见', '不适用'
+  ];0
 
   let result = text;
   keywords.forEach(word => {
@@ -3389,7 +3667,7 @@ function filterReview(type, tabEl) {
       </div>`;
     }).join('');
 
-    const multiTag = isMulti ? `<span style="font-size:10px;color:var(--warning);margin-left:4px">[不定项选择]</span>` : '';
+    const multiTag = isMulti ? `<span style="font-size:10px;color:var(--warning);margin-left:4px">[多选]</span>` : '';
 
     item.innerHTML = `
       <div class="review-item-head">
