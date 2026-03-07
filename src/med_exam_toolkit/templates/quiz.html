@@ -373,6 +373,82 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   content:'';flex:1;height:1px;background:var(--accent);opacity:.25;
 }
 
+/* ── B型题共享选项块 ─────────────────────────────────────── */
+.q-shared-opts{
+  background:var(--surface);border:1px solid var(--border);border-radius:10px;
+  padding:14px 16px;margin-bottom:16px;
+  border-left:3px solid var(--warning);
+}
+.q-shared-opts-label{
+  font-size:10px;font-weight:700;color:var(--warning);text-transform:uppercase;
+  letter-spacing:.08em;margin-bottom:10px;
+  display:flex;align-items:center;gap:6px;
+}
+.q-shared-opts-label::after{content:'';flex:1;height:1px;background:var(--warning);opacity:.25}
+.q-shared-opts-label .stem-toggle-hint{font-size:10px;margin-left:4px;opacity:.65;font-weight:400}
+.q-shared-opts.is-collapsed .q-shared-opts-content{max-height:0!important;opacity:0}
+.q-shared-opts:not(.is-collapsed) .q-shared-opts-content{max-height:none;opacity:1}
+.q-shared-opts-content{overflow:hidden;transition:max-height .3s ease,opacity .25s}
+.q-shared-opts.is-collapsed{background:var(--card);border-style:dashed;opacity:.75}
+.q-shared-opts.is-collapsed .q-shared-opts-label{color:var(--muted)}
+.q-shared-opt-row{
+  display:flex;align-items:flex-start;gap:8px;
+  font-size:13px;color:var(--text);padding:4px 0;line-height:1.6;
+}
+.q-shared-opt-lbl{
+  width:22px;height:22px;border-radius:6px;flex-shrink:0;
+  background:var(--warn-bg);color:var(--warning);
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;
+}
+/* 解析面板里的共享选项回显 */
+.explain-shared-opts{
+  border:1px solid var(--border);border-radius:8px;
+  padding:10px 12px;margin-bottom:10px;font-size:13px;
+}
+.explain-shared-opts-title{
+  font-size:10px;color:var(--warning);font-weight:700;
+  margin-bottom:8px;text-transform:uppercase;letter-spacing:.06em;
+  display:flex;align-items:center;gap:5px;
+}
+.explain-shared-opts-title::after{content:'';flex:1;height:1px;background:var(--warning);opacity:.25}
+.explain-shared-opt-row{display:flex;align-items:flex-start;gap:8px;padding:3px 0;line-height:1.5}
+.explain-shared-opt-row .opt-lbl{
+  width:22px;height:22px;border-radius:6px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;
+  background:var(--card);color:var(--muted);border:1px solid var(--border);
+}
+.explain-shared-opt-row.is-ans .opt-lbl{background:var(--success-bg);color:var(--success);border-color:var(--success)}
+.explain-shared-opt-row.is-ans{color:var(--success);font-weight:600}
+/* review 里的共享选项 */
+.review-shared-opts{
+  border:1px solid var(--border);border-radius:8px;
+  padding:8px 12px;margin-bottom:8px;font-size:12px;
+}
+.review-shared-opts-title{font-size:10px;color:var(--warning);font-weight:700;margin-bottom:6px}
+.review-shared-opt-row{display:flex;align-items:flex-start;gap:6px;padding:2px 0;color:var(--muted);line-height:1.5}
+.review-shared-opt-row .opt-lbl{
+  width:18px;height:18px;border-radius:5px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:10px;font-weight:700;background:var(--card);color:var(--muted);
+  border:1px solid var(--border);
+}
+.review-shared-opt-row.is-ans .opt-lbl{background:var(--success-bg);color:var(--success);border-color:var(--success)}
+.review-shared-opt-row.is-ans{color:var(--success);font-weight:600}
+/* memo 里的共享选项 */
+.memo-shared-opts{
+  border:1px solid var(--border);border-radius:8px;
+  padding:10px 12px;margin-bottom:10px;font-size:13px;
+}
+.memo-shared-opts-title{font-size:10px;color:var(--warning);font-weight:700;margin-bottom:6px}
+.memo-shared-opt-row{display:flex;align-items:flex-start;gap:6px;padding:3px 0;color:var(--muted);line-height:1.5}
+.memo-shared-opt-row .opt-lbl{
+  width:20px;height:20px;border-radius:5px;flex-shrink:0;
+  display:flex;align-items:center;justify-content:center;
+  font-size:11px;font-weight:700;background:var(--warn-bg);color:var(--warning);
+}
+
 .q-text{font-size:16px;line-height:1.8;color:var(--text);margin-bottom:18px;font-weight:500;letter-spacing:.01em}
 /* 诱导性关键词高亮 */
 .inductive-word{
@@ -851,6 +927,14 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   white-space:pre-wrap;word-break:break-word;
 }
 .review-discuss strong{color:var(--text)}
+.review-score-badge{
+  display:inline-flex;align-items:center;gap:5px;
+  font-size:12px;font-weight:700;padding:4px 10px;border-radius:7px;
+  margin-bottom:10px;
+}
+.review-score-badge.full{background:var(--success-bg);color:var(--success)}
+.review-score-badge.partial{background:var(--warn-bg);color:var(--warning)}
+.review-score-badge.zero{background:var(--danger-bg);color:var(--danger)}
 
 /* ════════════════════════════════════════════
    Toast
@@ -1095,6 +1179,71 @@ button,a,[role=button],label{touch-action:manipulation}
 .unit-search-input::placeholder{color:var(--muted)}
 /* 限高可滚动 chip 容器 */
 .chip-scroll{max-height:160px;overflow-y:auto;padding-right:2px}
+/* 章节 chip 上的题数角标 */
+.chip .chip-cnt{
+  font-size:10px;font-weight:400;color:var(--muted);margin-left:3px;
+}
+.chip.active .chip-cnt{color:rgba(255,255,255,.7)}
+/* 全选/反选快捷行 */
+.unit-quick-bar{
+  display:flex;gap:6px;margin-bottom:8px;
+}
+.unit-quick-btn{
+  font-size:11px;font-weight:600;padding:3px 10px;border-radius:6px;
+  background:var(--surface);border:1px solid var(--border);color:var(--muted);
+  cursor:pointer;flex-shrink:0;
+}
+.unit-quick-btn:hover{border-color:var(--accent);color:var(--accent)}
+
+/* ── 章节配额面板 ── */
+.unit-quota-panel{margin-top:10px}
+.unit-quota-batch-bar{
+  display:flex;align-items:center;gap:8px;
+  padding:8px 12px;background:var(--surface);
+  border-radius:10px;border:1px solid var(--border);margin-bottom:10px;
+  flex-wrap:wrap;
+}
+.unit-quota-batch-bar span{font-size:12px;color:var(--muted);flex-shrink:0}
+.unit-quota-batch-input{
+  width:58px;text-align:center;background:var(--card);
+  border:1.5px solid var(--border);border-radius:7px;
+  padding:4px;font-size:14px;font-weight:700;color:var(--text);
+}
+.unit-quota-batch-input:focus{border-color:var(--accent);outline:none}
+.unit-quota-batch-btn{
+  font-size:12px;font-weight:600;padding:4px 12px;border-radius:7px;
+  background:var(--accent-bg);border:1px solid var(--accent);color:var(--accent);cursor:pointer;
+}
+.unit-quota-batch-btn.ratio{
+  background:var(--surface);border-color:var(--border);color:var(--muted);
+}
+.unit-quota-batch-btn:hover{opacity:.8}
+.unit-quota-list{
+  display:flex;flex-direction:column;gap:0;
+  max-height:220px;overflow-y:auto;overflow-x:hidden;
+  border:1px solid var(--border);border-radius:10px;
+}
+.unit-quota-row{
+  display:flex;align-items:center;gap:8px;
+  padding:7px 12px;border-bottom:1px solid var(--border);
+  background:var(--card);
+}
+.unit-quota-row:last-child{border-bottom:none}
+.unit-quota-row:nth-child(even){background:var(--surface)}
+.unit-quota-name{flex:1;font-size:12px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unit-quota-avail{font-size:11px;color:var(--muted);flex-shrink:0;width:44px;text-align:right}
+.unit-quota-input{
+  width:52px;text-align:center;background:var(--bg);
+  border:1.5px solid var(--border);border-radius:6px;
+  padding:3px 4px;font-size:13px;font-weight:700;color:var(--text);flex-shrink:0;
+}
+.unit-quota-input:focus{border-color:var(--accent);outline:none}
+.unit-quota-total-row{
+  display:flex;justify-content:space-between;align-items:center;
+  padding:8px 12px 2px;font-size:12px;color:var(--muted);
+  margin-top:6px;
+}
+.unit-quota-total-row strong{color:var(--accent);font-size:15px}
 /* section 内小型切换标签 */
 .cfg-toggle-inline{
   display:flex;align-items:center;gap:5px;cursor:pointer;
@@ -1246,11 +1395,23 @@ button,a,[role=button],label{touch-action:manipulation}
     <div class="config-section">
       <div class="cfg-section-head">
         <span class="config-section-label">章节筛选</span>
-        <span class="cfg-meta-badge" id="unit-sel-count">全部</span>
+        <div style="display:flex;align-items:center;gap:10px">
+          <label class="cfg-toggle-inline">
+            <input type="checkbox" id="cfg-per-unit" onchange="togglePerUnit()">
+            按章节配额
+          </label>
+          <span class="cfg-meta-badge" id="unit-sel-count">全部</span>
+        </div>
       </div>
       <input class="unit-search-input" id="unit-search"
              placeholder="🔍 搜索章节名称…" oninput="filterUnitChips(this.value)">
+      <div class="unit-quick-bar">
+        <button class="unit-quick-btn" onclick="selectAllUnits()">全选</button>
+        <button class="unit-quick-btn" onclick="invertUnits()">反选</button>
+        <button class="unit-quick-btn" onclick="clearUnits()">清空</button>
+      </div>
       <div class="chip-wrap chip-scroll" id="unit-chips"></div>
+      <div id="unit-quota-panel" style="display:none"></div>
     </div>
 
     <!-- ── 题型配置（筛选 / 精细配额 切换）── -->
@@ -1597,6 +1758,7 @@ const CFG = {
   shuffle: true,
   examTime: 90,
   perMode:    null,   // null = 关闭；{mode: sqCount} = 精细配额
+  perUnit:    null,   // null = 关闭；{unit: sqCount} = 章节配额
   difficulty: null,   // null = 关闭；{easy,medium,hard,extreme} = 权重
   countRatio: null,   // null = 关闭；{mode: weight} = 数量精细比例（与 perMode 互斥）
   scoring:    false,  // 是否开启计分
@@ -1894,6 +2056,7 @@ function openConfig(mode) {
   CFG.units = new Set(['__all__']);
   CFG.modes = new Set(['__all__']);
   CFG.perMode    = null;
+  CFG.perUnit    = null;
   CFG.difficulty = null;
   CFG.countRatio = null;
   CFG.scoring    = false;
@@ -1913,6 +2076,12 @@ function openConfig(mode) {
   document.getElementById('mode-quota-panel').style.display = 'none';
   document.getElementById('mode-quota-panel').innerHTML = '';
   document.getElementById('count-section').style.display = '';
+
+  // 重置章节配额
+  const puCk = document.getElementById('cfg-per-unit');
+  if (puCk) puCk.checked = false;
+  document.getElementById('unit-quota-panel').style.display = 'none';
+  document.getElementById('unit-quota-panel').innerHTML = '';
 
   // 重置数量精细比例
   const crCk = document.getElementById('cfg-count-ratio');
@@ -1947,17 +2116,21 @@ function openConfig(mode) {
 function buildUnitChips(items, mode) {
   const wrap = document.getElementById('unit-chips');
   wrap.innerHTML = '';
+  const unitSq = S.bankInfo.unit_sq || {};
+
   const all = document.createElement('button');
   all.className = 'chip active';
   all.textContent = '全部';
   all.dataset.val = '__all__';
   all.onclick = () => toggleChip(all, 'unit', mode);
   wrap.appendChild(all);
+
   items.forEach(item => {
+    const cnt = unitSq[item] || 0;
     const btn = document.createElement('button');
     btn.className = 'chip';
-    btn.textContent = item;
     btn.dataset.val = item;
+    btn.innerHTML = `${esc(item)}<span class="chip-cnt">${cnt}</span>`;
     btn.onclick = () => toggleChip(btn, 'unit', mode);
     wrap.appendChild(btn);
   });
@@ -2020,7 +2193,65 @@ function toggleChip(btn, type, mode) {
       document.querySelector(`#${container} .chip[data-val="__all__"]`)?.classList.remove('active');
     }
   }
-  if (type === 'unit') updateUnitSelCount();
+  if (type === 'unit') {
+    updateUnitSelCount();
+    _refreshQuotaFromUnits();
+    _onUnitSelectionChange();
+  }
+}
+
+/** 全选所有章节 */
+function selectAllUnits() {
+  const chips = document.querySelectorAll('#unit-chips .chip');
+  CFG.units.clear();
+  chips.forEach(c => {
+    if (c.dataset.val !== '__all__') {
+      CFG.units.add(c.dataset.val);
+      c.style.display !== 'none' && c.classList.add('active');
+    }
+  });
+  document.querySelector('#unit-chips .chip[data-val="__all__"]')?.classList.remove('active');
+  updateUnitSelCount();
+  _refreshQuotaFromUnits();
+  _onUnitSelectionChange();
+}
+
+/** 反选：未选的选上，已选的取消 */
+function invertUnits() {
+  const chips = [...document.querySelectorAll('#unit-chips .chip')]
+    .filter(c => c.dataset.val !== '__all__' && c.style.display !== 'none');
+  const wasAll = CFG.units.has('__all__');
+  CFG.units.clear();
+  chips.forEach(c => {
+    const v = c.dataset.val;
+    if (wasAll || !c.classList.contains('active')) {
+      CFG.units.add(v);
+      c.classList.add('active');
+    } else {
+      c.classList.remove('active');
+    }
+  });
+  if (CFG.units.size === 0) {
+    CFG.units.add('__all__');
+    document.querySelector('#unit-chips .chip[data-val="__all__"]')?.classList.add('active');
+  } else {
+    document.querySelector('#unit-chips .chip[data-val="__all__"]')?.classList.remove('active');
+  }
+  updateUnitSelCount();
+  _refreshQuotaFromUnits();
+  _onUnitSelectionChange();
+}
+
+/** 清空选择（回到"全部"）*/
+function clearUnits() {
+  CFG.units.clear();
+  CFG.units.add('__all__');
+  document.querySelectorAll('#unit-chips .chip').forEach(c => {
+    c.classList.toggle('active', c.dataset.val === '__all__');
+  });
+  updateUnitSelCount();
+  _refreshQuotaFromUnits();
+  _onUnitSelectionChange();
 }
 
 // ── 精细配额 ──────────────────────────────────────────────────────
@@ -2126,6 +2357,144 @@ function setMultiScoreMode(mode, btn) {
   CFG.multiScoreMode = mode;
   btn.closest('.scoring-multi-chips').querySelectorAll('.scoring-multi-chip')
      .forEach(b => b.classList.toggle('active', b === btn));
+}
+
+// ── 章节配额 ──────────────────────────────────────────────────────
+function togglePerUnit() {
+  const on = document.getElementById('cfg-per-unit').checked;
+  const panel = document.getElementById('unit-quota-panel');
+  panel.style.display = on ? '' : 'none';
+  if (on) {
+    CFG.perUnit = {};
+    // 开启时若未选章节，自动全选所有章节方便配置
+    if (CFG.units.has('__all__')) {
+      // 全部状态下，使用所有章节
+    }
+    buildUnitQuotaPanel();
+    // 开启章节配额时隐藏数量区（配额决定总数）
+    document.getElementById('count-section').style.display = 'none';
+  } else {
+    CFG.perUnit = null;
+    document.getElementById('count-section').style.display = '';
+    panel.innerHTML = '';
+  }
+}
+
+function _getActiveUnits() {
+  // 返回当前生效的章节列表
+  if (CFG.units.has('__all__')) return S.bankInfo.units;
+  return [...CFG.units].filter(u => S.bankInfo.units.includes(u));
+}
+
+function buildUnitQuotaPanel() {
+  const panel = document.getElementById('unit-quota-panel');
+  panel.innerHTML = '';
+  const units  = _getActiveUnits();
+  const unitSq = S.bankInfo.unit_sq || {};
+  if (!units.length) { panel.innerHTML = '<div style="font-size:12px;color:var(--muted);padding:8px 0">请先选择章节</div>'; return; }
+
+  const wrap = document.createElement('div');
+  wrap.className = 'unit-quota-panel';
+
+  // 批量设置栏
+  const batchBar = document.createElement('div');
+  batchBar.className = 'unit-quota-batch-bar';
+  batchBar.innerHTML = `
+    <span>批量设置</span>
+    <input class="unit-quota-batch-input" id="unit-batch-val" type="number"
+           min="1" value="20" placeholder="题数">
+    <button class="unit-quota-batch-btn" onclick="applyUnitQuotaBatch('fixed')">每章固定题数</button>
+    <button class="unit-quota-batch-btn ratio" onclick="applyUnitQuotaBatch('ratio')">按比例分配</button>`;
+  wrap.appendChild(batchBar);
+
+  // 章节列表
+  const list = document.createElement('div');
+  list.className = 'unit-quota-list';
+  units.forEach(unit => {
+    const avail = unitSq[unit] || 0;
+    const def   = Math.min(20, avail);
+    CFG.perUnit[unit] = def;
+    const row = document.createElement('div');
+    row.className = 'unit-quota-row';
+    row.innerHTML = `
+      <span class="unit-quota-name" title="${esc(unit)}">${esc(unit)}</span>
+      <span class="unit-quota-avail">共${avail}</span>
+      <input class="unit-quota-input" type="number" min="0" max="${avail}"
+             value="${def}" data-unit="${esc(unit)}"
+             oninput="updateUnitQuota(this)">`;
+    list.appendChild(row);
+  });
+  wrap.appendChild(list);
+
+  // 合计行
+  const totalRow = document.createElement('div');
+  totalRow.className = 'unit-quota-total-row';
+  totalRow.innerHTML = `<span>合计小题数</span><strong id="unit-quota-total-val">0</strong>`;
+  wrap.appendChild(totalRow);
+
+  panel.appendChild(wrap);
+  _refreshUnitQuotaTotal();
+}
+
+function updateUnitQuota(input) {
+  const unit = input.dataset.unit;
+  const max  = parseInt(input.max) || 9999;
+  const val  = Math.max(0, Math.min(parseInt(input.value) || 0, max));
+  input.value = val;
+  if (CFG.perUnit) CFG.perUnit[unit] = val;
+  _refreshUnitQuotaTotal();
+}
+
+function _refreshUnitQuotaTotal() {
+  if (!CFG.perUnit) return;
+  const total = Object.values(CFG.perUnit).reduce((a, b) => a + b, 0);
+  const el = document.getElementById('unit-quota-total-val');
+  if (el) el.textContent = total;
+}
+
+function applyUnitQuotaBatch(mode) {
+  if (!CFG.perUnit) return;
+  const batchVal = parseInt(document.getElementById('unit-batch-val').value) || 20;
+  const units    = _getActiveUnits();
+  const unitSq   = S.bankInfo.unit_sq || {};
+
+  if (mode === 'fixed') {
+    // 每章固定题数（不超过该章上限）
+    units.forEach(unit => {
+      const avail = unitSq[unit] || 0;
+      const val   = Math.min(batchVal, avail);
+      CFG.perUnit[unit] = val;
+      const input = document.querySelector(`.unit-quota-input[data-unit="${CSS.escape(unit)}"]`);
+      if (input) input.value = val;
+    });
+  } else {
+    // 按比例：以 batchVal 为总题数，按各章可用数等比分配
+    const totalAvail = units.reduce((s, u) => s + (unitSq[u] || 0), 0);
+    if (!totalAvail) return;
+    let allocated = 0;
+    units.forEach((unit, i) => {
+      const avail = unitSq[unit] || 0;
+      let val;
+      if (i === units.length - 1) {
+        val = Math.max(0, batchVal - allocated);
+      } else {
+        val = Math.round(batchVal * avail / totalAvail);
+        allocated += val;
+      }
+      val = Math.min(val, avail);
+      CFG.perUnit[unit] = val;
+      const input = document.querySelector(`.unit-quota-input[data-unit="${CSS.escape(unit)}"]`);
+      if (input) input.value = val;
+    });
+  }
+  _refreshUnitQuotaTotal();
+}
+
+// 章节变化时重建配额面板（只对已勾选的章节显示行）
+function _onUnitSelectionChange() {
+  if (CFG.perUnit !== null) {
+    buildUnitQuotaPanel();
+  }
 }
 
 function togglePerMode() {
@@ -2242,25 +2611,83 @@ function _refreshCountRatioDisplay() {
 }
 
 
+// ── 精细配额 ──────────────────────────────────────────────────────
+
+/**
+ * 根据当前选中章节，计算各题型可用小题数，
+ * 并刷新精细配额面板的「共 X」显示、input max、以及按比例重新建议配额值。
+ */
+function _getUnitModeSq() {
+  const unitModeSq = S.bankInfo.unit_mode_sq || {};
+  const isAll = CFG.units.has('__all__');
+  const result = {};  // {mode: available_sq}
+  S.bankInfo.modes.forEach(m => result[m] = 0);
+
+  const units = isAll ? S.bankInfo.units : [...CFG.units];
+  units.forEach(u => {
+    const modeMap = unitModeSq[u] || {};
+    Object.entries(modeMap).forEach(([m, n]) => {
+      if (result[m] !== undefined) result[m] += n;
+    });
+  });
+  return result;
+}
+
+function _refreshQuotaFromUnits() {
+  // 同步更新数量滑杆的 max
+  const avail = _getUnitModeSq();
+  const totalAvail = Object.values(avail).reduce((a, b) => a + b, 0);
+  const slider = document.getElementById('count-slider');
+  if (slider) {
+    const newMax = Math.min(totalAvail || S.bankInfo.total_sq, 300);
+    slider.max = newMax;
+    if (parseInt(slider.value) > newMax) {
+      slider.value = newMax;
+      updateCount(newMax);
+    }
+  }
+
+  if (!CFG.perMode) return;   // 精细配额未开启，不需要刷新
+
+  S.bankInfo.modes.forEach(mode => {
+    const a = avail[mode] || 0;
+    // 更新「共 X」文字
+    const availEl = document.querySelector(`.mode-quota-avail[data-mode-avail="${CSS.escape(mode)}"]`);
+    if (availEl) availEl.textContent = `共 ${a}`;
+    // 更新 input max，并把超出的值截断
+    const input = document.querySelector(`.mode-quota-input[data-mode="${CSS.escape(mode)}"]`);
+    if (input) {
+      input.max = a;
+      const cur = parseInt(input.value) || 0;
+      if (cur > a) {
+        input.value = a;
+        CFG.perMode[mode] = a;
+      }
+    }
+  });
+  updatePerModeTotal();
+  _refreshScoringTotal();
+}
+
 function buildModeQuota() {
   const panel = document.getElementById('mode-quota-panel');
   panel.innerHTML = '';
-  const modes  = S.bankInfo.modes;
-  const sqMap  = S.bankInfo.mode_counts_sq || {};
+  const modes = S.bankInfo.modes;
+  const avail = _getUnitModeSq();   // 按当前章节计算
 
   const list = document.createElement('div');
   list.className = 'mode-quota-list';
 
   modes.forEach(mode => {
-    const available = sqMap[mode] || 0;
-    const def = Math.max(1, Math.round(available * 0.4)); // 默认 40%
+    const available = avail[mode] || 0;
+    const def = Math.max(1, Math.round(available * 0.4));
     CFG.perMode[mode] = def;
 
     const row = document.createElement('div');
     row.className = 'mode-quota-row';
     row.innerHTML = `
       <span class="mode-quota-label" title="${esc(mode)}">${esc(mode)}</span>
-      <span class="mode-quota-avail">共 ${available}</span>
+      <span class="mode-quota-avail" data-mode-avail="${esc(mode)}">共 ${available}</span>
       <input class="mode-quota-input" type="number" min="0" max="${available}"
              value="${def}" data-mode="${esc(mode)}"
              oninput="updatePerModeCount(this)">`;
@@ -2456,11 +2883,21 @@ async function startSession() {
   // 章节筛选
   if (!CFG.units.has('__all__')) CFG.units.forEach(u => params.append('unit', u));
 
+  const isPU    = document.getElementById('cfg-per-unit')?.checked;
   const isPM    = document.getElementById('cfg-per-mode')?.checked;
   const isCR    = document.getElementById('cfg-count-ratio')?.checked;
   const isDiff  = document.getElementById('cfg-difficulty')?.checked;
 
-  if (isPM && CFG.perMode) {
+  if (isPU && CFG.perUnit) {
+    // ── 章节配额：传 per_unit JSON，章节 unit 参数由后端从 per_unit key 中推断 ──
+    const nonZero = Object.fromEntries(
+      Object.entries(CFG.perUnit).filter(([, v]) => v > 0)
+    );
+    if (!Object.keys(nonZero).length) { toast('请至少为一个章节设置题目数量'); return; }
+    params.set('per_unit', JSON.stringify(nonZero));
+    params.set('shuffle', '1');
+
+  } else if (isPM && CFG.perMode) {
     // ── 题型精细配额：传 per_mode JSON，忽略题型 chips 和数量滑杆 ──
     const nonZero = Object.fromEntries(
       Object.entries(CFG.perMode).filter(([, v]) => v > 0)
@@ -2690,6 +3127,33 @@ function _fillQ(wrap, q, isExam, isPractice) {
     wrap.appendChild(stemDiv);
   }
 
+  // B型题共享选项块（渲染在题目文字上方，可折叠）
+  if (q.shared_options && q.shared_options.length > 0) {
+    const siblingCount = S.questions.filter(sq => sq.qi === q.qi).length;
+    const soDiv = document.createElement('div');
+    soDiv.className = 'q-shared-opts';
+    const soLabel = siblingCount > 1
+      ? `B型题共享选项（共 ${siblingCount} 小题 · 第 ${q.si + 1} 题）`
+      : 'B型题共享选项';
+    const soItems = q.shared_options.map((o, i) => {
+      const l = String.fromCharCode(65 + i);
+      const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+      return `<div class="q-shared-opt-row">
+        <span class="q-shared-opt-lbl">${l}</span>
+        <span>${esc(clean)}</span>
+      </div>`;
+    }).join('');
+    soDiv.innerHTML = `
+      <div class="q-shared-opts-label" style="cursor:pointer">${soLabel}
+        <span class="stem-toggle-hint">▴ 点击收起</span></div>
+      <div class="q-shared-opts-content">${soItems}</div>`;
+    soDiv.querySelector('.q-shared-opts-label').addEventListener('click', () => {
+      const c = soDiv.classList.toggle('is-collapsed');
+      soDiv.querySelector('.stem-toggle-hint').textContent = c ? '▾ 点击展开' : '▴ 点击收起';
+    });
+    wrap.appendChild(soDiv);
+  }
+
   // Question text
   const qtxt = document.createElement('div');
   qtxt.className = 'q-text';
@@ -2703,7 +3167,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
   if (isMulti) {
     const badge = document.createElement('div');
     badge.className = 'multi-badge';
-    badge.innerHTML = '多选题';
+    badge.innerHTML = '不定项';
     wrap.appendChild(badge);
   }
 
@@ -2932,6 +3396,25 @@ function buildExplain(q, selected) {
       corrRow.innerHTML = `正确答案：<span>${q.answer}</span>`;
     }
     inner.appendChild(corrRow);
+  }
+
+  // B型题：在解析前展示共享选项，高亮正确答案
+  if (q.shared_options && q.shared_options.length > 0) {
+    const soBox = document.createElement('div');
+    soBox.className = 'explain-shared-opts';
+    const soTitle = document.createElement('div');
+    soTitle.className = 'explain-shared-opts-title';
+    soTitle.textContent = 'B型题共享选项';
+    soBox.appendChild(soTitle);
+    q.shared_options.forEach((o, i) => {
+      const l = String.fromCharCode(65 + i);
+      const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+      const row = document.createElement('div');
+      row.className = 'explain-shared-opt-row' + (correctSet.has(l) ? ' is-ans' : '');
+      row.innerHTML = `<span class="opt-lbl">${l}</span><span>${esc(clean)}</span>`;
+      soBox.appendChild(row);
+    });
+    inner.appendChild(soBox);
   }
 
   const body = document.createElement('div');
@@ -3229,6 +3712,17 @@ function renderMemo(dir = 'forward') {
     ${q.answer.length > 1 ? `<span class="multi-badge">⊞ 多选</span>` : ''}
   </div>`;
   const stemHtml = q.stem ? `<div class="memo-stem-block">${esc(q.stem)}</div>` : '';
+  // B型题共享选项块
+  const sharedOptsHtml = (q.shared_options && q.shared_options.length > 0)
+    ? `<div class="memo-shared-opts">
+        <div class="memo-shared-opts-title">B型题共享选项</div>
+        ${q.shared_options.map((o,i) => {
+          const l = String.fromCharCode(65+i);
+          const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+          return `<div class="memo-shared-opt-row"><span class="opt-lbl">${l}</span><span>${esc(co)}</span></div>`;
+        }).join('')}
+      </div>`
+    : '';
   const optsHtml = q.options.map((o, i) => {
     const l = String.fromCharCode(65 + i);
     const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
@@ -3241,7 +3735,7 @@ function renderMemo(dir = 'forward') {
        ${q.point ? `<div class="memo-explain-point">考点：${esc(q.point)}</div>` : ''}`
     : `<div class="memo-explain-text" style="color:var(--muted)">暂无解析</div>`;
 
-  const questionHtml = metaTags + stemHtml +
+  const questionHtml = metaTags + stemHtml + sharedOptsHtml +
     `<div class="memo-q-text">${esc(q.text)}</div>
      <div class="memo-opts">${optsHtml}</div>`;
   const answerHtml = `<div class="memo-answer-inner">
@@ -3579,12 +4073,12 @@ function esc(s) {
 function highlightInductiveWords(text) {
   // 诱导性关键词列表（按长度降序排列，优先匹配长词）
   const keywords = [
-    '不恰当', '不合适', '不正确', '不包括', '错误的是', '不属于',
+    '不恰当', '不合适', '不正确', '不包括', '不属于', '不常见',
     '除外', '除了', '不是', '无需', '不必', '禁止', '不得',
     '不可能', '排除', '不对的', '相反', '例外', '无关', '不得不',
     '不应', '不可', '不宜', '欠妥', '不妥', '不当', '错误的',
-    '不常见', '不适用'
-  ];0
+    '不适用', '不含', '无效'
+  ];
 
   let result = text;
   keywords.forEach(word => {
@@ -3601,6 +4095,41 @@ function showReview() {
   setTimeout(() => {
     filterReview('all', document.querySelector('.rtab.active') || document.querySelector('.rtab'));
   }, 250);
+}
+
+/** 计算单题得分并返回徽章 HTML（仅考试计分模式下有内容）*/
+function _buildReviewScoreBadge(q, sel, idx) {
+  const R = S.results;
+  if (!R || !R.scoring || !R.scorePerMode) return '';
+
+  const mode      = q.mode || '';
+  const perSq     = R.scorePerMode[mode] || 1;
+  const isEmpty   = !sel || (sel instanceof Set && sel.size === 0);
+  const isMulti   = isMultiQ(q);
+  const correctSet= new Set((q.answer || '').split(''));
+
+  let earned = 0;
+  if (!isEmpty) {
+    if (!isMulti) {
+      earned = (sel === q.answer) ? perSq : 0;
+    } else {
+      const selSet = sel instanceof Set ? sel : new Set([sel]);
+      if (R.multiScoreMode === 'strict') {
+        const allOk = selSet.size === correctSet.size && [...correctSet].every(l => selSet.has(l));
+        earned = allOk ? perSq : 0;
+      } else {
+        const optScore = perSq / correctSet.size;
+        let got = 0;
+        selSet.forEach(l => { got += correctSet.has(l) ? optScore : -optScore; });
+        earned = Math.round(Math.max(0, got) * 10) / 10;
+      }
+    }
+  }
+
+  const cls   = earned >= perSq ? 'full' : earned > 0 ? 'partial' : 'zero';
+  const icon  = earned >= perSq ? '✅' : earned > 0 ? '⚡' : '❌';
+  const label = isEmpty ? '未作答  0' : `${icon} ${earned}`;
+  return `<div class="review-score-badge ${cls}">${label} / ${perSq} 分</div>`;
 }
 
 function filterReview(type, tabEl) {
@@ -3656,6 +4185,20 @@ function filterReview(type, tabEl) {
     const item = document.createElement('div');
     item.className = 'review-item';
 
+    // B型题：共享选项回显（高亮正确答案行）
+    const sharedOptsReviewHtml = (q.shared_options && q.shared_options.length > 0)
+      ? `<div class="review-shared-opts">
+          <div class="review-shared-opts-title">B型题共享选项</div>
+          ${q.shared_options.map((o,oi) => {
+            const l = String.fromCharCode(65+oi);
+            const isCor = correctSet.has(l);
+            const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+            return `<div class="review-shared-opt-row${isCor ? ' is-ans' : ''}">
+              <span class="opt-lbl">${l}</span><span>${esc(clean)}</span>
+            </div>`;
+          }).join('')}
+        </div>`
+      : '';
     const optsHtml = q.options.map((o, oi) => {
       const l = String.fromCharCode(65 + oi);
       const isCor = correctSet.has(l);
@@ -3677,6 +4220,8 @@ function filterReview(type, tabEl) {
       </div>
       <div class="review-expand" id="rexp-${i}">
         <div class="review-expand-inner">
+          ${_buildReviewScoreBadge(q, sel, i)}
+          ${sharedOptsReviewHtml}
           ${isMulti ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">正确答案：<span style="color:var(--success);font-weight:700">${q.answer.split('').join(' ')}</span></div>` : ''}
           <div class="review-opts-list">${optsHtml}</div>
           <div class="review-discuss">${q.discuss ? `<strong>解析：</strong>${esc(q.discuss)}` : '暂无解析'}
