@@ -16,6 +16,7 @@ setup(
         "pyyaml>=6.0",
         "openai>=2.0.0",
         "flask>=3.0.0",
+        "flask-compress>=1.20",
     ],
     entry_points={
         "console_scripts": [
