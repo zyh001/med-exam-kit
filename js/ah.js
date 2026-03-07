@@ -3,21 +3,46 @@ var APP_NAME = "阿虎医考";
 var PKG_NAME = "com.ahuxueshu";
 var OUTPUT_DIR = "/sdcard/tests/";
 var SKIP_MODES = [];  // ★ 清空：A1/A2、A3/A4、B1 均已适配
+var ENABLE_IMAGE_CAPTURE = false;  // ★ 新增：是否捕获题目中的图片（Base64 编码）
 var record;
 var lastNumb = "";
 
 // ==================== 工具函数 ====================
 
-function hasNullValue(obj) {
+/**
+ * 检查数据是否包含 null 值
+ * @param {Object} obj - 要检查的对象
+ * @param {boolean} skipImageFields - 是否跳过图片字段（用于数据完整性检查）
+ */
+function hasNullValue(obj, skipImageFields) {
+    if (skipImageFields === undefined) skipImageFields = false;
+    
     if (obj === null || obj === undefined) {
         return true;
     }
     if (Array.isArray(obj)) {
         if (obj.length === 0) return true;
-        return obj.some(hasNullValue);
+        for (var i = 0; i < obj.length; i++) {
+            if (hasNullValue(obj[i], skipImageFields)) return true;
+        }
+        return false;
     }
     if (typeof obj === 'object' && obj !== null) {
-        return Object.values(obj).some(hasNullValue);
+        var keys = Object.keys(obj);
+        for (var i = 0; i < keys.length; i++) {
+            var key = keys[i];
+            // 如果跳过图片字段，跳过所有包含 image 的键
+            if (skipImageFields && key.toLowerCase().indexOf('image') !== -1) {
+                continue;
+            }
+            var val = obj[key];
+            if (val === null || val === undefined) {
+                return true;
+            }
+            if (typeof val === 'object' && val !== null) {
+                if (hasNullValue(val, skipImageFields)) return true;
+            }
+        }
     }
     return false;
 }
@@ -88,6 +113,106 @@ function filterByTop(arr, lower, upper) {
         }
     }
     return result;
+}
+
+// ==================== 图片处理工具函数 ====================
+
+/**
+ * 检测文本中是否包含图片占位符
+ */
+function hasImagePlaceholder(text) {
+    if (text == null) return false;
+    // 检查是否包含 U+FFFD 替换字符（￼）
+    return text.indexOf('\uFFFD') !== -1;
+}
+
+/**
+ * 对指定元素的区域进行截图并转换为 Base64
+ * 返回：data:image/png;base64,xxxxx 格式的字符串
+ */
+function captureElementToBase64(element) {
+    if (element == null) return null;
+    try {
+        // 获取元素边界
+        var bounds = element.bounds();
+        var left = bounds.left;
+        var top = bounds.top;
+        var right = bounds.right;
+        var bottom = bounds.bottom;
+        
+        // 确保坐标在屏幕范围内
+        if (left < 0) left = 0;
+        if (top < 0) top = 0;
+        if (right > device.width) right = device.width;
+        if (bottom > device.height) bottom = device.height;
+        
+        var width = right - left;
+        var height = bottom - top;
+        
+        if (width <= 0 || height <= 0) {
+            console.log("  元素尺寸无效：" + width + "x" + height);
+            return null;
+        }
+        
+        // 截图并裁剪
+        var screenImg = captureScreen();
+        if (screenImg == null) {
+            console.log("  截图失败");
+            return null;
+        }
+        
+        var clippedImg = images.clip(screenImg, left, top, width, height);
+        if (clippedImg == null) {
+            console.log("  裁剪失败");
+            return null;
+        }
+        
+        // 转换为 Base64
+        var base64 = images.toBase64(clippedImg);
+        if (base64 == null) {
+            console.log("  Base64 转换失败");
+            return null;
+        }
+        
+        return "data:image/png;base64," + base64;
+    } catch (e) {
+        console.log("  截图异常：" + e);
+        return null;
+    }
+}
+
+/**
+ * 对指定坐标区域进行截图并转换为 Base64
+ */
+function captureRegionToBase64(left, top, right, bottom) {
+    try {
+        if (!requestScreenCapture()) {
+            return null;
+        }
+        
+        // 确保坐标在屏幕范围内
+        if (left < 0) left = 0;
+        if (top < 0) top = 0;
+        if (right > device.width) right = device.width;
+        if (bottom > device.height) bottom = device.height;
+        
+        var width = right - left;
+        var height = bottom - top;
+        
+        if (width <= 0 || height <= 0) return null;
+        
+        var screenImg = captureScreen();
+        if (screenImg == null) return null;
+        
+        var clippedImg = images.clip(screenImg, left, top, width, height);
+        if (clippedImg == null) return null;
+        
+        var base64 = images.toBase64(clippedImg);
+        return "data:image/png;base64," + base64;
+    } catch (e) {
+        console.log("  区域截图异常：" + e);
+        return null;
+    }
 }
 
 // ==================== 通用数据提取 ====================
@@ -270,7 +395,7 @@ function get_error_prone() {
 }
 
 /**
- * 拉取 A1/A2 型题数据
+ * 拉取 A1/A2 型题数据（支持图片捕获）
  */
 function fetch() {
     console.log("========== 拉取 A1/A2 ==========");
@@ -291,6 +416,53 @@ function fetch() {
         error_prone: get_error_prone(),
         discuss: get_discuss()
     };
+
+    // ★★★ 图片捕获逻辑 ★★★
+    if (ENABLE_IMAGE_CAPTURE) {
+        // 检查题目是否包含图片
+        if (hasImagePlaceholder(test.test)) {
+            console.log("  题目包含图片，正在捕获...");
+            let questionEl = id("com.ahuxueshu:id/question_name_ax").findOne(2000);
+            if (questionEl != null) {
+                test.test_image_base64 = captureElementToBase64(questionEl);
+                if (test.test_image_base64 != null) {
+                    console.log("  题目图片捕获成功");
+                }
+            }
+        }
+
+        // 检查选项是否包含图片
+        let contentEls = id("com.ahuxueshu:id/option_content").find();
+        let optionImages = [];
+        for (let i = 0; i < contentEls.length; i++) {
+            if (isVisible(contentEls[i])) {
+                let optText = contentEls[i].text();
+                if (hasImagePlaceholder(optText)) {
+                    console.log("  选项 " + (i + 1) + " 包含图片，正在捕获...");
+                    let imgBase64 = captureElementToBase64(contentEls[i]);
+                    optionImages.push(imgBase64);
+                } else {
+                    optionImages.push(null);
+                }
+            }
+        }
+        if (optionImages.length > 0) {
+            test.option_images = optionImages;
+            console.log("  选项图片捕获：" + optionImages.filter(function(x) { return x != null; }).length + " 个");
+        }
+
+        // 检查解析是否包含图片
+        if (hasImagePlaceholder(test.discuss)) {
+            console.log("  解析包含图片，正在捕获...");
+            let discussEl = id("com.ahuxueshu:id/official_analysis_htv").findOne(2000);
+            if (discussEl != null) {
+                test.discuss_image_base64 = captureElementToBase64(discussEl);
+                if (test.discuss_image_base64 != null) {
+                    console.log("  解析图片捕获成功");
+                }
+            }
+        }
+    }
 
     console.log("  [" + test.mode + "] " + test.numb);
     console.log("  题目：" + (test.test || "").substring(0, 60) + "...");
@@ -468,6 +640,80 @@ function fetchA3A4() {
         sub_questions: subQuestions
     };
 
+    // ★★★ 图片捕获逻辑 (A3/A4) ★★★
+    if (ENABLE_IMAGE_CAPTURE) {
+        // 检查共享题干是否包含图片
+        if (hasImagePlaceholder(stemText)) {
+            console.log("  共享题干包含图片，正在捕获...");
+            let stemEl = id("com.ahuxueshu:id/test_tv").findOne(2000);
+            if (stemEl != null) {
+                result.stem_image_base64 = captureElementToBase64(stemEl);
+                if (result.stem_image_base64 != null) {
+                    console.log("  共享题干图片捕获成功");
+                }
+            }
+        }
+
+        // 检查每个子题
+        for (var q = 0; q < subQuestions.length; q++) {
+            var subQ = subQuestions[q];
+            if (hasImagePlaceholder(subQ.test)) {
+                console.log("  子题 " + (q + 1) + " 包含图片，正在捕获...");
+                // 找到对应的子题元素
+                if (q < subQAnchors.length) {
+                    let qEl = id("com.ahuxueshu:id/question_name_atf").find()[q];
+                    if (qEl != null) {
+                        subQ.test_image_base64 = captureElementToBase64(qEl);
+                    }
+                }
+            }
+            // 检查子题选项
+            if (subQ.option && subQ.option.length > 0) {
+                let optImages = [];
+                // 获取该子题范围内的选项元素
+                var lo = subQAnchors[q].top;
+                var hi = (q + 1 < subQAnchors.length) ? subQAnchors[q + 1].top : Infinity;
+                var rangeOpts = filterByTop(allOptionPairs, lo, hi);
+                
+                for (var oi = 0; oi < subQ.option.length; oi++) {
+                    if (hasImagePlaceholder(subQ.option[oi])) {
+                        console.log("  子题 " + (q + 1) + " 选项 " + (oi + 1) + " 包含图片，正在捕获...");
+                        // 找到对应的选项元素进行截图
+                        if (oi < rangeOpts.length) {
+                            // 通过遍历所有 option_content 元素找到对应的
+                            let contentEls = id("com.ahuxueshu:id/option_content").find();
+                            let foundEl = null;
+                            let matchCount = 0;
+                            for (var ci = 0; ci < contentEls.length; ci++) {
+                                if (isCurrentPage(contentEls[ci])) {
+                                    if (matchCount === oi) {
+                                        foundEl = contentEls[ci];
+                                        break;
+                                    }
+                                    matchCount++;
+                                }
+                            }
+                            if (foundEl != null) {
+                                optImages.push(captureElementToBase64(foundEl));
+                            } else {
+                                optImages.push(null);
+                            }
+                        } else {
+                            optImages.push(null);
+                        }
+                    } else {
+                        optImages.push(null);
+                    }
+                }
+                if (optImages.some(function(x) { return x != null; })) {
+                    subQ.option_images = optImages;
+                    console.log("  子题 " + (q + 1) + " 选项图片捕获：" + optImages.filter(function(x) { return x != null; }).length + " 个");
+                }
+            }
+        }
+        console.log("  A3/A4 图片捕获完成");
+    }
+
     console.log("  [" + mode + "] " + result.numb);
     console.log("  共享题干：" + stemText.substring(0, 60) + "...");
     console.log("  子题数：" + subQuestions.length);
@@ -639,6 +885,58 @@ function fetchB1() {
         discuss: discuss
     };
 
+    // ★★★ 图片捕获逻辑 (B1) ★★★
+    if (ENABLE_IMAGE_CAPTURE) {
+        // 检查共用选项是否包含图片并实际捕获
+        let sharedOptImages = [];
+        let shareContentEls = id("com.ahuxueshu:id/share_option_content").find();
+        
+        for (var i = 0; i < sharedOptions.length; i++) {
+            if (hasImagePlaceholder(sharedOptions[i])) {
+                console.log("  共用选项 " + (i + 1) + " 包含图片，正在捕获...");
+                // 找到对应的选项元素进行截图
+                if (i < shareContentEls.length && isCurrentPage(shareContentEls[i])) {
+                    sharedOptImages.push(captureElementToBase64(shareContentEls[i]));
+                } else {
+                    sharedOptImages.push(null);
+                }
+            } else {
+                sharedOptImages.push(null);
+            }
+        }
+        if (sharedOptImages.some(function(x) { return x != null; })) {
+            result.shared_options_images = sharedOptImages;
+            console.log("  共用选项图片捕获：" + sharedOptImages.filter(function(x) { return x != null; }).length + " 个");
+        }
+
+        // 检查每个子题
+        for (var q = 0; q < subQuestions.length; q++) {
+            var subQ = subQuestions[q];
+            if (hasImagePlaceholder(subQ.test)) {
+                console.log("  子题 " + (q + 1) + " 包含图片，正在捕获...");
+                if (q < subQAnchors.length) {
+                    let qEl = id("com.ahuxueshu:id/item_question_name").find()[q];
+                    if (qEl != null) {
+                        subQ.test_image_base64 = captureElementToBase64(qEl);
+                    }
+                }
+            }
+        }
+
+        // 检查解析是否包含图片
+        if (hasImagePlaceholder(discuss)) {
+            console.log("  解析包含图片，正在捕获...");
+            let discussEl = id("com.ahuxueshu:id/official_analysis_htv").findOne(2000);
+            if (discussEl != null) {
+                result.discuss_image_base64 = captureElementToBase64(discussEl);
+                if (result.discuss_image_base64 != null) {
+                    console.log("  解析图片捕获成功");
+                }
+            }
+        }
+        console.log("  B1 图片捕获完成");
+    }
+
     console.log("  [B1 型题] " + result.numb);
     console.log("  共用选项数：" + sharedOptions.length);
     console.log("  子题数：" + subQuestions.length);
@@ -657,6 +955,58 @@ function savejson(test) {
     files.write(name, jsonData);
     console.log("  ✔ 保存成功 " + test.numb);
     return jsonData;
+}
+
+/**
+ * 处理请求频繁弹窗
+ * 流程：请求频繁弹窗 → 点击确定 → 返回题目列表 → 点击继续做题 → 做题记录弹窗 → 点击继续
+ */
+function handleRateLimit() {
+    if (id("com.ahuxueshu:id/redo_content_tv").exists()) {
+        console.log("  检测到请求频繁弹窗，点击确定...");
+        id("com.ahuxueshu:id/redo_cancel_tv").findOne(1000).click();
+        sleep(1500);
+        // 点击确定后返回题目列表，需要点击"继续做题"按钮
+        handleContinueFromList();
+        return true;
+    }
+    return false;
+}
+
+/**
+ * 处理题目列表页面的"继续做题"按钮
+ */
+function handleContinueFromList() {
+    // 检测是否到达题目列表页面（通过章节列表元素判断）
+    if (id("com.ahuxueshu:id/subject_of_question").exists() || id("com.ahuxueshu:id/doing").exists()) {
+        console.log("  已到达题目列表，寻找继续做题按钮...");
+        // 查找"继续做题"按钮（ID: doing）
+        var doingBtn = id("com.ahuxueshu:id/doing").findOne(2000);
+        if (doingBtn != null) {
+            console.log("  找到继续做题按钮，点击...");
+            doingBtn.click();
+            sleep(1500);
+            // 点击继续做题后会出现做题记录弹窗，需要处理
+            handleContinueDialog();
+            return true;
+        }
+    }
+    return false;
+}
+
+/**
+ * 处理做题记录弹窗（继续做题确认）
+ * 弹窗内容：您上一次做到了第 X 题，请问是否继续？
+ * 按钮：重新开始 | 继续
+ */
+function handleContinueDialog() {
+    if (text("继续").exists() && text("重新开始").exists()) {
+        console.log("  检测到做题记录弹窗，点击继续...");
+        text("继续").findOne(1000).click();
+        sleep(1500);
+        return true;
+    }
+    return false;
 }
 
 function closeAd() {
@@ -680,6 +1030,10 @@ function closeAd() {
         sleep(500);
         return true;
     }
+    // 处理请求频繁弹窗（会触发完整的恢复流程）
+    if (handleRateLimit()) return true;
+    // 处理做题记录弹窗（直接在题目页面时）
+    if (handleContinueDialog()) return true;
     return false;
 }
 
@@ -851,6 +1205,7 @@ function printMissingFields(json) {
 function main() {
     console.log("========== 脚本启动 ==========");
     console.log("设备宽度：" + device.width + " 高度：" + device.height);
+    console.log("图片捕获功能：" + (ENABLE_IMAGE_CAPTURE ? "启用" : "禁用"));
     setScreenMetrics(1200, 2670);   //设置分辨率，解决分辨率不同的问题
     sleep(3000);
     closeAd();
@@ -963,7 +1318,8 @@ function main() {
         }
 
         // 10. 校验并保存
-        if (json == null || hasNullValue(json)) {
+        // 使用 skipImageFields=true 跳过图片字段检查（图片捕获失败不影响保存）
+        if (json == null || hasNullValue(json, true)) {
             console.log("数据不完整，打印缺失字段:");
             printMissingFields(json);
 
@@ -976,7 +1332,8 @@ function main() {
                 console.log("重试拉取异常：" + e);
             }
 
-            if (json != null && !hasNullValue(json)) {
+            // 重试时也跳过图片字段检查
+            if (json != null && !hasNullValue(json, true)) {
                 savejson(json);
                 savedCount++;
                 stats[typeClass]++;
@@ -1023,6 +1380,20 @@ files.remove(OUTPUT_DIR + "placeholder");
 
 console.log("启动 App: " + APP_NAME);
 app.launchApp(APP_NAME);
+
+// ★★★ 请求截图权限（只有在启用图片捕获时才请求）★★★
+if (ENABLE_IMAGE_CAPTURE) {
+    console.log("请求截图权限...");
+    if (!requestScreenCapture()) {
+        console.log("截图权限请求失败，请手动授予权限后重试");
+        toast("请授予截图权限");
+        sleep(3000);
+    } else {
+        console.log("截图权限已获得");
+    }
+} else {
+    console.log("图片捕获功能已禁用，跳过截图权限请求");
+}
 
 sleep(5000);
 closeAd();
