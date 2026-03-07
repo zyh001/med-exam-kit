@@ -1150,14 +1150,14 @@ function waitForPage(timeout) {
 
 /**
  * 判断题型类别
- * 返回："A1" | "A3A4" | "B1" | "SKIP" | "UNKNOWN"
+ * 返回："A1" | "A3A4" | "CASE" | "B1" | "SKIP" | "UNKNOWN"
  */
 function classifyMode(mode) {
     if (mode == null) return "UNKNOWN";
     if (shouldSkip(mode)) return "SKIP";
     if (mode.indexOf("B1") !== -1) return "B1";
     if (mode.indexOf("A3") !== -1 || mode.indexOf("A4") !== -1) return "A3A4";
-    if (mode.indexOf("案例分析") !== -1) return "A3A4";  // 案例分析题按 A3/A4 处理
+    if (mode.indexOf("案例分析") !== -1) return "CASE";  // 案例分析题独立类别
     return "A1";  // A1/A2 及其他未知类型都走 A1 逻辑
 }
 
@@ -1168,6 +1168,7 @@ function fetchByType(typeClass) {
     switch (typeClass) {
         case "B1":   return fetchB1();
         case "A3A4": return fetchA3A4();
+        case "CASE": return fetchA3A4();  // 案例分析题使用 A3/A4 的提取逻辑
         case "A1":   return fetch();
         default:     return null;
     }
@@ -1219,12 +1220,12 @@ function main() {
     var stuckCount = 0;
 
     // ★ 统计各题型保存数量
-    var stats = { "A1": 0, "A3A4": 0, "B1": 0, "SKIP": 0 };
+    var stats = { "A1": 0, "A3A4": 0, "CASE": 0, "B1": 0, "SKIP": 0 };
 
     for (var i = 0; i < 10000; i++) {
         console.log("\n---------- 第 " + (i + 1) + " 轮 | 已保存：" + savedCount
-            + " (A1:" + stats["A1"] + " A3/A4:" + stats["A3A4"] + " B1:" + stats["B1"]
-            + " 跳过:" + stats["SKIP"] + ") ----------");
+            + " (A1:" + stats["A1"] + " A3/A4:" + stats["A3A4"] + " 案例:" + stats["CASE"]
+            + " B1:" + stats["B1"] + " 跳过:" + stats["SKIP"] + ") ----------");
 
         // 1. 处理广告弹窗
         closeAd();
@@ -1368,10 +1369,11 @@ function main() {
 
     console.log("\n========== 脚本结束 ==========");
     console.log("共保存题目：" + savedCount);
-    console.log("  A1/A2: " + stats["A1"]);
-    console.log("  A3/A4: " + stats["A3A4"]);
-    console.log("  B1:    " + stats["B1"]);
-    console.log("  跳过：  " + stats["SKIP"]);
+    console.log("  A1/A2:    " + stats["A1"]);
+    console.log("  A3/A4:    " + stats["A3A4"]);
+    console.log("  案例分析题：" + stats["CASE"]);
+    console.log("  B1:       " + stats["B1"]);
+    console.log("  跳过：     " + stats["SKIP"]);
 }
 
 // ==================== 入口 ====================
