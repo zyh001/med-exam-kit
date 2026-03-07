@@ -25,17 +25,21 @@ function hasNullValue(obj) {
 function isVisible(element) {
     if (element == null) return false;
     let bounds = element.bounds();
-    return bounds.left >= 0 && bounds.right > 0 && bounds.left < device.width;
+    // 只检查 right > 0，允许 left 为负数（左滑时左侧页面的元素）
+    return bounds.right > 0 && bounds.left < device.width;
 }
 
 /**
  * 判断元素是否在当前页面内（宽松判断，用于滚动容器内的元素）
  * 只排除左右页的元素，不要求在屏幕可视区域内
+ * 允许 left 为负数或 right 超出屏幕（滚动时）
  */
 function isCurrentPage(element) {
     if (element == null) return false;
     let bounds = element.bounds();
-    return bounds.left >= 0 && bounds.right > 0 && bounds.left < device.width;
+    // 使用宽松判断：只要不是完全在左侧或右侧页面外即可
+    // device.width 通常是 1200，第二页的 left 会是 1200 或更大
+    return bounds.left < device.width && bounds.right > 0;
 }
 
 function getFormattedTimestamp() {
@@ -61,7 +65,7 @@ function shouldSkip(mode) {
 }
 
 /**
- * 按 bottom 值范围筛选（用于A3/A4，元素top被裁剪，bottom有效）
+ * 按 bottom 值范围筛选（用于 A3/A4，元素 top 被裁剪，bottom 有效）
  */
 function filterByBottom(arr, lower, upper) {
     var result = [];
@@ -74,7 +78,7 @@ function filterByBottom(arr, lower, upper) {
 }
 
 /**
- * 按 top 值范围筛选（用于B1，元素bottom被裁剪，top有效）
+ * 按 top 值范围筛选（用于 B1，元素 bottom 被裁剪，top 有效）
  */
 function filterByTop(arr, lower, upper) {
     var result = [];
@@ -91,19 +95,16 @@ function filterByTop(arr, lower, upper) {
 function get_cls() {
     let el = id("com.ahuxueshu:id/tk_title_sub_tv").findOne(5000);
     if (el == null) {
-        console.log("未找到课程名，尝试重置");
+        console.log("  ✗ 未找到课程名，尝试重置");
         reset();
         return get_cls();
     }
-    let text = el.text();
-    console.log("课程: " + text);
-    return text;
+    return el.text();
 }
 
 function get_unit() {
     let el = id("com.ahuxueshu:id/section_name").findOne(500);
     if (el != null) {
-        console.log("章节: " + el.text());
         return el.text();
     }
     return null;
@@ -112,20 +113,18 @@ function get_unit() {
 function get_numb() {
     let el = id("com.ahuxueshu:id/section_position").findOne(3000);
     if (el != null) {
-        let text = el.text().replace(/\s/g, "");
-        console.log("题号: " + text);
-        return text;
+        return el.text().replace(/\s/g, "");
     }
     return null;
 }
 
 /**
  * 检测当前题型
- * 优先级: B1(question_type_b) → A3/A4(test_tv) → A1/A2(question_name_ax)
+ * 优先级：B1(question_type_b) → A3/A4(test_tv) → A1/A2(question_name_ax)
  */
 function getCurrentMode() {
     try {
-        // 1. B1型题
+        // 1. B1 型题
         var b1Elements = id("com.ahuxueshu:id/question_type_b").find();
         for (var i = 0; i < b1Elements.length; i++) {
             if (isVisible(b1Elements[i])) {
@@ -133,12 +132,12 @@ function getCurrentMode() {
                 if (txt != null && txt.trim() !== "") {
                     var match = txt.match(/\[(.+?)\]/);
                     if (match) return match[1];
-                    return "B1型题";
+                    return "B1 型题";
                 }
             }
         }
 
-        // 2. A3/A4型题
+        // 2. A3/A4 型题
         var testTvElements = id("com.ahuxueshu:id/test_tv").find();
         for (var i = 0; i < testTvElements.length; i++) {
             if (isVisible(testTvElements[i])) {
@@ -150,7 +149,7 @@ function getCurrentMode() {
             }
         }
 
-        // 3. A1/A2型题
+        // 3. A1/A2 型题
         var elements = id("com.ahuxueshu:id/question_name_ax").find();
         for (var i = 0; i < elements.length; i++) {
             if (isVisible(elements[i])) {
@@ -162,12 +161,12 @@ function getCurrentMode() {
             }
         }
     } catch (e) {
-        console.log("获取题型异常: " + e);
+        console.log("获取题型异常：" + e);
     }
     return null;
 }
 
-// ==================== A1/A2型题 数据提取 ====================
+// ==================== A1/A2 型题 数据提取 ====================
 
 function get_mode_and_test() {
     let elements = id("com.ahuxueshu:id/question_name_ax").find();
@@ -182,8 +181,6 @@ function get_mode_and_test() {
                 mode = match[1];
                 test = text.replace(match[0], "").trim();
             }
-            console.log("题型: " + mode);
-            console.log("题目: " + test);
             return { mode: mode, test: test };
         }
     }
@@ -221,7 +218,6 @@ function get_option() {
 
     for (let i = 0; i < Math.min(letters.length, contents.length); i++) {
         let optionText = letters[i].text + "." + contents[i].text;
-        console.log("选项: " + optionText);
         options.push(optionText);
     }
 
@@ -234,9 +230,7 @@ function get_answer() {
         let el = elements[i];
         if (isVisible(el)) {
             let text = el.text();
-            let answer = text.replace("正确答案：", "").replace(/\n/g, "").trim();
-            console.log("答案: " + answer);
-            return answer;
+            return text.replace("正确答案：", "").replace(/\n/g, "").trim();
         }
     }
     return null;
@@ -247,9 +241,7 @@ function get_discuss() {
     for (let i = 0; i < elements.length; i++) {
         let el = elements[i];
         if (isVisible(el)) {
-            let text = el.text();
-            console.log("解析: " + text.substring(0, 60) + "...");
-            return text;
+            return el.text();
         }
     }
     return "";
@@ -260,9 +252,7 @@ function get_rate() {
     for (let i = 0; i < elements.length; i++) {
         let el = elements[i];
         if (isVisible(el)) {
-            let text = el.text().split("\n")[0].trim();
-            console.log("正确率: " + text);
-            return text;
+            return el.text().split("\n")[0].trim();
         }
     }
     return "";
@@ -273,9 +263,7 @@ function get_error_prone() {
     for (let i = 0; i < elements.length; i++) {
         let el = elements[i];
         if (isVisible(el)) {
-            let text = el.text().split("\n")[0].trim();
-            console.log("易错选项: " + text);
-            return text;
+            return el.text().split("\n")[0].trim();
         }
     }
     return "";
@@ -285,7 +273,7 @@ function get_error_prone() {
  * 拉取 A1/A2 型题数据
  */
 function fetch() {
-    console.log("========== 开始拉取 A1/A2 ==========");
+    console.log("========== 拉取 A1/A2 ==========");
     let timestamp = getFormattedTimestamp();
     let modeAndTest = get_mode_and_test();
 
@@ -303,27 +291,33 @@ function fetch() {
         error_prone: get_error_prone(),
         discuss: get_discuss()
     };
+
+    console.log("  [" + test.mode + "] " + test.numb);
+    console.log("  题目：" + (test.test || "").substring(0, 60) + "...");
+    console.log("  选项数：" + (test.option ? test.option.length : 0));
+    console.log("  答案：" + test.answer);
+
     return test;
 }
 
-// ==================== A3/A4型题 数据提取 ====================
+// ==================== A3/A4 型题 数据提取 ====================
 
 /**
  * 拉取 A3/A4 型题数据
  *
- * 结构：共用题干(test_tv) + 多个子题(question_name_atf)
- * 分组依据：元素 bounds().bottom 值（A3/A4的top被裁剪，bottom有效）
+ * 结构：共用题干 (test_tv) + 多个子题 (question_name_atf)
+ * 分组依据：元素 bounds().top 值（按垂直顺序排列）
  *
  * 输出格式:
  * { stem: "共用题干", sub_questions: [{ test, option:[], answer, rate, error_prone, discuss }] }
  */
 function fetchA3A4() {
-    console.log("========== 开始拉取 A3/A4 ==========");
+    console.log("========== 拉取 A3/A4 或 案例分析 ==========");
     var timestamp = getFormattedTimestamp();
 
     // 1. 题干和题型
     var stemText = "";
-    var mode = "A3/A4型题";
+    var mode = "A3/A4 型题";
     var testTvElements = id("com.ahuxueshu:id/test_tv").find();
     for (var i = 0; i < testTvElements.length; i++) {
         if (isVisible(testTvElements[i])) {
@@ -335,25 +329,22 @@ function fetchA3A4() {
             } else {
                 stemText = text.trim();
             }
-            console.log("题型: " + mode);
-            console.log("题干: " + stemText.substring(0, 80) + "...");
             break;
         }
     }
 
-    // 2. 子题锚点 (question_name_atf)
+    // 2. 子题锚点 (question_name_atf) - 使用 top 坐标排序
     var subQAnchors = [];
     var atfElements = id("com.ahuxueshu:id/question_name_atf").find();
     for (var i = 0; i < atfElements.length; i++) {
         if (isCurrentPage(atfElements[i])) {
             var b = atfElements[i].bounds();
-            subQAnchors.push({ text: atfElements[i].text(), bottom: b.bottom });
+            subQAnchors.push({ text: atfElements[i].text(), top: b.top });
         }
     }
-    subQAnchors.sort(function(a, b) { return a.bottom - b.bottom; });
-    console.log("子题数量: " + subQAnchors.length);
+    subQAnchors.sort(function(a, b) { return a.top - b.top; });
 
-    // 3. 所有选项对 (option + option_content)
+    // 3. 所有选项对 (option + option_content) - 使用 top 坐标
     var allOptionPairs = [];
     var letterEls = id("com.ahuxueshu:id/option").find();
     var contentEls = id("com.ahuxueshu:id/option_content").find();
@@ -363,100 +354,98 @@ function fetchA3A4() {
     for (var i = 0; i < letterEls.length; i++) {
         if (isCurrentPage(letterEls[i])) {
             var b = letterEls[i].bounds();
-            visLetters.push({ text: letterEls[i].text(), bottom: b.bottom });
+            visLetters.push({ text: letterEls[i].text(), top: b.top });
         }
     }
     for (var i = 0; i < contentEls.length; i++) {
         if (isCurrentPage(contentEls[i])) {
             var b = contentEls[i].bounds();
-            visContents.push({ text: contentEls[i].text(), bottom: b.bottom });
+            visContents.push({ text: contentEls[i].text(), top: b.top });
         }
     }
 
-    visLetters.sort(function(a, b) { return a.bottom - b.bottom; });
-    visContents.sort(function(a, b) { return a.bottom - b.bottom; });
+    visLetters.sort(function(a, b) { return a.top - b.top; });
+    visContents.sort(function(a, b) { return a.top - b.top; });
 
     for (var i = 0; i < Math.min(visLetters.length, visContents.length); i++) {
         allOptionPairs.push({
             text: visLetters[i].text + "." + visContents[i].text,
-            bottom: visLetters[i].bottom
+            top: visLetters[i].top
         });
     }
 
-    // 4. 所有答案
+    // 4. 所有答案 - 使用 top 坐标
     var allAnswers = [];
     var ansEls = id("com.ahuxueshu:id/right_answer_tv").find();
     for (var i = 0; i < ansEls.length; i++) {
         if (isCurrentPage(ansEls[i])) {
             var b = ansEls[i].bounds();
             var t = ansEls[i].text().replace("正确答案：", "").replace(/\n/g, "").trim();
-            allAnswers.push({ text: t, bottom: b.bottom });
+            allAnswers.push({ text: t, top: b.top });
         }
     }
-    allAnswers.sort(function(a, b) { return a.bottom - b.bottom; });
+    allAnswers.sort(function(a, b) { return a.top - b.top; });
 
-    // 5. 所有正确率
+    // 5. 所有正确率 - 使用 top 坐标
     var allRates = [];
     var rateEls = id("com.ahuxueshu:id/rate_of_all_tv").find();
     for (var i = 0; i < rateEls.length; i++) {
         if (isCurrentPage(rateEls[i])) {
             var b = rateEls[i].bounds();
-            allRates.push({ text: rateEls[i].text().split("\n")[0].trim(), bottom: b.bottom });
+            allRates.push({ text: rateEls[i].text().split("\n")[0].trim(), top: b.top });
         }
     }
-    allRates.sort(function(a, b) { return a.bottom - b.bottom; });
+    allRates.sort(function(a, b) { return a.top - b.top; });
 
-    // 6. 所有易错选项
+    // 6. 所有易错选项 - 使用 top 坐标
     var allErrors = [];
     var errEls = id("com.ahuxueshu:id/error_prone_tv").find();
     for (var i = 0; i < errEls.length; i++) {
         if (isCurrentPage(errEls[i])) {
             var b = errEls[i].bounds();
-            allErrors.push({ text: errEls[i].text().split("\n")[0].trim(), bottom: b.bottom });
+            allErrors.push({ text: errEls[i].text().split("\n")[0].trim(), top: b.top });
         }
     }
-    allErrors.sort(function(a, b) { return a.bottom - b.bottom; });
+    allErrors.sort(function(a, b) { return a.top - b.top; });
 
-    // 7. 所有解析 (official_analysis_htv_include — A3/A4专用)
+    // 7. 所有解析 (official_analysis_htv_include — A3/A4 专用) - 使用 top 坐标
     var allAnalysis = [];
     var anaEls = id("com.ahuxueshu:id/official_analysis_htv_include").find();
     for (var i = 0; i < anaEls.length; i++) {
         if (isCurrentPage(anaEls[i])) {
             var b = anaEls[i].bounds();
-            allAnalysis.push({ text: anaEls[i].text(), bottom: b.bottom });
+            allAnalysis.push({ text: anaEls[i].text(), top: b.top });
         }
     }
-    allAnalysis.sort(function(a, b) { return a.bottom - b.bottom; });
+    allAnalysis.sort(function(a, b) { return a.top - b.top; });
 
-    // 8. 按 bottom 坐标分组
+    // 8. 按 top 坐标分组
     var subQuestions = [];
     for (var q = 0; q < subQAnchors.length; q++) {
-        var lo = subQAnchors[q].bottom;
-        var hi = (q + 1 < subQAnchors.length) ? subQAnchors[q + 1].bottom : Infinity;
+        var lo = subQAnchors[q].top;
+        var hi = (q + 1 < subQAnchors.length) ? subQAnchors[q + 1].top : Infinity;
 
         var opts = [];
-        var rangeOpts = filterByBottom(allOptionPairs, lo, hi);
+        var rangeOpts = filterByTop(allOptionPairs, lo, hi);
         for (var j = 0; j < rangeOpts.length; j++) opts.push(rangeOpts[j].text);
 
         var answer = "";
-        var ra = filterByBottom(allAnswers, lo, hi);
+        var ra = filterByTop(allAnswers, lo, hi);
         if (ra.length > 0) answer = ra[0].text;
 
         var rate = "";
-        var rr = filterByBottom(allRates, lo, hi);
+        var rr = filterByTop(allRates, lo, hi);
         if (rr.length > 0) rate = rr[0].text;
 
         var errorProne = "";
-        var re = filterByBottom(allErrors, lo, hi);
+        var re = filterByTop(allErrors, lo, hi);
         if (re.length > 0) errorProne = re[0].text;
 
         var discuss = "";
-        var rd = filterByBottom(allAnalysis, lo, hi);
+        var rd = filterByTop(allAnalysis, lo, hi);
         if (rd.length > 0) discuss = rd[0].text;
 
         var qText = subQAnchors[q].text.replace(/^\(\d+\)\s*/, "").trim();
-        console.log("  子题" + (q + 1) + ": " + qText);
-        console.log("    选项数: " + opts.length + " | 答案: " + answer + " | 正确率: " + rate);
 
         subQuestions.push({
             test: qText,
@@ -468,7 +457,7 @@ function fetchA3A4() {
         });
     }
 
-    return {
+    var result = {
         name: timestamp,
         pkg: PKG_NAME,
         cls: get_cls(),
@@ -478,32 +467,38 @@ function fetchA3A4() {
         stem: stemText,
         sub_questions: subQuestions
     };
+
+    console.log("  [" + mode + "] " + result.numb);
+    console.log("  共享题干：" + stemText.substring(0, 60) + "...");
+    console.log("  子题数：" + subQuestions.length);
+
+    return result;
 }
 
-// ==================== B1型题 数据提取 ====================
+// ==================== B1 型题 数据提取 ====================
 
 /**
  * 拉取 B1 型题数据
  *
- * 结构：共用选项(share_option + share_option_content) + 多个子题(item_question_name)
- * 子题只有字母按钮(option_btn)，答案从共用选项中选择
- * 整体解析在最后(official_analysis_htv)
+ * 结构：共用选项 (share_option + share_option_content) + 多个子题 (item_question_name)
+ * 子题只有字母按钮 (option_btn)，答案从共用选项中选择
+ * 整体解析在最后 (official_analysis_htv)
  *
- * 分组依据：元素 bounds().top 值（B1的bottom被裁剪，top有效）
+ * 分组依据：元素 bounds().top 值（B1 的 bottom 被裁剪，top 有效）
  *
  * 输出格式:
  * {
  *   shared_options: ["A.根尖周病变...", "B.根尖周病变..."],
  *   sub_questions: [{ test, answer, rate, error_prone }],
- *   discuss: "第1题: ... 第2题: ..."
+ *   discuss: "第 1 题：... 第 2 题：..."
  * }
  */
 function fetchB1() {
-    console.log("========== 开始拉取 B1 ==========");
+    console.log("========== 拉取 B1 ==========");
     var timestamp = getFormattedTimestamp();
 
     // -------- 1. 题型 --------
-    var mode = "B1型题";
+    var mode = "B1 型题";
     var b1TypeElements = id("com.ahuxueshu:id/question_type_b").find();
     for (var i = 0; i < b1TypeElements.length; i++) {
         if (isCurrentPage(b1TypeElements[i])) {
@@ -515,7 +510,6 @@ function fetchB1() {
             break;
         }
     }
-    console.log("题型: " + mode);
 
     // -------- 2. 共用选项 (share_option + share_option_content) --------
     var sharedOptions = [];
@@ -543,11 +537,10 @@ function fetchB1() {
 
     for (var i = 0; i < Math.min(visShareLetters.length, visShareContents.length); i++) {
         var optText = visShareLetters[i].text + "." + visShareContents[i].text;
-        console.log("  共用选项: " + optText.substring(0, 60));
         sharedOptions.push(optText);
     }
 
-    // -------- 3. 子题锚点 (item_question_name — B1专用) --------
+    // -------- 3. 子题锚点 (item_question_name — B1 专用) --------
     var subQAnchors = [];
     var itemQEls = id("com.ahuxueshu:id/item_question_name").find();
     for (var i = 0; i < itemQEls.length; i++) {
@@ -557,7 +550,6 @@ function fetchB1() {
         }
     }
     subQAnchors.sort(function(a, b) { return a.top - b.top; });
-    console.log("子题数量: " + subQAnchors.length);
 
     // -------- 4. 所有答案 (right_answer_tv) --------
     var allAnswers = [];
@@ -593,13 +585,12 @@ function fetchB1() {
     }
     allErrors.sort(function(a, b) { return a.top - b.top; });
 
-    // -------- 7. 整体解析 (official_analysis_htv — B1所有子题合并) --------
+    // -------- 7. 整体解析 (official_analysis_htv — B1 所有子题合并) --------
     var discuss = "";
     var anaEls = id("com.ahuxueshu:id/official_analysis_htv").find();
     for (var i = 0; i < anaEls.length; i++) {
         if (isCurrentPage(anaEls[i])) {
             discuss = anaEls[i].text();
-            console.log("  解析: " + discuss.substring(0, 80) + "...");
             break;
         }
     }
@@ -628,9 +619,6 @@ function fetchB1() {
         // 清理子题文本
         var qText = subQAnchors[q].text.replace(/^\(\d+\)\s*/, "").trim();
 
-        console.log("  子题" + (q + 1) + ": " + qText);
-        console.log("    答案: " + answer + " | 正确率: " + rate + " | 易错: " + errorProne);
-
         subQuestions.push({
             test: qText,
             answer: answer,
@@ -639,7 +627,7 @@ function fetchB1() {
         });
     }
 
-    return {
+    var result = {
         name: timestamp,
         pkg: PKG_NAME,
         cls: get_cls(),
@@ -650,42 +638,44 @@ function fetchB1() {
         sub_questions: subQuestions,
         discuss: discuss
     };
+
+    console.log("  [B1 型题] " + result.numb);
+    console.log("  共用选项数：" + sharedOptions.length);
+    console.log("  子题数：" + subQuestions.length);
+
+    return result;
 }
 
 // ==================== 核心逻辑函数 ====================
 
 function savejson(test) {
-    var name = OUTPUT_DIR + test.name + ".json";
+    var name = OUTPUT_DIR + test.cls + "/" + (test.unit || "") + "/" + test.name + ".json";
     record = test;
     lastNumb = test.numb;
     var jsonData = JSON.stringify(test, null, 2);
-    files.create(name);
+    files.createWithDirs(name);
     files.write(name, jsonData);
-    console.log("\n####保存成功#### " + test.numb + " [" + test.mode + "]\n\n");
+    console.log("  ✔ 保存成功 " + test.numb);
     return jsonData;
 }
 
 function closeAd() {
     if (id("close").exists()) {
-        console.log("检测到广告(id:close)，关闭");
         id("close").findOne(500).click();
         sleep(500);
         return true;
     }
     if (id("iv_close").exists()) {
-        console.log("检测到广告(id:iv_close)，关闭");
         id("iv_close").findOne(500).click();
         sleep(500);
         return true;
     }
     if (text("关闭").exists()) {
-        console.log("检测到广告(text:关闭)，关闭");
         text("关闭").findOne(500).click();
         sleep(500);
         return true;
     }
     if (text("跳过").exists()) {
-        console.log("检测到广告(text:跳过)，关闭");
         text("跳过").findOne(500).click();
         sleep(500);
         return true;
@@ -694,7 +684,6 @@ function closeAd() {
 }
 
 function forceStop() {
-    console.log("强制停止App");
     app.openAppSetting(PKG_NAME);
     sleep(1000);
     let stopBtn = text("强行停止").findOne(3000);
@@ -718,7 +707,6 @@ function sim_click(targetText) {
         target = textContains(targetText).findOne(250);
     }
     let targetBounds = target.parent().bounds();
-    console.log("找到: " + targetText + " Y:" + targetBounds.centerY());
     while (targetBounds.centerY() > device.height - 200) {
         swipe(700, 2000, 700, 1600, 1000);
         targetBounds = textContains(targetText).findOne().parent().bounds();
@@ -744,18 +732,18 @@ function reset() {
     sleep(3000);
     closeAd();
     if (record != null) {
-        console.log("尝试恢复到: " + record.cls + " > " + record.unit + " > " + record.numb);
+        console.log("恢复到：" + record.cls + " > " + (record.unit || "") + " > " + record.numb);
         sleep(2000);
         closeAd();
-        try { sim_click(record.cls); sleep(2000); closeAd(); } catch (e) { console.log("导航课程失败: " + e); }
-        try { sim_click(record.unit); sleep(2000); closeAd(); } catch (e) { console.log("导航章节失败: " + e); }
+        try { sim_click(record.cls); sleep(2000); closeAd(); } catch (e) { console.log("  ✗ 导航课程失败：" + e); }
+        try { sim_click(record.unit); sleep(2000); closeAd(); } catch (e) { console.log("  ✗ 导航章节失败：" + e); }
         try {
             let currentNum = record.numb.split("/")[0];
-            console.log("恢复到题号: " + currentNum);
+            console.log("恢复到题号：" + currentNum);
             sleep(3000);
             sim_click(currentNum);
             sleep(3000);
-        } catch (e) { console.log("导航题号失败: " + e); }
+        } catch (e) { console.log("  ✗ 导航题号失败：" + e); }
     }
     console.log("========== 重置完成 ==========");
 }
@@ -764,7 +752,7 @@ function checkMode() {
     let beitiTab = text("背题").findOne(500);
     if (beitiTab != null) {
         if (!id("com.ahuxueshu:id/right_answer_tv").exists()) {
-            console.log("切换到背题模式");
+            console.log("  切换到背题模式");
             beitiTab.click();
             sleep(2000);
         }
@@ -780,7 +768,7 @@ function swipeNext() {
 
 /**
  * 等待页面加载完成
- * 支持: A1/A2(question_name_ax) | A3/A4(test_tv) | B1(question_type_b)
+ * 支持：A1/A2(question_name_ax) | A3/A4(test_tv) | B1(question_type_b)
  */
 function waitForPage(timeout) {
     timeout = timeout || 5000;
@@ -808,14 +796,15 @@ function waitForPage(timeout) {
 
 /**
  * 判断题型类别
- * 返回: "A1" | "A3A4" | "B1" | "SKIP" | "UNKNOWN"
+ * 返回："A1" | "A3A4" | "B1" | "SKIP" | "UNKNOWN"
  */
 function classifyMode(mode) {
     if (mode == null) return "UNKNOWN";
     if (shouldSkip(mode)) return "SKIP";
     if (mode.indexOf("B1") !== -1) return "B1";
     if (mode.indexOf("A3") !== -1 || mode.indexOf("A4") !== -1) return "A3A4";
-    return "A1";  // A1/A2 及其他未知类型都走A1逻辑
+    if (mode.indexOf("案例分析") !== -1) return "A3A4";  // 案例分析题按 A3/A4 处理
+    return "A1";  // A1/A2 及其他未知类型都走 A1 逻辑
 }
 
 /**
@@ -861,7 +850,7 @@ function printMissingFields(json) {
 
 function main() {
     console.log("========== 脚本启动 ==========");
-    console.log("设备宽度: " + device.width + " 高度: " + device.height);
+    console.log("设备宽度：" + device.width + " 高度：" + device.height);
     setScreenMetrics(1200, 2670);   //设置分辨率，解决分辨率不同的问题
     sleep(3000);
     closeAd();
@@ -878,7 +867,7 @@ function main() {
     var stats = { "A1": 0, "A3A4": 0, "B1": 0, "SKIP": 0 };
 
     for (var i = 0; i < 10000; i++) {
-        console.log("\n---------- 第 " + (i + 1) + " 轮 | 已保存: " + savedCount
+        console.log("\n---------- 第 " + (i + 1) + " 轮 | 已保存：" + savedCount
             + " (A1:" + stats["A1"] + " A3/A4:" + stats["A3A4"] + " B1:" + stats["B1"]
             + " 跳过:" + stats["SKIP"] + ") ----------");
 
@@ -892,9 +881,9 @@ function main() {
             closeAd();
             if (!waitForPage(5000)) {
                 failCount++;
-                console.log("连续失败: " + failCount + "/" + maxFail);
+                console.log("连续失败：" + failCount + "/" + maxFail);
                 if (failCount >= maxFail) {
-                    console.log("连续失败过多，重置App");
+                    console.log("连续失败过多，重置 App");
                     reset();
                     checkMode();
                     failCount = 0;
@@ -909,7 +898,7 @@ function main() {
 
         // 4. 检测章节切换
         if (currentUnit != null && lastUnit !== "" && currentUnit !== lastUnit) {
-            console.log("★★★ 章节切换: " + lastUnit + " → " + currentUnit + " ★★★");
+            console.log("★★★ 章节切换：" + lastUnit + " → " + currentUnit + " ★★★");
             lastNumb = "";
             checkMode();
             sleep(500);
@@ -918,7 +907,7 @@ function main() {
         // 5. 去重：同一章节内题号相同则跳过
         if (currentNumb != null && currentNumb === lastNumb && currentUnit === lastUnit) {
             stuckCount++;
-            console.log("题号未变化(" + currentNumb + ")，卡住次数: " + stuckCount);
+            console.log("题号未变化 (" + currentNumb + ")，卡住次数：" + stuckCount);
 
             if (stuckCount >= 3) {
                 console.log("多次卡住，检查是否已到末尾...");
@@ -944,11 +933,11 @@ function main() {
         // 6. ★★★ 检测题型 ★★★
         var currentMode = getCurrentMode();
         var typeClass = classifyMode(currentMode);
-        console.log("当前题型: " + currentMode + " → 类别: " + typeClass);
+        console.log("当前题型：" + currentMode + " → 类别：" + typeClass);
 
         // 7. 跳过未适配的题型
         if (typeClass === "SKIP") {
-            console.log("⏭ 跳过[" + currentMode + "]: " + currentNumb);
+            console.log("⏭ 跳过 [" + currentMode + "]: " + currentNumb);
             stats["SKIP"]++;
             lastNumb = currentNumb;
             lastUnit = currentUnit || "";
@@ -958,7 +947,7 @@ function main() {
 
         // 8. 未知题型处理
         if (typeClass === "UNKNOWN") {
-            console.log("⚠ 未识别题型，尝试按A1处理");
+            console.log("⚠ 未识别题型，尝试按 A1 处理");
             typeClass = "A1";
         }
 
@@ -967,7 +956,7 @@ function main() {
         try {
             json = fetchByType(typeClass);
         } catch (e) {
-            console.log("拉取数据异常: " + e);
+            console.log("拉取数据异常：" + e);
             failCount++;
             swipeNext();
             continue;
@@ -979,12 +968,12 @@ function main() {
             printMissingFields(json);
 
             // 等待后重试一次
-            console.log("等待2秒后重试...");
+            console.log("等待 2 秒后重试...");
             sleep(2000);
             try {
                 json = fetchByType(typeClass);
             } catch (e) {
-                console.log("重试拉取异常: " + e);
+                console.log("重试拉取异常：" + e);
             }
 
             if (json != null && !hasNullValue(json)) {
@@ -1000,7 +989,7 @@ function main() {
                 lastNumb = currentNumb;
                 lastUnit = currentUnit || "";
                 if (failCount >= maxFail) {
-                    console.log("连续失败过多，重置App");
+                    console.log("连续失败过多，重置 App");
                     reset();
                     checkMode();
                     failCount = 0;
@@ -1021,18 +1010,18 @@ function main() {
     }
 
     console.log("\n========== 脚本结束 ==========");
-    console.log("共保存题目: " + savedCount);
+    console.log("共保存题目：" + savedCount);
     console.log("  A1/A2: " + stats["A1"]);
     console.log("  A3/A4: " + stats["A3A4"]);
     console.log("  B1:    " + stats["B1"]);
-    console.log("  跳过:  " + stats["SKIP"]);
+    console.log("  跳过：  " + stats["SKIP"]);
 }
 
 // ==================== 入口 ====================
 files.createWithDirs(OUTPUT_DIR + "placeholder");
 files.remove(OUTPUT_DIR + "placeholder");
 
-console.log("启动App: " + APP_NAME);
+console.log("启动 App: " + APP_NAME);
 app.launchApp(APP_NAME);
 
 sleep(5000);
