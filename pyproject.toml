@@ -27,6 +27,7 @@ dependencies = [
     "pyyaml>=6.0",
     "openai>=2.0.0",
     "flask>=3.0.0",
+    "flask-compress>=1.20",
     "tqdm>=4.65",
     "termcolor>=2.0",
     "lxml>=4.9",
