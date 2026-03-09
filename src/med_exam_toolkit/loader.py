@@ -40,13 +40,13 @@ def load_json_files(
 
     json_files = list(sorted(input_path.rglob("*.json")))
     total_files = len(json_files)
-    print(f"[INFO] 开始处理 {total_files} 个文件...")
+    logger.info("开始处理 %d 个文件...", total_files)
 
     for file_idx, fp in enumerate(json_files, 1):
         try:
             raw = json.loads(fp.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, UnicodeDecodeError) as e:
-            logger.warning(f"跳过无法解析的文件 {fp}: {e}")
+            logger.warning("跳过无法解析的文件 %s: %s", fp, e)
             skipped += 1
             continue
 
@@ -60,7 +60,7 @@ def load_json_files(
                     break
 
         if parser_name is None:
-            logger.warning(f"未知 pkg={pkg}，跳过文件 {fp.name}")
+            logger.warning("未知 pkg=%s，跳过文件 %s", pkg, fp.name)
             skipped += 1
             continue
 
@@ -74,14 +74,17 @@ def load_json_files(
             if file_idx % progress_interval == 0 or file_idx == total_files:
                 elapsed = time.time() - start_time
                 rate = file_idx / elapsed if elapsed > 0 else 0
-                print(f"[INFO] 进度：{file_idx}/{total_files} ({file_idx/total_files*100:.1f}%), "
-                      f"处理 {processed} 题，跳过 {skipped} 个，速度：{rate:.1f} 文件/秒")
+                logger.info(
+                    "进度：%d/%d (%.1f%%)，处理 %d 题，跳过 %d 个，速度：%.1f 文件/秒",
+                    file_idx, total_files, file_idx / total_files * 100,
+                    processed, skipped, rate,
+                )
         except Exception as e:
-            logger.warning(f"解析失败 {fp.name}: {e}")
+            logger.warning("解析失败 %s: %s", fp.name, e)
             skipped += 1
 
     elapsed = time.time() - start_time
-    print(f"[INFO] 加载完成：{len(questions)} 题，跳过 {skipped} 个文件，耗时 {elapsed:.2f} 秒")
+    logger.info("加载完成：%d 题，跳过 %d 个文件，耗时 %.2f 秒", len(questions), skipped, elapsed)
     return questions
 
 
