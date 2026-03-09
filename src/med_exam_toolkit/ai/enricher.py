@@ -481,12 +481,51 @@ class BankEnricher:
             enable_thinking = thinking,
         )
 
-        try:
-            response = client.chat.completions.create(**params)
-        except Exception as exc:  # noqa: BLE001
+        # 带指数退避的重试：应对速率限制（429）和瞬时网络抖动
+        # 最多重试 3 次，等待间隔依次为 2s、4s、8s
+        MAX_RETRIES  = 3
+        base_delay   = 2.0
+        last_exc: Exception | None = None
+
+        for attempt in range(MAX_RETRIES + 1):
             if self._shutdown.is_set():
                 return None
-            logger.warning("AI 请求异常: %s", exc)
+
+            try:
+                response = client.chat.completions.create(**params)
+                break   # 请求成功，跳出重试循环
+
+            except Exception as exc:  # noqa: BLE001
+                last_exc = exc
+                if self._shutdown.is_set():
+                    return None
+
+                # 判断是否值得重试（速率限制或临时网络错误）
+                exc_str = str(exc).lower()
+                retryable = (
+                    "429" in exc_str           # rate limit
+                    or "rate limit" in exc_str
+                    or "timeout" in exc_str
+                    or "connection" in exc_str
+                    or "502" in exc_str
+                    or "503" in exc_str
+                )
+
+                if retryable and attempt < MAX_RETRIES:
+                    delay = base_delay * (2 ** attempt)   # 2s → 4s → 8s
+                    logger.warning(
+                        "AI 请求失败 (attempt %d/%d)，%.0fs 后重试: %s",
+                        attempt + 1, MAX_RETRIES, delay, exc,
+                    )
+                    time.sleep(delay)
+                    continue
+
+                # 不可重试，或已达最大次数
+                logger.warning("AI 请求异常: %s", exc)
+                return None
+        else:
+            # for-else：重试次数耗尽仍未成功
+            logger.warning("AI 请求达到最大重试次数，放弃: %s", last_exc)
             return None
 
         content, reasoning_text = extract_response_text(response)
