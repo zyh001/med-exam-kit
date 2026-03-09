@@ -3,7 +3,7 @@ import hashlib
 import re
 import logging
 from typing import Iterator
-from med_exam_toolkit.models import Question
+from med_exam_toolkit.models import Question, SubQuestion
 
 logger = logging.getLogger(__name__)
 
@@ -16,7 +16,8 @@ def _normalize_text(text: str) -> str:
     text = text.replace("：", ":").replace("（", "(").replace("）", ")")
     return text.lower()
 
-def _resolve_answer_text(sq) -> str:
+
+def _resolve_answer_text(sq: SubQuestion) -> str:
     """将答案字母转为实际选项文本，避免选项顺序影响指纹"""
     try:
         idx = ord(sq.answer.strip().upper()) - ord("A")
@@ -25,6 +26,7 @@ def _resolve_answer_text(sq) -> str:
     except (TypeError, ValueError):
         pass
     return sq.answer.strip().upper()
+
 
 def compute_fingerprint(q: Question, strategy: str = "strict") -> str:
     """
@@ -59,13 +61,13 @@ def compute_fingerprint(q: Question, strategy: str = "strict") -> str:
 
 
 def deduplicate(
-    questions: list[Question] | Iterator[Question],
-    strategy: str = "strict",
+        questions: list[Question] | Iterator[Question],
+        strategy: str = "strict",
 ) -> list[Question]:
     """
     去重，返回去重后的列表。
     保留首次出现的题目，后续重复的丢弃。
-    
+
     支持 list 和 Iterator 输入。
     """
     seen: dict[str, Question] = {}
@@ -86,5 +88,5 @@ def deduplicate(
             seen[fp] = q
 
     result = list(seen.values())
-    print(f"[INFO] 去重完成：{total} -> {len(result)} (去除 {duplicates} 条重复)")
+    logger.info("去重完成：%d -> %d (去除 %d 条重复)", total, len(result), duplicates)
     return result
