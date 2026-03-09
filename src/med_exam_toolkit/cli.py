@@ -353,6 +353,108 @@ def info(ctx, input_dir, bank, password):
         click.echo("题库为空。")
 
 @cli.command(hidden=True)
+@click.option("--bank", required=True, type=click.Path(exists=True),
+              help="旧版 MQB1 题库路径（.mqb）")
+@click.option("-o", "--output", default=None,
+              help="输出路径（默认在原文件名后追加 _v2，如 questions_v2.mqb）")
+@click.option("--password", default=None, help="旧版题库的加密密码")
+@click.option("--new-password", default=None, help="新版题库的加密密码（留空则不加密）")
+@click.option("--yes", "-y", is_flag=True, default=False,
+              help="跳过确认提示，直接执行迁移")
+def migrate(bank, output, password, new_password, yes):
+    """将旧版 MQB1 (pickle) 题库迁移为安全的 MQB2 (JSON) 格式
+
+    \b
+    迁移是一次性操作：
+      1. 使用 pickle 读取旧版文件（仅此步骤使用 pickle）
+      2. 立即转存为无 pickle 的 MQB2 格式
+      3. 迁移完成后，旧版文件可以安全删除
+
+    \b
+    示例：
+      med-exam migrate --bank old.mqb
+      med-exam migrate --bank old.mqb -o new.mqb
+      med-exam migrate --bank old.mqb --password 旧密码 --new-password 新密码
+    """
+    from med_exam_toolkit.bank import load_bank_legacy, save_bank
+
+    bank_path = Path(bank)
+
+    # 确定输出路径：默认在文件名末尾加 _v2
+    if output:
+        output_path = Path(output).with_suffix(".mqb")
+    else:
+        output_path = bank_path.with_name(bank_path.stem + "_v2.mqb")
+
+    # 先检测文件格式，确认确实是 MQB1，避免用户误操作
+    with open(bank_path, "rb") as fh:
+        magic = fh.read(4)
+
+    if magic == b"MQB2":
+        click.echo("ℹ️  该文件已经是新版 MQB2 格式，无需迁移。")
+        return
+    if magic != b"MQB1":
+        click.echo(f"[ERROR] 不是有效的 .mqb 文件（magic={magic!r}），已中止。")
+        raise SystemExit(1)
+
+    # 打印醒目的安全警告，让用户知晓 pickle 的风险和适用前提
+    click.echo()
+    click.echo("  ⚠️  安全提示  ".center(60, "─"))
+    click.echo("  本操作将使用 pickle 读取旧版 MQB1 文件。")
+    click.echo("  pickle 在反序列化时可以执行任意代码，存在安全风险。")
+    click.echo("  请确认以下两点后再继续：")
+    click.echo("    1. 该文件是由你自己的 med-exam-kit 生成的")
+    click.echo("    2. 文件在生成后未被他人修改过")
+    click.echo("─" * 60)
+    click.echo(f"  源文件：{bank_path}")
+    click.echo(f"  输出至：{output_path}")
+    if new_password:
+        click.echo("  新文件将使用新密码加密")
+    elif password:
+        click.echo("  新文件将不加密（如需加密请指定 --new-password）")
+    click.echo("─" * 60)
+    click.echo()
+
+    # 未传 --yes 时交互确认，给用户最后一次反悔的机会
+    if not yes:
+        confirmed = click.confirm("确认继续迁移？", default=False)
+        if not confirmed:
+            click.echo("已取消。")
+            return
+
+    # ── 读取旧版文件 ──
+    click.echo("📂 读取旧版 MQB1 文件...")
+    try:
+        questions = load_bank_legacy(bank_path, password)
+    except ValueError as e:
+        click.echo(f"[ERROR] {e}")
+        raise SystemExit(1)
+
+    total_subq = sum(len(q.sub_questions) for q in questions)
+    click.echo(f"   读取完成：{len(questions)} 道大题，{total_subq} 道小题")
+
+    # ── 写入新版文件 ──
+    click.echo("💾 写入新版 MQB2 文件...")
+    try:
+        fp = save_bank(questions, output_path.with_suffix(""), new_password)
+    except Exception as e:
+        click.echo(f"[ERROR] 写入失败：{e}")
+        raise SystemExit(1)
+
+    click.echo()
+    click.echo("  ✅ 迁移完成  ".center(60, "─"))
+    click.echo(f"  新文件：{fp}")
+    click.echo(f"  格式：MQB2 (JSON，无 pickle)")
+    if new_password:
+        click.echo("  加密：已用新密码加密（随机盐）")
+    else:
+        click.echo("  加密：未加密")
+    click.echo()
+    click.echo("  旧版文件仍保留在原位，确认新文件正常后可手动删除：")
+    click.echo(f"    rm {bank_path}")
+    click.echo("─" * 60)
+
+@cli.command(hidden=True)
 @click.option("--bank", required=True, type=click.Path(exists=True))
 @click.option("--password", default=None)
 @click.pass_context
@@ -524,8 +626,6 @@ def inspect(bank, password, filter_modes, filter_units, keyword,
     from med_exam_toolkit.inspect import run_inspect
     run_inspect(bank, password, filter_modes, filter_units, keyword,
                 has_ai, missing, limit, full, show_ai)
-
-@click.version_option(package_name="med-exam-toolkit")
 
 @cli.command()
 @click.option("--bank", required=True, type=click.Path(exists=True), help=".mqb 题库路径")
