@@ -34,9 +34,10 @@ _PURE_REASONING_KEYWORDS = (
 
 # 2. 混合思考模型（通过 enable_thinking 开关控制，默认关闭）
 _HYBRID_THINKING_KEYWORDS = (
+    "qwen3.5-plus",
     "qwen3.5",
     "qwen-plus",
-    "qwen3.5-plus",
+    "qwen3",      # 覆盖所有 qwen3-* 系列
 )
 
 
