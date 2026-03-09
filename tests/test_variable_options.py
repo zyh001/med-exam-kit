@@ -118,24 +118,22 @@ def test_xlsx_export_variable_options():
 
         # 验证文件可以被 openpyxl 读回
         from openpyxl import load_workbook
+        wb = load_workbook(fp)
         try:
-            wb = load_workbook(fp)
-            try:
-                ws = wb.active
+            ws = wb.active
 
-                # 表头行应包含选项列（选项 A、选项 B、选项 C、选项 D、选项 E）
-                # 注意：由于全空列会被过滤，10 选项的列可能不存在
-                headers = [cell.value for cell in ws[1]]
-                # 验证至少有 5 个选项列（因为最大有 5 个选项的题目）
-                option_headers = [h for h in headers if h and h.startswith("选项")]
-                assert len(option_headers) >= 5
+            # 表头行应包含选项列（选项 A、选项 B、选项 C、选项 D、选项 E）
+            # 注意：由于全空列会被过滤，10 选项的列可能不存在
+            headers = [cell.value for cell in ws[1]]
+            # 验证至少有 5 个选项列（因为最大有 5 个选项的题目）
+            option_headers = [h for h in headers if h and h.startswith("选项")]
+            assert len(option_headers) >= 5
 
-                # 数据行数 = 4 题 + 1 表头
-                assert ws.max_row == 5
-            finally:
-                wb.close()  # 确保关闭文件句柄，避免 Windows 上的权限问题
+            # 数据行数 = 4 题 + 1 表头
+            assert ws.max_row == 5
         finally:
-            del wb  # 确保释放引用
+            # 单一 finally 即可保证文件句柄释放，无需再手动 del
+            wb.close()
     finally:
         import shutil
         shutil.rmtree(tmpdir, ignore_errors=True)
