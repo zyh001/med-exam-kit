@@ -3,12 +3,21 @@
 文件格式 (MQB2):
   4 bytes  — magic b"MQB2"
   4 bytes  — meta_len (big-endian uint32)
-  N bytes  — meta JSON (UTF-8)：包含 count / created / encrypted / salt_hex
-  M bytes  — payload JSON (UTF-8)，加密时为 Fernet 密文
+  N bytes  — meta JSON (UTF-8)：包含 count / created / encrypted / compressed / salt_hex
+  M bytes  — payload：JSON → zlib压缩 → (Fernet加密，可选)
+
+处理顺序：
+  写入：JSON 序列化 → zlib 压缩 → Fernet 加密（可选）
+  读取：Fernet 解密（可选）→ zlib 解压 → JSON 反序列化
 
 安全说明:
   - 不再使用 pickle，彻底消除反序列化代码执行风险
   - 每个题库文件生成独立随机盐值，避免彩虹表攻击
+
+压缩说明:
+  - 使用标准库 zlib，无需额外依赖
+  - 压缩在加密前完成，加密数据量更小；对纯文本 JSON 通常可减小 70–80%
+  - meta 中记录 compressed 标志，未压缩的旧 MQB2 文件仍可正常读取
 """
 from __future__ import annotations
 
@@ -18,6 +27,7 @@ import hashlib
 import json
 import os
 import time
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -80,26 +90,44 @@ def save_bank(
     questions: list[Question],
     output: Path,
     password: str | None = None,
+    compress: bool = True,
+    compress_level: int = 6,
 ) -> Path:
+    """保存题库到 .mqb 文件。
+
+    Args:
+        questions:       题目列表
+        output:          输出路径（自动添加 .mqb 后缀）
+        password:        加密密码，None 表示不加密
+        compress:        是否启用 zlib 压缩（默认开启，通常可减小 70–80%）
+        compress_level:  zlib 压缩等级 1–9，默认 6（速度与压缩率的平衡点）
+    """
     fp = output.with_suffix(DEFAULT_SUFFIX)
     fp.parent.mkdir(parents=True, exist_ok=True)
 
-    # 序列化为 JSON 字节（无 pickle，无代码执行风险）
+    # 1. JSON 序列化（无 pickle，无代码执行风险）
     payload: bytes = json.dumps(
         [_question_to_dict(q) for q in questions],
         ensure_ascii=False,
     ).encode("utf-8")
+    raw_size = len(payload)
 
-    # 每次保存生成新的随机盐值，加密和非加密文件都记录（方便格式一致）
+    # 2. zlib 压缩（在加密前压缩，数据熵低，压缩效果最佳）
+    if compress:
+        payload = zlib.compress(payload, level=compress_level)
+
+    # 3. 每次保存生成新的随机盐值
     salt = os.urandom(16)
 
     meta: dict[str, Any] = {
-        "count":     len(questions),
-        "created":   time.time(),
-        "encrypted": password is not None,
-        "salt_hex":  salt.hex(),   # 盐明文存储，本身不需要保密
+        "count":      len(questions),
+        "created":    time.time(),
+        "encrypted":  password is not None,
+        "compressed": compress,
+        "salt_hex":   salt.hex(),   # 盐明文存储，本身不需要保密
     }
 
+    # 4. Fernet 加密（可选）
     if password:
         if not HAS_CRYPTO:
             raise ImportError("加密需要 cryptography 库: pip install cryptography")
@@ -113,6 +141,15 @@ def save_bank(
         fh.write(len(meta_bytes).to_bytes(4, "big"))
         fh.write(meta_bytes)
         fh.write(payload)
+
+    compressed_size = len(payload)
+    if compress:
+        ratio = (1 - compressed_size / raw_size) * 100 if raw_size else 0
+        import logging
+        logging.getLogger(__name__).debug(
+            "保存完成：原始 %d B → 压缩后 %d B（减小 %.1f%%）",
+            raw_size, compressed_size, ratio,
+        )
 
     return fp
 
@@ -139,12 +176,12 @@ def load_bank(path: Path, password: str | None = None) -> list[Question]:
         meta: dict[str, Any] = json.loads(fh.read(meta_len).decode("utf-8"))
         payload = fh.read()
 
+    # 1. 解密（可选）
     if meta.get("encrypted"):
         if not password:
             raise ValueError("该题库已加密，请提供 --password")
         if not HAS_CRYPTO:
             raise ImportError("解密需要 cryptography 库: pip install cryptography")
-        # 从文件 meta 中读取该文件专属的盐值
         salt = bytes.fromhex(meta["salt_hex"])
         key = _derive_key(password, salt)
         try:
@@ -152,7 +189,11 @@ def load_bank(path: Path, password: str | None = None) -> list[Question]:
         except Exception:
             raise ValueError("密码错误或文件损坏")
 
-    # payload 是 JSON，安全反序列化
+    # 2. 解压（兼容旧版未压缩的 MQB2 文件）
+    if meta.get("compressed", False):
+        payload = zlib.decompress(payload)
+
+    # 3. JSON 反序列化（安全）
     raw_list: list[dict] = json.loads(payload.decode("utf-8"))
     return [_question_from_dict(d) for d in raw_list]
 
