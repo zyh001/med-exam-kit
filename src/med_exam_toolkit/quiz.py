@@ -1,4 +1,3 @@
-"""医考练习 Web 应用 - 后端服务"""
 from __future__ import annotations
 import json as _json
 import random
@@ -9,15 +8,17 @@ import time
 import webbrowser
 from collections import defaultdict, deque
 from pathlib import Path
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, make_response
 from flask_compress import Compress
 
-_questions:     list        = []
-_bank_path:     Path | None = None
-_password:      str  | None = None
-_session_token: str         = ""   # 启动时由 start_quiz() 生成
-_server_port:   int         = 5174
-_server_host:   str         = "127.0.0.1"  # 绑定地址，影响 Host 校验策略
+_questions:      list        = []
+_bank_path:      Path | None = None
+_db_path:        Path | None = None   # 进度数据库（与题库同目录，.progress.db）
+_password:       str  | None = None
+_session_token:  str         = ""
+_server_port:    int         = 5174
+_server_host:    str         = "127.0.0.1"
+_record_enabled: bool        = True   # --no-record 时为 False
 
 # ── 速率限制：滑动窗口，每 IP 最多 120 次/分钟 ──
 _RATE_LIMIT  = 120
@@ -47,6 +48,12 @@ def _get_lan_ip() -> str:
             return s.getsockname()[0]
     except OSError:
         return "127.0.0.1"
+
+
+def _get_user_id() -> str:
+    """从请求 Cookie 中读取用户 UUID，不存在则返回 '_legacy'。
+    Cookie 的生成和设置在 index() 路由中完成。"""
+    return request.cookies.get("med_exam_uid", "_legacy")
 
 
 def _create_app() -> Flask:
@@ -253,6 +260,81 @@ def _sample_with_difficulty(pool: list, target: int, difficulty: dict, rng) -> l
 # API
 # ════════════════════════════════════════════
 
+@app.post("/api/record")
+def api_record():
+    """保存一次完整答题会话（错题本 + SM-2 + 历史统计均由此驱动）。"""
+    if not _record_enabled:
+        return jsonify({"ok": True, "skipped": True})   # 静默跳过，不报错
+    if _db_path is None:
+        return jsonify({"ok": False, "error": "进度数据库未初始化"}), 503
+    try:
+        from med_exam_toolkit.progress import record_session
+        data = request.get_json(silent=True) or {}
+        record_session(_db_path, data, user_id=_get_user_id())
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/record/status")
+def api_record_status():
+    """返回记录功能状态及当前用户 ID（用于前端展示）。"""
+    uid = _get_user_id()
+    return jsonify({
+        "enabled":    _record_enabled,
+        "db_ready":   _db_path is not None and _db_path.exists(),
+        "user_id":    uid,
+        "is_legacy":  uid == "_legacy",
+    })
+
+
+@app.post("/api/record/clear")
+def api_record_clear():
+    """清空当前用户的全部做题记录。"""
+    if _db_path is None or not _db_path.exists():
+        return jsonify({"ok": True, "deleted": {}}), 200
+    try:
+        from med_exam_toolkit.progress import clear_user_data
+        deleted = clear_user_data(_db_path, user_id=_get_user_id())
+        return jsonify({"ok": True, "deleted": deleted})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/stats")
+def api_stats():
+    """返回全局统计 + 历史趋势 + 章节正确率。"""
+    if _db_path is None or not _db_path.exists():
+        return jsonify({"overall": {}, "history": [], "units": []})
+    from med_exam_toolkit.progress import get_overall_stats, get_history, get_unit_stats
+    uid = _get_user_id()
+    return jsonify({
+        "overall": get_overall_stats(_db_path, user_id=uid),
+        "history": get_history(_db_path, user_id=uid, limit=20),
+        "units":   get_unit_stats(_db_path, user_id=uid),
+    })
+
+
+@app.get("/api/review/due")
+def api_review_due():
+    """返回今日 SM-2 到期的题目指纹列表。"""
+    if _db_path is None or not _db_path.exists():
+        return jsonify({"fingerprints": [], "count": 0})
+    from med_exam_toolkit.progress import get_due_fingerprints
+    fps = get_due_fingerprints(_db_path, user_id=_get_user_id())
+    return jsonify({"fingerprints": fps, "count": len(fps)})
+
+
+@app.get("/api/wrongbook")
+def api_wrongbook():
+    """返回错题指纹列表（按错误次数降序）。"""
+    if _db_path is None or not _db_path.exists():
+        return jsonify({"items": [], "count": 0})
+    from med_exam_toolkit.progress import get_wrong_fingerprints
+    items = get_wrong_fingerprints(_db_path, user_id=_get_user_id())
+    return jsonify({"items": items, "count": len(items)})
+
+
 @app.get("/api/info")
 def api_info():
     from collections import Counter
@@ -291,13 +373,15 @@ def api_questions():
     limit         = int(request.args.get("limit", 0))
     shuffle       = request.args.get("shuffle", "0") == "1"
     seed          = request.args.get("seed", None)
-    per_mode_raw  = request.args.get("per_mode",   None)
-    per_unit_raw  = request.args.get("per_unit",   None)  # JSON {"unit": sq_count}
-    difficulty_raw= request.args.get("difficulty", None)
+    per_mode_raw  = request.args.get("per_mode",      None)
+    per_unit_raw  = request.args.get("per_unit",      None)
+    difficulty_raw= request.args.get("difficulty",    None)
+    fps_raw       = request.args.get("fingerprints",  None)  # 逗号分隔的指纹白名单
 
     per_mode   = _json.loads(per_mode_raw)   if per_mode_raw   else None
     per_unit   = _json.loads(per_unit_raw)   if per_unit_raw   else None
     difficulty = _json.loads(difficulty_raw) if difficulty_raw else None
+    fp_set     = set(fps_raw.split(","))     if fps_raw        else None
 
     rng = random.Random(int(seed)) if seed else random.Random()
 
@@ -311,6 +395,11 @@ def api_questions():
         # per_unit 模式：只保留有配额的章节
         if per_unit and (q.unit or "") not in per_unit:
             continue
+        # 指纹白名单过滤（用于错题/复习模式）
+        if fp_set is not None:
+            fp = getattr(q, "fingerprint", "") or ""
+            if fp not in fp_set:
+                continue
         grp = [_sq_flat(q, sq, qi, si) for si, sq in enumerate(q.sub_questions)]
         if grp:
             groups.append(grp)
@@ -429,24 +518,53 @@ def api_questions():
 
 @app.get("/")
 def index():
-    return render_template("quiz.html", session_token=_session_token)
+    uid = request.cookies.get("med_exam_uid", "")
+    resp = make_response(render_template("quiz.html", session_token=_session_token))
+    if not uid:
+        # 首次访问：生成并写入持久 Cookie（有效期 1 年）
+        uid = secrets.token_hex(16)   # 32 位十六进制，每用户独立
+        resp.set_cookie(
+            "med_exam_uid", uid,
+            max_age=365 * 24 * 3600,
+            httponly=True,
+            samesite="Strict",
+        )
+    return resp
 
 
-def start_quiz(bank_path: str, port: int = 5174, host: str = "127.0.0.1",
-               no_browser: bool = False, password: str | None = None) -> None:
+def start_quiz(
+    bank_path:  str,
+    port:       int  = 5174,
+    host:       str  = "127.0.0.1",
+    no_browser: bool = False,
+    password:   str | None = None,
+    no_record:  bool = False,
+) -> None:
     """启动医考练习 Web 应用"""
     from med_exam_toolkit.bank import load_bank
-    global _questions, _bank_path, _password, _session_token, _server_port, _server_host
-    _bank_path     = Path(bank_path).resolve()
-    _password      = password
-    _server_port   = port
-    _server_host   = host
-    _session_token = secrets.token_hex(32)   # 每次启动生成新 token
+    global _questions, _bank_path, _password, _session_token, \
+           _server_port, _server_host, _db_path, _record_enabled
+
+    _bank_path      = Path(bank_path).resolve()
+    _password       = password
+    _server_port    = port
+    _server_host    = host
+    _session_token  = secrets.token_hex(32)
+    _record_enabled = not no_record
 
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
     sq_total = sum(len(q.sub_questions) for q in _questions)
     print(f"[INFO] 共 {len(_questions)} 大题 / {sq_total} 小题")
+
+    if _record_enabled:
+        from med_exam_toolkit.progress import db_path_for_bank, init_db
+        _db_path = db_path_for_bank(_bank_path)
+        init_db(_db_path)
+        print(f"[INFO] 进度数据库: {_db_path}")
+    else:
+        _db_path = None
+        print("[INFO] 学习记录已关闭（--no-record）")
 
     local_url = f"http://127.0.0.1:{port}"
     print(f"[INFO] 本机访问: {local_url}")
@@ -456,11 +574,9 @@ def start_quiz(bank_path: str, port: int = 5174, host: str = "127.0.0.1",
         print(f"[INFO] 局域网访问: {lan_url}  （同网段其他设备可用此地址）")
     print("[INFO] Ctrl+C 退出")
 
-    open_url = local_url
     if not no_browser:
-        threading.Timer(0.9, lambda: webbrowser.open(open_url)).start()
+        threading.Timer(0.9, lambda: webbrowser.open(local_url)).start()
 
-    # threaded=True：每个请求在独立线程中处理，支持多用户并发访问
     app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
 
