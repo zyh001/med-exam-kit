@@ -352,7 +352,7 @@ def info(ctx, input_dir, bank, password):
     else:
         click.echo("题库为空。")
 
-@cli.command(hidden=True)
+@cli.command()
 @click.option("--bank", required=True, type=click.Path(exists=True),
               help="旧版 MQB1 题库路径（.mqb）")
 @click.option("-o", "--output", default=None,
@@ -651,7 +651,8 @@ def edit(bank, password, port, host, no_browser):
 @click.option("--port", default=5174, type=int, help="本地端口（默认 5174）")
 @click.option("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
 @click.option("--no-browser", is_flag=True, default=False, help="不自动打开浏览器")
-def quiz(bank, password, port, host, no_browser):
+@click.option("--no-record", is_flag=True, default=False, help="不记录做题历史（不创建 .progress.db）")
+def quiz(bank, password, port, host, no_browser, no_record):
     """启动医考练习 Web 应用（练习/考试/背题模式）
 
     \b
@@ -660,7 +661,8 @@ def quiz(bank, password, port, host, no_browser):
     按 Ctrl+C 退出
     """
     from med_exam_toolkit.quiz import start_quiz
-    start_quiz(bank, port=port, host=host, no_browser=no_browser, password=password)
+    start_quiz(bank, port=port, host=host, no_browser=no_browser,
+               password=password, no_record=no_record)
 
 
 def main():
