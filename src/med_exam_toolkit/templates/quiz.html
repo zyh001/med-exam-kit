@@ -1311,6 +1311,96 @@ button,a,[role=button],label{touch-action:manipulation}
 .diff-label{width:36px;font-size:12px;color:var(--muted);flex-shrink:0}
 .diff-pct{width:36px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;flex-shrink:0}
 
+/* ════ 主页快捷操作行 ════ */
+.home-quick-row{display:flex;gap:10px;padding:0 20px 20px}
+.home-quick-btn{
+  flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
+  padding:13px 10px;border-radius:13px;font-size:13px;font-weight:600;
+  background:var(--surface);border:1.5px solid var(--border);color:var(--text);
+  cursor:pointer;transition:all .18s;position:relative;
+}
+.home-quick-btn:hover{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
+.home-quick-btn:active{transform:scale(.97)}
+.home-quick-icon{font-size:17px;line-height:1}
+.due-badge{
+  position:absolute;top:-7px;right:-7px;
+  min-width:18px;height:18px;padding:0 5px;border-radius:9px;
+  background:var(--warning);color:#fff;font-size:11px;font-weight:700;
+  display:flex;align-items:center;justify-content:center;
+}
+.due-badge.err{background:var(--danger)}
+
+/* ════ 统计页面 ════ */
+#s-stats{overflow-y:auto;display:flex;flex-direction:column}
+.stats-header{
+  display:flex;align-items:center;gap:12px;padding:16px 20px;
+  border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface);
+}
+.stats-header h2{font-size:17px;font-weight:700}
+.stats-body{padding:16px 20px;display:flex;flex-direction:column;gap:20px;max-width:720px;margin:0 auto;width:100%}
+
+.stats-summary-row{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}
+.stat-summary-card{
+  background:var(--surface);border:1px solid var(--border);border-radius:13px;
+  padding:14px 16px;display:flex;flex-direction:column;gap:4px;
+}
+.stat-summary-num{font-size:26px;font-weight:800;color:var(--text)}
+.stat-summary-label{font-size:12px;color:var(--muted)}
+.stat-summary-card.accent .stat-summary-num{color:var(--accent)}
+.stat-summary-card.danger .stat-summary-num{color:var(--danger)}
+.stat-summary-card.warning .stat-summary-num{color:var(--warning)}
+
+.stats-section{background:var(--surface);border:1px solid var(--border);border-radius:13px;padding:16px 18px}
+.stats-section-title{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px}
+
+/* 趋势折线图 */
+.trend-chart-wrap{position:relative;height:90px}
+.trend-chart{width:100%;height:90px;overflow:visible}
+.trend-bar{fill:var(--accent);opacity:.7;rx:3;ry:3;transition:opacity .2s}
+.trend-bar:hover{opacity:1}
+.trend-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.trend-dot{fill:var(--accent)}
+.trend-empty{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:13px}
+.trend-label{font-size:9px;fill:var(--muted)}
+.trend-pct-label{font-size:9px;fill:var(--accent);font-weight:700}
+
+/* 章节正确率列表 */
+.unit-stats-list{display:flex;flex-direction:column;gap:8px;max-height:340px;overflow-y:auto}
+.unit-stat-row{display:flex;align-items:center;gap:10px}
+.unit-stat-name{font-size:13px;color:var(--text);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.unit-stat-bar-wrap{width:110px;height:8px;background:var(--card);border-radius:4px;flex-shrink:0;overflow:hidden}
+.unit-stat-bar{height:100%;border-radius:4px;transition:width .4s cubic-bezier(.4,0,.2,1)}
+.unit-stat-pct{font-size:12px;font-weight:700;width:36px;text-align:right;flex-shrink:0}
+.unit-stat-cnt{font-size:11px;color:var(--muted);width:46px;text-align:right;flex-shrink:0}
+
+/* 错题预览 */
+.wrongbook-preview{display:flex;flex-direction:column;gap:6px;margin-bottom:12px;max-height:200px;overflow-y:auto}
+.wrongbook-row{
+  display:flex;align-items:center;gap:10px;padding:8px 10px;
+  background:var(--card);border-radius:8px;font-size:12px;
+}
+.wrongbook-wrong-cnt{color:var(--danger);font-weight:700;min-width:28px;text-align:right;flex-shrink:0}
+.wrongbook-fp{color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1}
+.wrongbook-acc{color:var(--muted);min-width:36px;text-align:right;flex-shrink:0}
+
+.stats-action-btn{
+  width:100%;padding:12px;border-radius:10px;font-size:14px;font-weight:700;
+  background:linear-gradient(135deg,var(--accent),#6177f9);color:#fff;
+  border:none;cursor:pointer;transition:opacity .18s;
+}
+.stats-action-btn:hover{opacity:.88}
+.stats-action-btn.danger-btn{background:linear-gradient(135deg,var(--danger),#c0392b)}
+
+/* 成绩页：错题/SM2 行动按钮 */
+.res-btn.wrongbook{background:var(--danger-bg);color:var(--danger);border:1.5px solid var(--danger)}
+.res-btn.review{background:var(--warn-bg);color:var(--warning);border:1.5px solid var(--warning)}
+
+/* SM-2 复习标签 */
+.review-mode-badge{
+  display:inline-flex;align-items:center;gap:5px;padding:3px 9px;
+  border-radius:20px;font-size:11px;font-weight:700;
+  background:var(--warn-bg);color:var(--warning);margin-left:8px;
+}
 </style>
 </head>
 <body>
@@ -1377,6 +1467,82 @@ button,a,[role=button],label{touch-action:manipulation}
   <div id="recent-section" style="display:none">
     <div class="section-label">最近记录</div>
     <div class="recent-list" id="recent-list"></div>
+  </div>
+  <!-- 快捷操作：统计 / 今日复习 / 错题练习 -->
+  <div class="home-quick-row">
+    <button class="home-quick-btn" onclick="openStats()">
+      <span class="home-quick-icon">📊</span><span>学习统计</span>
+    </button>
+    <button class="home-quick-btn" onclick="startReview()" id="review-btn">
+      <span class="home-quick-icon">🔄</span><span>今日复习</span>
+      <span class="due-badge" id="due-badge" style="display:none">0</span>
+    </button>
+    <button class="home-quick-btn" onclick="startWrongBookReview()" id="wrongbook-btn">
+      <span class="home-quick-icon">📕</span><span>错题练习</span>
+      <span class="due-badge err" id="wrong-badge" style="display:none">0</span>
+    </button>
+  </div>
+</div>
+
+<!-- ═══ STATS ═══════════════════════════════════════════════════════ -->
+<div id="s-stats" class="screen slide-right">
+  <div class="stats-header">
+    <button class="back-btn" onclick="showScreen('s-home')">←</button>
+    <h2>学习统计</h2>
+  </div>
+  <div class="stats-body">
+    <!-- 总览卡片 -->
+    <div class="stats-summary-row">
+      <div class="stat-summary-card">
+        <div class="stat-summary-num" id="st-total">—</div>
+        <div class="stat-summary-label">累计答题次数</div>
+      </div>
+      <div class="stat-summary-card accent">
+        <div class="stat-summary-num" id="st-accuracy">—</div>
+        <div class="stat-summary-label">总体正确率</div>
+      </div>
+      <div class="stat-summary-card danger">
+        <div class="stat-summary-num" id="st-wrong-topics">—</div>
+        <div class="stat-summary-label">错过的题目数</div>
+      </div>
+      <div class="stat-summary-card warning">
+        <div class="stat-summary-num" id="st-due">—</div>
+        <div class="stat-summary-label">今日待复习</div>
+      </div>
+    </div>
+    <!-- 趋势图 -->
+    <div class="stats-section">
+      <div class="stats-section-title">最近答题趋势（正确率）</div>
+      <div class="trend-chart-wrap">
+        <svg id="trend-chart" class="trend-chart" viewBox="0 0 320 72" preserveAspectRatio="none"></svg>
+        <div class="trend-empty" id="trend-empty" style="display:none">暂无记录</div>
+      </div>
+    </div>
+    <!-- 章节正确率 -->
+    <div class="stats-section">
+      <div class="stats-section-title">章节正确率（历史累计）</div>
+      <div id="unit-stats-list" class="unit-stats-list">
+        <div style="color:var(--muted);font-size:13px;padding:8px 0">暂无数据</div>
+      </div>
+    </div>
+    <!-- 高频错题 -->
+    <div class="stats-section" id="wrongbook-section">
+      <div class="stats-section-title">高频错题（错误次数最多）</div>
+      <div id="wrongbook-preview" class="wrongbook-preview">
+        <div style="color:var(--muted);font-size:13px;padding:8px 0">暂无错题记录</div>
+      </div>
+      <button class="stats-action-btn danger-btn" onclick="startWrongBookReview()" id="wrongbook-all-btn" style="display:none">
+        📕 练习全部错题
+      </button>
+    </div>
+    <!-- 学习记录设置 -->
+    <div class="stats-section" id="record-settings-section">
+      <div class="stats-section-title">学习记录设置</div>
+      <div id="record-status-body">
+        <!-- 由 JS 动态填充 -->
+        <div style="color:var(--muted);font-size:13px">加载中…</div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -1648,9 +1814,11 @@ button,a,[role=button],label{touch-action:manipulation}
         <div class="unit-breakdown fade-up" id="unit-breakdown" style="display:none"></div>
         <div class="score-block fade-up" id="score-block" style="display:none"></div>
         <div class="results-actions fade-up">
-          <button class="res-btn primary" onclick="showReview()">📖 查看解析</button>
-          <button class="res-btn ghost"   onclick="retryQuiz()">🔁 再练一次</button>
-          <button class="res-btn ghost"   onclick="showScreen('s-home')">🏠 回到主页</button>
+          <button class="res-btn primary"   onclick="showReview()">📖 查看解析</button>
+          <button class="res-btn ghost"     onclick="retryQuiz()">🔁 再练一次</button>
+          <button class="res-btn wrongbook" onclick="startWrongBookReview()" id="res-wrongbook-btn" style="display:none">📕 练错题</button>
+          <button class="res-btn review"    onclick="startReview()" id="res-review-btn" style="display:none">🔄 今日复习</button>
+          <button class="res-btn ghost"     onclick="showScreen('s-home')">🏠 回到主页</button>
         </div>
       </div>
     </div>
@@ -2006,6 +2174,8 @@ async function init() {
   } catch(e) {
     document.getElementById('home-bank-name').textContent = '无法连接到服务器';
   }
+  // 异步加载徽章（不阻塞主界面显示）
+  _refreshProgressBadges();
 }
 
 function renderHome() {
@@ -3998,6 +4168,12 @@ function calculateResults() {
   S.history = S.history.slice(0, 10);
   localStorage.setItem('quiz-history', JSON.stringify(S.history));
 
+  // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
+  _recordSessionToServer(S.results, S.questions, S.ans).then(() => {
+    // 记录完成后刷新主页徽章
+    _refreshProgressBadges();
+  });
+
   renderResults();
 }
 
@@ -4266,6 +4442,308 @@ function filterReview(type, tabEl) {
   if (!list.children.length) {
     list.innerHTML = '<div style="text-align:center;color:var(--muted);padding:40px;font-size:14px">没有符合条件的题目</div>';
   }
+}
+
+// ════════════════════════════════════════════
+// 进度持久化：错题本 + SM-2 + 统计
+// ════════════════════════════════════════════
+
+/** 把本次答题结果 POST 到服务端 */
+async function _recordSessionToServer(results, questions, ans) {
+  if (!results || !questions) return;
+  const items = [];
+  questions.forEach((q, i) => {
+    const fp = q.fingerprint;
+    if (!fp) return;
+    let sel = ans[i];
+    if (sel && sel.__set) sel = new Set(sel.v);
+    const isEmpty  = !sel || (sel instanceof Set && sel.size === 0);
+    let   result   = -1;  // -1=skip
+    if (!isEmpty) {
+      const isMulti   = isMultiQ(q);
+      const correctSet= new Set(isMulti ? q.answer.split('') : [q.answer]);
+      if (isMulti) {
+        const selSet = sel instanceof Set ? sel : new Set([sel]);
+        result = (selSet.size === correctSet.size && [...correctSet].every(l => selSet.has(l))) ? 1 : 0;
+      } else {
+        result = (sel === q.answer) ? 1 : 0;
+      }
+    }
+    items.push({ fingerprint: fp, result, mode: q.mode, unit: q.unit });
+  });
+
+  const today = new Date().toLocaleDateString('zh-CN');
+  const units  = [...new Set(questions.map(q => q.unit).filter(Boolean))];
+  const payload = {
+    id:       String(Date.now()),
+    mode:     results.mode,
+    total:    results.total,
+    correct:  results.correct,
+    wrong:    results.wrong,
+    skip:     results.skip,
+    time_sec: results.timeSec,
+    date:     today,
+    units,
+    items,
+  };
+  try {
+    await apiFetch('/api/record', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  } catch (e) {
+    console.warn('记录上传失败:', e);
+  }
+}
+
+/** 刷新主页徽章（今日复习数 + 错题数） */
+async function _refreshProgressBadges() {
+  try {
+    const [dueRes, wbRes] = await Promise.all([
+      apiFetch('/api/review/due').then(r => r.json()),
+      apiFetch('/api/wrongbook').then(r => r.json()),
+    ]);
+    const dueBadge   = document.getElementById('due-badge');
+    const wrongBadge = document.getElementById('wrong-badge');
+    if (dueBadge) {
+      dueBadge.textContent = dueRes.count || 0;
+      dueBadge.style.display = dueRes.count > 0 ? '' : 'none';
+    }
+    if (wrongBadge) {
+      wrongBadge.textContent = wbRes.count || 0;
+      wrongBadge.style.display = wbRes.count > 0 ? '' : 'none';
+    }
+    // 成绩页按钮
+    const resWB  = document.getElementById('res-wrongbook-btn');
+    const resRev = document.getElementById('res-review-btn');
+    if (resWB)  resWB.style.display  = wbRes.count  > 0 ? '' : 'none';
+    if (resRev) resRev.style.display = dueRes.count > 0 ? '' : 'none';
+  } catch (e) { /* 静默失败，不影响主流程 */ }
+}
+
+/** 开始今日 SM-2 复习（练习模式，仅加载到期题目） */
+async function startReview() {
+  try {
+    const res  = await apiFetch('/api/review/due').then(r => r.json());
+    const fps  = res.fingerprints || [];
+    if (!fps.length) { toast('🎉 今日没有待复习题目！'); return; }
+    const data = await apiFetch(
+      '/api/questions?shuffle=1&fingerprints=' + fps.join(',')
+    ).then(r => r.json());
+    if (!data.items || !data.items.length) { toast('找不到对应题目，题库可能已更新'); return; }
+    S.mode      = 'practice';
+    S.questions = data.items;
+    S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
+    S.examStart = Date.now();
+    S.modeGroups = buildModeGroups(data.items);
+    S.currentGroupIdx = 0; S.caseMaxReached = {};
+    S.practiceSessionId = String(Date.now());
+    toast(`🔄 复习模式：共 ${data.items.length} 题`);
+    startQuiz();
+  } catch(e) { toast('加载复习题目失败'); }
+}
+
+/** 开始错题练习（练习模式，仅加载答错过的题目） */
+async function startWrongBookReview() {
+  try {
+    const res = await apiFetch('/api/wrongbook').then(r => r.json());
+    const fps = (res.items || []).map(it => it.fingerprint);
+    if (!fps.length) { toast('暂时没有错题记录 👍'); return; }
+    // 最多取 100 道最高频错题
+    const topFps = fps.slice(0, 100);
+    const data = await apiFetch(
+      '/api/questions?shuffle=1&fingerprints=' + topFps.join(',')
+    ).then(r => r.json());
+    if (!data.items || !data.items.length) { toast('找不到对应题目'); return; }
+    S.mode      = 'practice';
+    S.questions = data.items;
+    S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
+    S.examStart = Date.now();
+    S.modeGroups = buildModeGroups(data.items);
+    S.currentGroupIdx = 0; S.caseMaxReached = {};
+    S.practiceSessionId = String(Date.now());
+    toast(`📕 错题模式：共 ${data.items.length} 题`);
+    startQuiz();
+  } catch(e) { toast('加载错题失败'); }
+}
+
+/** 打开统计页面 */
+async function openStats() {
+  showScreen('s-stats');
+  try {
+    const [d, wb, rs] = await Promise.all([
+      apiFetch('/api/stats').then(r => r.json()),
+      apiFetch('/api/wrongbook').then(r => r.json()),
+      apiFetch('/api/record/status').then(r => r.json()),
+    ]);
+    _renderStatsOverall(d.overall || {});
+    _renderTrendChart(d.history || []);
+    _renderUnitStats(d.units || []);
+    _renderWrongbookPreview(wb.items || []);
+    _renderRecordStatus(rs);
+  } catch(e) {
+    document.getElementById('unit-stats-list').innerHTML =
+      '<div style="color:var(--danger);font-size:13px">加载失败，请稍后重试</div>';
+  }
+}
+
+/** 渲染学习记录设置栏 */
+function _renderRecordStatus(rs) {
+  const el = document.getElementById('record-status-body');
+  if (!el) return;
+
+  if (!rs.enabled) {
+    el.innerHTML = `
+      <div style="display:flex;align-items:center;gap:8px;color:var(--muted);font-size:13px;padding:4px 0">
+        <span style="font-size:16px">🔕</span>
+        <span>学习记录已关闭（启动时传入 <code style="background:var(--card);padding:2px 5px;border-radius:4px">--no-record</code> 参数）</span>
+      </div>`;
+    return;
+  }
+
+  const shortId = rs.user_id === '_legacy' ? '（未识别）' : rs.user_id.slice(0, 8) + '…';
+  const idTip   = rs.user_id === '_legacy'
+    ? '刷新页面后将自动分配新 ID'
+    : '此 ID 存储在浏览器 Cookie 中，清除 Cookie 将获得新 ID';
+
+  el.innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:10px">
+      <div style="display:flex;align-items:center;gap:8px;font-size:13px">
+        <span style="font-size:15px">🟢</span>
+        <span style="color:var(--text)">记录功能已启用</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted);background:var(--card);border-radius:8px;padding:8px 10px;line-height:1.7">
+        <div>当前用户 ID：<code style="color:var(--accent)">${shortId}</code></div>
+        <div style="margin-top:2px">${idTip}</div>
+      </div>
+      <button onclick="_confirmClearRecord()"
+        style="align-self:flex-start;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;
+               background:var(--danger-bg);color:var(--danger);border:1.5px solid var(--danger);cursor:pointer">
+        🗑 清空我的学习记录
+      </button>
+    </div>`;
+}
+
+/** 清空记录确认 */
+async function _confirmClearRecord() {
+  const yes = confirm('⚠️ 确定要清空你的全部学习记录吗？\n\n这将删除所有答题历史、错题记录和 SM-2 复习进度，无法恢复。');
+  if (!yes) return;
+  try {
+    const res = await apiFetch('/api/record/clear', { method: 'POST' }).then(r => r.json());
+    if (res.ok) {
+      const d = res.deleted;
+      toast(`已清空：${d.attempts} 条答题记录、${d.sessions} 个会话、${d.sm2_cards} 条复习卡`);
+      openStats();   // 刷新统计页
+    } else {
+      toast('清空失败：' + (res.error || '未知错误'));
+    }
+  } catch(e) { toast('请求失败'); }
+}
+
+function _renderStatsOverall(o) {
+  document.getElementById('st-total').textContent       = o.total_attempts   ?? '—';
+  document.getElementById('st-accuracy').textContent    = o.accuracy != null  ? o.accuracy + '%' : '—';
+  document.getElementById('st-wrong-topics').textContent= o.wrong_topics      ?? '—';
+  document.getElementById('st-due').textContent         = o.due_today         ?? '—';
+}
+
+function _renderTrendChart(history) {
+  const svg   = document.getElementById('trend-chart');
+  const empty = document.getElementById('trend-empty');
+  svg.innerHTML = '';
+  const recent = history.filter(h => h.mode !== 'memo').slice(0, 15).reverse();
+  if (!recent.length) {
+    svg.style.display = 'none';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  svg.style.display = '';
+  if (empty) empty.style.display = 'none';
+
+  const W = 320, H = 72, PAD = 20, BAR_GAP = 4;
+  const n   = recent.length;
+  const bw  = Math.max(6, (W - PAD * 2 - BAR_GAP * (n - 1)) / n);
+  const pts = recent.map((h, i) => ({
+    x: PAD + i * (bw + BAR_GAP) + bw / 2,
+    y: H - PAD - (h.pct / 100) * (H - PAD * 2),
+    pct: h.pct,
+    date: h.date || '',
+  }));
+
+  // 渐变背景填充
+  const gradId = 'tg' + Math.random().toString(36).slice(2, 7);
+  svg.innerHTML += `<defs>
+    <linearGradient id="${gradId}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="var(--accent)" stop-opacity=".25"/>
+      <stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>
+    </linearGradient>
+  </defs>`;
+
+  // 填充区域
+  if (pts.length > 1) {
+    const areaD = `M ${pts[0].x} ${H - PAD} ` +
+      pts.map(p => `L ${p.x} ${p.y}`).join(' ') +
+      ` L ${pts[pts.length-1].x} ${H - PAD} Z`;
+    svg.innerHTML += `<path d="${areaD}" fill="url(#${gradId})"/>`;
+    const lineD = `M ` + pts.map(p => `${p.x} ${p.y}`).join(' L ');
+    svg.innerHTML += `<path d="${lineD}" class="trend-line"/>`;
+  }
+
+  pts.forEach((p, i) => {
+    // 圆点
+    svg.innerHTML += `<circle cx="${p.x}" cy="${p.y}" r="3.5" class="trend-dot"/>`;
+    // 正确率标签（每隔一个显示，防止拥挤）
+    if (n <= 8 || i % 2 === 0) {
+      svg.innerHTML += `<text x="${p.x}" y="${p.y - 7}" text-anchor="middle"
+        class="trend-pct-label">${p.pct}%</text>`;
+    }
+    // 日期标签（首尾）
+    if (i === 0 || i === n - 1) {
+      svg.innerHTML += `<text x="${p.x}" y="${H - 4}" text-anchor="middle"
+        class="trend-label">${p.date.replace(/\d{4}\//, '')}</text>`;
+    }
+  });
+}
+
+function _renderUnitStats(units) {
+  const el = document.getElementById('unit-stats-list');
+  if (!units.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">暂无数据</div>';
+    return;
+  }
+  // 按正确率从低到高排（弱项优先）
+  const sorted = [...units].sort((a, b) => a.accuracy - b.accuracy);
+  el.innerHTML = sorted.map(u => {
+    const color = u.accuracy >= 80 ? 'var(--success)'
+                : u.accuracy >= 60 ? 'var(--warning)'
+                : 'var(--danger)';
+    return `<div class="unit-stat-row">
+      <span class="unit-stat-name" title="${esc(u.unit)}">${esc(u.unit)}</span>
+      <div class="unit-stat-bar-wrap">
+        <div class="unit-stat-bar" style="width:${u.accuracy}%;background:${color}"></div>
+      </div>
+      <span class="unit-stat-pct" style="color:${color}">${u.accuracy}%</span>
+      <span class="unit-stat-cnt">${u.total}题</span>
+    </div>`;
+  }).join('');
+}
+
+function _renderWrongbookPreview(items) {
+  const el  = document.getElementById('wrongbook-preview');
+  const btn = document.getElementById('wrongbook-all-btn');
+  if (!items.length) {
+    el.innerHTML = '<div style="color:var(--muted);font-size:13px;padding:8px 0">暂无错题记录 👍</div>';
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+  if (btn) btn.style.display = '';
+  el.innerHTML = items.slice(0, 8).map(it => `
+    <div class="wrongbook-row">
+      <span class="wrongbook-wrong-cnt">✗${it.wrong}</span>
+      <span class="wrongbook-fp">${esc(it.fingerprint)}</span>
+      <span class="wrongbook-acc">${it.accuracy}%</span>
+    </div>`).join('');
 }
 
 // ════════════════════════════════════════════
