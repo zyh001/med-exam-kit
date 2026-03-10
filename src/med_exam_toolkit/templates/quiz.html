@@ -1723,6 +1723,19 @@ button,a,[role=button],label{touch-action:manipulation}
 <div id="toast"></div>
 
 <script>
+// ── Session Token（由服务端启动时生成，嵌入此页面）──────────────────────
+// 所有 /api/* 请求必须通过 apiFetch() 发出，它会自动附加此 Token。
+// 外部脚本/页面无法获知 Token，因此无法伪造 API 请求。
+const SESSION_TOKEN = "{{ session_token }}";
+
+/** 统一封装的 fetch，自动添加 X-Session-Token 请求头 */
+function apiFetch(url, opts = {}) {
+  opts.headers = Object.assign({}, opts.headers, {
+    "X-Session-Token": SESSION_TOKEN,
+  });
+  return fetch(url, opts);
+}
+
 // ════════════════════════════════════════════
 // 状态
 // ════════════════════════════════════════════
@@ -1987,7 +2000,7 @@ async function init() {
   // 先检测是否有未完成的考试（弹窗优先于主界面渲染）
   const hasSession = checkResumeSession();
   try {
-    S.bankInfo = await fetch('/api/info').then(r => r.json());
+    S.bankInfo = await apiFetch('/api/info').then(r => r.json());
     if (!hasSession) renderHome();
     else renderHome(); // 主界面也渲染，弹窗在最上层覆盖
   } catch(e) {
@@ -2943,7 +2956,7 @@ async function startSession() {
     }
   }
 
-  const data = await fetch('/api/questions?' + params).then(r => r.json());
+  const data = await apiFetch('/api/questions?' + params).then(r => r.json());
   if (!data.items.length) { toast('没有符合条件的题目'); return; }
 
   S.questions = data.items;
