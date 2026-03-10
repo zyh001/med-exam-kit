@@ -3,8 +3,12 @@ from __future__ import annotations
 
 import copy
 import json
+import secrets
+import socket
 import threading
+import time
 import webbrowser
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
@@ -12,14 +16,97 @@ from flask import Flask, jsonify, request, render_template
 from flask_compress import Compress
 
 # ── 全局状态 ──
-_questions: list = []
-_bank_path: Path | None = None
-_dirty    = False
-_password: str | None = None
+_questions:     list        = []
+_bank_path:     Path | None = None
+_dirty                      = False
+_password:      str  | None = None
+_session_token: str         = ""
+_server_port:   int         = 5173
+_server_host:   str         = "127.0.0.1"
+
+# ── 写操作锁：多线程并发时保护 _questions 的结构完整性 ──
+# 使用 RLock（可重入锁），允许同一线程在持有锁时再次加锁（防死锁）。
+# 所有会修改 _questions 的 endpoint 都必须持有此锁。
+_write_lock = threading.RLock()
+
+# ── 速率限制：编辑器含写操作，限制更严：60 次/分钟 ──
+_RATE_LIMIT  = 60
+_RATE_WINDOW = 60
+_rate_buckets: dict[str, deque] = defaultdict(deque)
+_rate_lock   = threading.Lock()
+
+
+def _check_rate_limit(ip: str) -> bool:
+    now = time.monotonic()
+    with _rate_lock:
+        q = _rate_buckets[ip]
+        while q and now - q[0] > _RATE_WINDOW:
+            q.popleft()
+        if len(q) >= _RATE_LIMIT:
+            return False
+        q.append(now)
+        return True
+
+
+def _get_lan_ip() -> str:
+    """获取本机局域网 IP，失败时回退到 127.0.0.1。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
+
 
 app = Flask(__name__, template_folder="templates")
 app.config["JSON_AS_ASCII"] = False
 Compress(app)
+
+
+@app.before_request
+def _guard():
+    # 1. 放行首页 HTML
+    if request.path == "/" and request.method == "GET":
+        return None
+
+    # 2. Host 头校验
+    #   • 仅本机 (127.0.0.1)：严格白名单
+    #   • 局域网 (0.0.0.0)：只校验端口匹配
+    host_header = request.headers.get("Host", "")
+    if ":" in host_header:
+        _, host_port_str = host_header.rsplit(":", 1)
+        try:
+            host_port = int(host_port_str)
+        except ValueError:
+            host_port = None
+    else:
+        host_port = None
+
+    if _server_host in ("127.0.0.1", "localhost"):
+        allowed = {
+            f"127.0.0.1:{_server_port}",
+            f"localhost:{_server_port}",
+            "127.0.0.1",
+            "localhost",
+        }
+        if host_header not in allowed:
+            return jsonify({"error": "Forbidden"}), 403
+    else:
+        if host_port is not None and host_port != _server_port:
+            return jsonify({"error": "Forbidden"}), 403
+
+    # 3. API 路由：校验 Session Token
+    if request.path.startswith("/api/"):
+        token = request.headers.get("X-Session-Token", "")
+        if not secrets.compare_digest(token, _session_token):
+            return jsonify({"error": "Unauthorized"}), 401
+
+        # 4. 速率限制
+        ip = request.remote_addr or "unknown"
+        if not _check_rate_limit(ip):
+            return jsonify({"error": "Too Many Requests"}), 429
+
+    return None
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -179,118 +266,122 @@ def api_get_question(qi: int):
 @app.put("/api/subquestion/<int:qi>/<int:si>")
 def api_update_sq(qi: int, si: int):
     global _dirty
-    if qi < 0 or qi >= len(_questions):
-        return jsonify({"error": "not found"}), 404
-    q = _questions[qi]
-    if si < 0 or si >= len(q.sub_questions):
-        return jsonify({"error": "not found"}), 404
-    sq = q.sub_questions[si]
     data = request.get_json()
+    with _write_lock:
+        if qi < 0 or qi >= len(_questions):
+            return jsonify({"error": "not found"}), 404
+        q = _questions[qi]
+        if si < 0 or si >= len(q.sub_questions):
+            return jsonify({"error": "not found"}), 404
+        sq = q.sub_questions[si]
 
-    for field in ("text", "answer", "discuss", "point"):
-        if field in data:
-            setattr(sq, field, data[field])
-    # rate: models.py 定义为 str，统一转字符串存储
-    if "rate" in data:
-        sq.rate = str(data["rate"]) if data["rate"] is not None else ""
-    if "options" in data and isinstance(data["options"], list):
-        sq.options = data["options"]
-    if "shared_options" in data and isinstance(data["shared_options"], list):
-        q.shared_options = data["shared_options"]
-    for field in ("mode", "unit", "cls", "stem"):
-        if field in data:
-            setattr(q, field, data[field])
+        for field in ("text", "answer", "discuss", "point"):
+            if field in data:
+                setattr(sq, field, data[field])
+        if "rate" in data:
+            sq.rate = str(data["rate"]) if data["rate"] is not None else ""
+        if "options" in data and isinstance(data["options"], list):
+            sq.options = data["options"]
+        if "shared_options" in data and isinstance(data["shared_options"], list):
+            q.shared_options = data["shared_options"]
+        for field in ("mode", "unit", "cls", "stem"):
+            if field in data:
+                setattr(q, field, data[field])
 
-    _dirty = True
-    return jsonify({"ok": True, "row": _sq_to_dict(q, sq, qi, si)})
+        _dirty = True
+        return jsonify({"ok": True, "row": _sq_to_dict(q, sq, qi, si)})
 
 
 @app.delete("/api/question/<int:qi>")
 def api_delete_question(qi: int):
     global _dirty
-    if qi < 0 or qi >= len(_questions):
-        return jsonify({"error": "not found"}), 404
-    _questions.pop(qi)
-    _dirty = True
-    return jsonify({"ok": True, "total": len(_questions)})
+    with _write_lock:
+        if qi < 0 or qi >= len(_questions):
+            return jsonify({"error": "not found"}), 404
+        _questions.pop(qi)
+        _dirty = True
+        return jsonify({"ok": True, "total": len(_questions)})
 
 
 @app.delete("/api/subquestion/<int:qi>/<int:si>")
 def api_delete_subquestion(qi: int, si: int):
     """删除单个子题（大题至少保留 1 个子题）"""
     global _dirty
-    if qi < 0 or qi >= len(_questions):
-        return jsonify({"error": "not found"}), 404
-    q = _questions[qi]
-    if si < 0 or si >= len(q.sub_questions):
-        return jsonify({"error": "not found"}), 404
-    if len(q.sub_questions) <= 1:
-        return jsonify({"error": "大题至少保留一个子题，如需删除整题请用删除大题"}), 400
-    q.sub_questions.pop(si)
-    _dirty = True
-    return jsonify({"ok": True, "sub_total": len(q.sub_questions)})
+    with _write_lock:
+        if qi < 0 or qi >= len(_questions):
+            return jsonify({"error": "not found"}), 404
+        q = _questions[qi]
+        if si < 0 or si >= len(q.sub_questions):
+            return jsonify({"error": "not found"}), 404
+        if len(q.sub_questions) <= 1:
+            return jsonify({"error": "大题至少保留一个子题，如需删除整题请用删除大题"}), 400
+        q.sub_questions.pop(si)
+        _dirty = True
+        return jsonify({"ok": True, "sub_total": len(q.sub_questions)})
 
 
 @app.post("/api/question")
 def api_create_question():
     """新建大题（复制结构模板，内容清空）"""
     global _dirty
-    if not _questions:
-        return jsonify({"error": "题库为空，无法创建"}), 400
     data = request.get_json() or {}
+    with _write_lock:
+        if not _questions:
+            return jsonify({"error": "题库为空，无法创建"}), 400
 
-    tmpl_q  = copy.deepcopy(_questions[0])
-    tmpl_sq = copy.deepcopy(tmpl_q.sub_questions[0])
+        tmpl_q  = copy.deepcopy(_questions[0])
+        tmpl_sq = copy.deepcopy(tmpl_q.sub_questions[0])
 
-    tmpl_q.mode  = data.get("mode",  tmpl_q.mode)
-    tmpl_q.unit  = data.get("unit",  tmpl_q.unit)
-    tmpl_q.cls   = ""
-    tmpl_q.stem  = ""
-    tmpl_q.shared_options = []
+        tmpl_q.mode  = data.get("mode",  tmpl_q.mode)
+        tmpl_q.unit  = data.get("unit",  tmpl_q.unit)
+        tmpl_q.cls   = ""
+        tmpl_q.stem  = ""
+        tmpl_q.shared_options = []
 
-    for attr in ("text", "answer", "discuss", "point"):
-        try: setattr(tmpl_sq, attr, "")
+        for attr in ("text", "answer", "discuss", "point"):
+            try: setattr(tmpl_sq, attr, "")
+            except: pass
+        for attr in ("rate", "ai_answer", "ai_discuss", "ai_confidence",
+                     "ai_model", "eff_answer", "eff_discuss"):
+            try: setattr(tmpl_sq, attr, None)
+            except: pass
+        tmpl_sq.options = ["", "", "", ""]
+        try: tmpl_sq.answer_source  = "manual"
         except: pass
-    for attr in ("rate", "ai_answer", "ai_discuss", "ai_confidence",
-                 "ai_model", "eff_answer", "eff_discuss"):
-        try: setattr(tmpl_sq, attr, None)
+        try: tmpl_sq.discuss_source = "manual"
         except: pass
-    tmpl_sq.options = ["", "", "", ""]
-    try: tmpl_sq.answer_source  = "manual"
-    except: pass
-    try: tmpl_sq.discuss_source = "manual"
-    except: pass
-    tmpl_q.sub_questions = [tmpl_sq]
+        tmpl_q.sub_questions = [tmpl_sq]
 
-    _questions.append(tmpl_q)
-    qi = len(_questions) - 1
-    _dirty = True
-    return jsonify({"ok": True, "qi": qi})
+        _questions.append(tmpl_q)
+        qi = len(_questions) - 1
+        _dirty = True
+        return jsonify({"ok": True, "qi": qi})
 
 
 @app.post("/api/question/<int:qi>/subquestion")
 def api_add_subquestion(qi: int):
     """给大题追加一个新子题"""
     global _dirty
-    if qi < 0 or qi >= len(_questions):
-        return jsonify({"error": "not found"}), 404
-    q = _questions[qi]
-    tmpl = copy.deepcopy(q.sub_questions[0])
-    for attr in ("text", "answer", "discuss", "point"):
-        try: setattr(tmpl, attr, "")
+    with _write_lock:
+        if qi < 0 or qi >= len(_questions):
+            return jsonify({"error": "not found"}), 404
+        q = _questions[qi]
+        tmpl = copy.deepcopy(q.sub_questions[0])
+        for attr in ("text", "answer", "discuss", "point"):
+            try: setattr(tmpl, attr, "")
+            except: pass
+        for attr in ("rate", "ai_answer", "ai_discuss", "ai_confidence",
+                     "ai_model", "eff_answer", "eff_discuss"):
+            try: setattr(tmpl, attr, None)
+            except: pass
+        try: tmpl.answer_source  = "manual"
         except: pass
-    for attr in ("rate", "ai_answer", "ai_discuss", "ai_confidence",
-                 "ai_model", "eff_answer", "eff_discuss"):
-        try: setattr(tmpl, attr, None)
+        try: tmpl.discuss_source = "manual"
         except: pass
-    try: tmpl.answer_source  = "manual"
-    except: pass
-    try: tmpl.discuss_source = "manual"
-    except: pass
-    q.sub_questions.append(tmpl)
-    si = len(q.sub_questions) - 1
-    _dirty = True
-    return jsonify({"ok": True, "si": si, "sub_total": len(q.sub_questions)})
+        q.sub_questions.append(tmpl)
+        si = len(q.sub_questions) - 1
+        _dirty = True
+        return jsonify({"ok": True, "si": si, "sub_total": len(q.sub_questions)})
 
 
 @app.post("/api/replace/preview")
@@ -331,7 +422,7 @@ def api_replace_preview():
 
 @app.post("/api/replace")
 def api_replace():
-    """批量文本替换（Bug fix：移除了错误引用的 fp_kw 变量）"""
+    """批量文本替换"""
     global _dirty
     data    = request.get_json() or {}
     find    = data.get("find", "")
@@ -343,32 +434,33 @@ def api_replace():
     if not find:
         return jsonify({"error": "find 不能为空"}), 400
 
-    count = 0
-    for q in _questions:
-        if mode and q.mode != mode: continue
-        if unit and unit not in (q.unit or ""): continue
-        for sq in q.sub_questions:
-            for field in fields:
-                val = getattr(sq, field, "") or ""
-                if find in val:
-                    setattr(sq, field, val.replace(find, replace))
-                    count += 1
-
-    if count:
-        _dirty = True
+    with _write_lock:
+        count = 0
+        for q in _questions:
+            if mode and q.mode != mode: continue
+            if unit and unit not in (q.unit or ""): continue
+            for sq in q.sub_questions:
+                for field in fields:
+                    val = getattr(sq, field, "") or ""
+                    if find in val:
+                        setattr(sq, field, val.replace(find, replace))
+                        count += 1
+        if count:
+            _dirty = True
     return jsonify({"ok": True, "replaced": count})
 
 
 @app.post("/api/save")
 def api_save():
     global _dirty
-    try:
-        from med_exam_toolkit.bank import save_bank
-        save_bank(_questions, _bank_path, _password)
-        _dirty = False
-        return jsonify({"ok": True, "path": str(_bank_path)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+    with _write_lock:
+        try:
+            from med_exam_toolkit.bank import save_bank
+            save_bank(_questions, _bank_path, _password)
+            _dirty = False
+            return jsonify({"ok": True, "path": str(_bank_path)})
+        except Exception as e:
+            return jsonify({"error": str(e)}), 500
 
 
 @app.post("/api/shutdown")
@@ -384,7 +476,7 @@ def api_shutdown():
 
 @app.get("/")
 def index():
-    return render_template("editor.html")
+    return render_template("editor.html", session_token=_session_token)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -395,21 +487,32 @@ def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
                  no_browser: bool = False, password: str | None = None) -> None:
     from med_exam_toolkit.bank import load_bank
 
-    global _questions, _bank_path, _password
-    _bank_path = Path(bank_path).resolve()
-    _password  = password
+    global _questions, _bank_path, _password, _session_token, _server_port, _server_host
+    _bank_path     = Path(bank_path).resolve()
+    _password      = password
+    _server_port   = port
+    _server_host   = host
+    _session_token = secrets.token_hex(32)
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
     print(f"[INFO] 已加载 {len(_questions)} 道大题")
 
-    url = f"http://127.0.0.1:{port}"
-    print(f"[INFO] 编辑器启动: {url}")
-    print(f"[INFO] 按 Ctrl+C 退出")
+    local_url = f"http://127.0.0.1:{port}"
+    print(f"[INFO] 本机访问: {local_url}")
+    if host == "0.0.0.0":
+        lan_ip  = _get_lan_ip()
+        lan_url = f"http://{lan_ip}:{port}"
+        print(f"[INFO] 局域网访问: {lan_url}  （同网段其他设备可用此地址）")
+        print("[WARN] ⚠️  编辑器已开放局域网访问，所有持有 Token 的用户均可修改题库。")
+        print("[WARN]    建议仅在受信任的私有网络中使用，不要暴露到公网。")
+    print("[INFO] 按 Ctrl+C 退出")
 
     if not no_browser:
-        threading.Timer(0.8, lambda: webbrowser.open(url)).start()
+        threading.Timer(0.8, lambda: webbrowser.open(local_url)).start()
 
-    app.run(host=host, port=port, debug=False, use_reloader=False)
+    # threaded=True：每个请求在独立线程中处理，支持多用户并发访问
+    # 写操作已通过 _write_lock (RLock) 保护，读操作无锁并发安全
+    app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":
