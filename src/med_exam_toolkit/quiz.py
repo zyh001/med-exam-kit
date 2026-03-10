@@ -2,22 +2,111 @@
 from __future__ import annotations
 import json as _json
 import random
+import secrets
+import socket
 import threading
+import time
 import webbrowser
-from collections import defaultdict
+from collections import defaultdict, deque
 from pathlib import Path
 from flask import Flask, jsonify, request, render_template
 from flask_compress import Compress
 
-_questions: list = []
-_bank_path: Path | None = None
-_password:  str  | None = None
+_questions:     list        = []
+_bank_path:     Path | None = None
+_password:      str  | None = None
+_session_token: str         = ""   # 启动时由 start_quiz() 生成
+_server_port:   int         = 5174
+_server_host:   str         = "127.0.0.1"  # 绑定地址，影响 Host 校验策略
+
+# ── 速率限制：滑动窗口，每 IP 最多 120 次/分钟 ──
+_RATE_LIMIT  = 120
+_RATE_WINDOW = 60   # 秒
+_rate_buckets: dict[str, deque] = defaultdict(deque)
+_rate_lock   = threading.Lock()
+
+
+def _check_rate_limit(ip: str) -> bool:
+    """返回 True 表示允许，False 表示超限。"""
+    now = time.monotonic()
+    with _rate_lock:
+        q = _rate_buckets[ip]
+        while q and now - q[0] > _RATE_WINDOW:
+            q.popleft()
+        if len(q) >= _RATE_LIMIT:
+            return False
+        q.append(now)
+        return True
+
+
+def _get_lan_ip() -> str:
+    """获取本机局域网 IP，失败时回退到 127.0.0.1。"""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+            s.connect(("8.8.8.8", 80))
+            return s.getsockname()[0]
+    except OSError:
+        return "127.0.0.1"
 
 
 def _create_app() -> Flask:
     app = Flask(__name__, template_folder="templates")
     app.config["JSON_AS_ASCII"] = False
     Compress(app)
+
+    @app.before_request
+    def _guard():
+        # 1. 放行首页 HTML（浏览器直接访问，尚未拿到 token）
+        if request.path == "/" and request.method == "GET":
+            return None
+
+        # 2. Host 头校验 —— 阻断 DNS 重绑定攻击
+        #
+        #   策略根据绑定地址分两种：
+        #   • 仅本机 (127.0.0.1)：严格白名单，只接受 127.0.0.1 / localhost
+        #   • 局域网 (0.0.0.0)：只校验端口是否匹配，不限制主机名
+        #     （此时用户已主动开放网络，Token 是主要防线）
+        host_header = request.headers.get("Host", "")
+        # 提取 Host 头中的端口（格式可能是 "hostname:port" 或 "hostname"）
+        if ":" in host_header:
+            host_name, host_port_str = host_header.rsplit(":", 1)
+            try:
+                host_port = int(host_port_str)
+            except ValueError:
+                host_port = None
+        else:
+            host_name  = host_header
+            host_port  = None  # 浏览器省略默认端口时
+
+        if _server_host in ("127.0.0.1", "localhost"):
+            # 严格模式：只允许回环地址，阻断所有外部域名重绑定
+            allowed = {
+                f"127.0.0.1:{_server_port}",
+                f"localhost:{_server_port}",
+                "127.0.0.1",
+                "localhost",
+            }
+            if host_header not in allowed:
+                return jsonify({"error": "Forbidden"}), 403
+        else:
+            # 宽松模式：只验证端口，拒绝端口不匹配的请求
+            # （防止请求被误路由到其他服务，Token 提供主要认证）
+            if host_port is not None and host_port != _server_port:
+                return jsonify({"error": "Forbidden"}), 403
+
+        # 3. API 路由：校验 Session Token
+        if request.path.startswith("/api/"):
+            token = request.headers.get("X-Session-Token", "")
+            if not secrets.compare_digest(token, _session_token):
+                return jsonify({"error": "Unauthorized"}), 401
+
+            # 4. 速率限制
+            ip = request.remote_addr or "unknown"
+            if not _check_rate_limit(ip):
+                return jsonify({"error": "Too Many Requests"}), 429
+
+        return None
+
     return app
 
 
@@ -340,26 +429,39 @@ def api_questions():
 
 @app.get("/")
 def index():
-    return render_template("quiz.html")
+    return render_template("quiz.html", session_token=_session_token)
 
 
 def start_quiz(bank_path: str, port: int = 5174, host: str = "127.0.0.1",
                no_browser: bool = False, password: str | None = None) -> None:
     """启动医考练习 Web 应用"""
     from med_exam_toolkit.bank import load_bank
-    global _questions, _bank_path, _password
-    _bank_path = Path(bank_path).resolve()
-    _password  = password
+    global _questions, _bank_path, _password, _session_token, _server_port, _server_host
+    _bank_path     = Path(bank_path).resolve()
+    _password      = password
+    _server_port   = port
+    _server_host   = host
+    _session_token = secrets.token_hex(32)   # 每次启动生成新 token
+
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
     sq_total = sum(len(q.sub_questions) for q in _questions)
     print(f"[INFO] 共 {len(_questions)} 大题 / {sq_total} 小题")
-    url = f"http://127.0.0.1:{port}"
-    print(f"[INFO] 做题应用已启动: {url}")
+
+    local_url = f"http://127.0.0.1:{port}"
+    print(f"[INFO] 本机访问: {local_url}")
+    if host == "0.0.0.0":
+        lan_ip  = _get_lan_ip()
+        lan_url = f"http://{lan_ip}:{port}"
+        print(f"[INFO] 局域网访问: {lan_url}  （同网段其他设备可用此地址）")
     print("[INFO] Ctrl+C 退出")
+
+    open_url = local_url
     if not no_browser:
-        threading.Timer(0.9, lambda: webbrowser.open(url)).start()
-    app.run(host=host, port=port, debug=False, use_reloader=False)
+        threading.Timer(0.9, lambda: webbrowser.open(open_url)).start()
+
+    # threaded=True：每个请求在独立线程中处理，支持多用户并发访问
+    app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
 
 if __name__ == "__main__":
