@@ -1,6 +1,6 @@
 [project]
 name = "med-exam-toolkit"
-version = "0.1.7-R260310"
+version = "0.1.7-R260312"
 requires-python = ">=3.10"
 description = "医学考试题目处理工具，支持题目去重、过滤、题库构建、自动组卷及多格式导出"
 readme = "README.md"
