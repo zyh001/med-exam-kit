@@ -1,0 +1,67 @@
+/* ================================================================
+   common.css  医考工具公共样式
+   quiz.html 与 editor.html 共同引用
+   ================================================================ */
+
+/* ── 共同 CSS 变量（两页面值完全相同的变量） ─────────────────────── */
+:root,[data-theme="dark"]{
+  --bg: #0d1117;
+  --surface: #161b22;
+  --card: #21262d;
+  --border: #30363d;
+  --text: #e6edf3;
+  --muted: #7d8590;
+  --accent: #4493f8;
+  --accent-bg: rgba(68,147,248,.12);
+  --success: #3fb950;
+  --success-bg: rgba(63,185,80,.12);
+  --danger: #f85149;
+  --danger-bg: rgba(248,81,73,.12);
+  --warning: #d29922;
+  --warn-bg: rgba(210,153,34,.12);
+  --shadow: 0 8px 32px rgba(0,0,0,.5);
+}
+
+[data-theme="light"]{
+  --bg: #f0f4f8;
+  --surface: #ffffff;
+  --card: #f6f8fa;
+  --border: #d0d7de;
+  --text: #1f2328;
+  --muted: #656d76;
+  --accent: #0969da;
+  --accent-bg: rgba(9,105,218,.1);
+  --success: #1a7f37;
+  --success-bg: rgba(26,127,55,.1);
+  --danger: #cf222e;
+  --danger-bg: rgba(207,34,46,.1);
+  --warning: #9a6700;
+  --warn-bg: rgba(154,103,0,.1);
+  --shadow: 0 4px 16px rgba(0,0,0,.12);
+  --shadow-sm: 0 2px 6px rgba(0,0,0,.08);
+}
+
+/* ── Reset ── */
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html{
+  height:100%;
+  /* iOS Safari：必须同时设 html 的 overflow，否则依然可以拖动 */
+  overflow:hidden;
+  overscroll-behavior:none;
+  background:var(--bg);
+}
+body{
+  width:100%;height:100%;
+  overflow:hidden;
+  overscroll-behavior:none;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
+  font-size:15px;line-height:1.6;
+  transition:background .25s,color .25s;
+  user-select:none;
+  -webkit-user-select:none;
+}
+
+/* ── 滚动条 ─────────────────────────────────────────────────────── */
+
