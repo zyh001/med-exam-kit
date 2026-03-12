@@ -21,6 +21,7 @@ _bank_path:     Path | None = None
 _dirty                      = False
 _password:      str  | None = None
 _session_token: str         = ""
+_asset_ver:     str         = ""     # 静态文件版本号，用于缓存破坏
 _server_port:   int         = 5173
 _server_host:   str         = "127.0.0.1"
 
@@ -58,7 +59,7 @@ def _get_lan_ip() -> str:
         return "127.0.0.1"
 
 
-app = Flask(__name__, template_folder="templates")
+app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["JSON_AS_ASCII"] = False
 Compress(app)
 
@@ -476,7 +477,7 @@ def api_shutdown():
 
 @app.get("/")
 def index():
-    return render_template("editor.html", session_token=_session_token)
+    return render_template("editor.html", session_token=_session_token, asset_ver=_asset_ver)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -487,12 +488,13 @@ def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
                  no_browser: bool = False, password: str | None = None) -> None:
     from med_exam_toolkit.bank import load_bank
 
-    global _questions, _bank_path, _password, _session_token, _server_port, _server_host
+    global _questions, _bank_path, _password, _session_token, _asset_ver, _server_port, _server_host
     _bank_path     = Path(bank_path).resolve()
     _password      = password
     _server_port   = port
     _server_host   = host
     _session_token = secrets.token_hex(32)
+    _asset_ver     = secrets.token_hex(8)    # 每次启动刷新缓存
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
     print(f"[INFO] 已加载 {len(_questions)} 道大题")

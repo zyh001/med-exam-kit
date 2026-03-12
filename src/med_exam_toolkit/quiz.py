@@ -16,6 +16,7 @@ _bank_path:      Path | None = None
 _db_path:        Path | None = None   # 进度数据库（与题库同目录，.progress.db）
 _password:       str  | None = None
 _session_token:  str         = ""
+_asset_ver:      str         = ""     # 静态文件版本号，用于缓存破坏
 _server_port:    int         = 5174
 _server_host:    str         = "127.0.0.1"
 _record_enabled: bool        = True   # --no-record 时为 False
@@ -57,7 +58,7 @@ def _get_user_id() -> str:
 
 
 def _create_app() -> Flask:
-    app = Flask(__name__, template_folder="templates")
+    app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_AS_ASCII"] = False
     Compress(app)
 
@@ -519,7 +520,8 @@ def api_questions():
 @app.get("/")
 def index():
     uid = request.cookies.get("med_exam_uid", "")
-    resp = make_response(render_template("quiz.html", session_token=_session_token))
+    resp = make_response(render_template(
+        "quiz.html", session_token=_session_token, asset_ver=_asset_ver))
     if not uid:
         # 首次访问：生成并写入持久 Cookie（有效期 1 年）
         uid = secrets.token_hex(16)   # 32 位十六进制，每用户独立
@@ -542,7 +544,7 @@ def start_quiz(
 ) -> None:
     """启动医考练习 Web 应用"""
     from med_exam_toolkit.bank import load_bank
-    global _questions, _bank_path, _password, _session_token, \
+    global _questions, _bank_path, _password, _session_token, _asset_ver, \
            _server_port, _server_host, _db_path, _record_enabled
 
     _bank_path      = Path(bank_path).resolve()
@@ -550,6 +552,7 @@ def start_quiz(
     _server_port    = port
     _server_host    = host
     _session_token  = secrets.token_hex(32)
+    _asset_ver      = secrets.token_hex(8)    # 每次启动刷新，强制浏览器拉新静态文件
     _record_enabled = not no_record
 
     print(f"[INFO] 加载题库: {_bank_path}")
