@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="{{ default_theme | default('light') }}">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+{% block head_meta %}{% endblock %}
+<title>{% block title %}医考工具{% endblock %}</title>
+<link rel="stylesheet" href="{{ url_for('static', filename='common.css') }}?v={{ asset_ver }}">
+{% block page_css %}{% endblock %}
+</head>
+<body>
+
+{% block body %}{% endblock %}
+
+<!--
+  SESSION_TOKEN 必须内联：它是每次启动动态生成的 Jinja2 变量，
+  无法放入静态文件。common.js 通过 window.SESSION_TOKEN 读取。
+-->
+<script>window.SESSION_TOKEN = "{{ session_token }}";</script>
+<script src="{{ url_for('static', filename='common.js') }}?v={{ asset_ver }}"></script>
+{% block page_js %}{% endblock %}
+</body>
+</html>
