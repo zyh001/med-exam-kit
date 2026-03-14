@@ -13,6 +13,7 @@ from typing import Any
 
 from med_exam_toolkit.ai.checkpoint import Checkpoint
 from med_exam_toolkit.ai.client import make_client
+from med_exam_toolkit.ai.cost import CostTracker, estimate_task_cost
 from med_exam_toolkit.ai.prompt import build_subquestion_prompt
 from med_exam_toolkit.ai.result import apply_to_subquestion, parse_response, validate_result
 from med_exam_toolkit.bank import load_bank, save_bank
@@ -126,6 +127,7 @@ class BankEnricher:
         )
         self._questions: list[Question] = []
         self._start_time: float = 0.0
+        self._tracker = CostTracker(model=model)  # token 用量累加器
 
     # ─────────────────────────────── 入口 ───────────────────────────────
 
@@ -167,6 +169,11 @@ class BankEnricher:
             self._ckpt.clear()
         else:
             print(f"  ⚠️  {failed} 个小题调用失败，断点已保留，下次 --resume 可续跑")
+
+        # ── Token 用量 & 费用统计 ──
+        if self._tracker.requests > 0:
+            print(f"\n{self._tracker.summary(elapsed_sec=elapsed)}")
+            print(f"  {'═'*50}")
 
     # ─────────────────────────────── 加载 ───────────────────────────────
 
@@ -306,6 +313,51 @@ class BankEnricher:
             in_p = self.output_path == self.bank_path
             print(f"  输出路径:  {self.output_path}{'（就地修改）' if in_p else ''}")
         print(f"{'═' * _W}\n")
+
+        # ── 费用预估（仅对 pending 任务估算，已命中缓存的不计费）──
+        if pending:
+            self._print_cost_estimate(pending, questions)
+
+    def _print_cost_estimate(self, pending: list[dict], questions: list[Question]) -> None:
+        """打印费用预估（dry-run 和正式运行前均显示）。"""
+        from med_exam_toolkit.ai.cost import lookup_price
+        try:
+            est = estimate_task_cost(
+                model=self.model,
+                tasks=pending,
+                questions=questions,
+                enable_thinking=self.enable_thinking,
+            )
+        except Exception:
+            return  # 估算失败不影响主流程
+
+        price = lookup_price(self.model)
+
+        print(f"  💰 费用预估（基于待处理 {est['total_tasks']} 个小题）")
+        print(f"  {'─'*_W}")
+        print(f"  模型定价:    {est['price_note']}", end="")
+        if price and (price.input > 0 or price.output > 0):
+            print(f"  (输入 ${price.input:.3f}/1M, 输出 ${price.output:.3f}/1M)")
+        else:
+            print()
+        print(f"  预估输入:    {est['est_input_tokens']:>10,} tokens")
+        print(f"  预估输出:    {est['est_output_tokens']:>10,} tokens")
+        print(f"  预估合计:    {est['est_total_tokens']:>10,} tokens")
+
+        cost = est["est_cost_usd"]
+        if cost is not None:
+            cny = cost * 7.2
+            if cost == 0.0:
+                print(f"  预估费用:    免费（本地部署）")
+            else:
+                print(f"  预估费用:    ${cost:.4f} USD  ≈ ¥{cny:.2f} CNY")
+                per_task = cost / est["total_tasks"] if est["total_tasks"] else 0
+                print(f"  单题均价:    ${per_task:.5f} USD")
+        else:
+            print(f"  预估费用:    未知定价，请参考 {self.model} 官方定价")
+        print(f"  {'─'*_W}")
+        print(f"  ⚠️  以上为粗略估算（实际用量以账单为准），输出 token 按均值估算")
+        print(f"  {'═'*_W}\n")
 
     def _dry_run_preview(self, pending: list[dict], questions: list[Question]) -> None:
         print(f"  [DRY-RUN] 将处理 {len(pending)} 个小题（不实际调用 AI）\n")
@@ -522,13 +574,17 @@ class BankEnricher:
 
                 # 不可重试，或已达最大次数
                 logger.warning("AI 请求异常: %s", exc)
+                self._tracker.add_failure()
                 return None
         else:
             # for-else：重试次数耗尽仍未成功
             logger.warning("AI 请求达到最大重试次数，放弃: %s", last_exc)
+            self._tracker.add_failure()
             return None
 
         content, reasoning_text = extract_response_text(response)
+        # 记录实际 token 用量（线程安全）
+        self._tracker.add_response(response)
 
         if reasoning_text:
             logger.debug("推理过程 (%d chars): %s…", len(reasoning_text), reasoning_text[:100])
