@@ -11,6 +11,7 @@ from med_exam_toolkit.bank import save_bank, load_bank
 from med_exam_toolkit.filters import FilterCriteria, apply_filters
 from med_exam_toolkit.exporters import discover as discover_exporters, get_exporter
 from med_exam_toolkit.exam import ExamConfig, ExamGenerator, ExamGenerationError, ExamDocxExporter
+from med_exam_toolkit.parsers import DEFAULT_PARSER_MAP
 
 def _load_config(config_path: str) -> dict:
     p = Path(config_path)
@@ -83,10 +84,7 @@ def export(ctx, input_dir, output_dir, formats, split_options, dedup, strategy,
     input_dir = input_dir or cfg.get("input_dir", "./data/raw")
     output_dir = output_dir or cfg.get("output_dir", "./data/output")
     strategy = strategy or cfg.get("dedup_strategy", "strict")
-    parser_map = cfg.get("parser_map", {
-        "com.ahuxueshu": "ahuyikao",
-        "com.yikaobang.yixue": "yikaobang",
-    })
+    parser_map = cfg.get("parser_map", DEFAULT_PARSER_MAP)
 
     if not formats:
         export_cfg = cfg.get("export", {})
@@ -195,10 +193,7 @@ def generate(ctx, input_dir, output, title, subtitle, cls, unit, mode, count, co
 
     cfg = ctx.obj["config"]
     input_dir = input_dir or cfg.get("input_dir", "./data/raw")
-    parser_map = cfg.get("parser_map", {
-        "com.ahuxueshu": "ahuyikao",
-        "com.yikaobang.yixue": "yikaobang",
-    })
+    parser_map = cfg.get("parser_map", DEFAULT_PARSER_MAP)
 
     # 加载题库
     if bank:
@@ -276,10 +271,7 @@ def build(ctx, input_dir, output, password, strategy, rebuild):
     """构建题库缓存 (.mqb), 已有文件时自动追加去重"""
     cfg = ctx.obj["config"]
     input_dir = input_dir or cfg.get("input_dir", "./data/raw")
-    parser_map = cfg.get("parser_map", {
-        "com.ahuxueshu": "ahuyikao",
-        "com.yikaobang.yixue": "yikaobang",
-    })
+    parser_map = cfg.get("parser_map", DEFAULT_PARSER_MAP)
 
     bank_path = Path(output).with_suffix(".mqb")
     existing = []
@@ -335,10 +327,7 @@ def info(ctx, input_dir, bank, password):
     """仅查看统计信息，不导出"""
     cfg = ctx.obj["config"]
     input_dir = input_dir or cfg.get("input_dir", "./data/raw")
-    parser_map = cfg.get("parser_map", {
-        "com.ahuxueshu": "ahuyikao",
-        "com.yikaobang.yixue": "yikaobang",
-    })
+    parser_map = cfg.get("parser_map", DEFAULT_PARSER_MAP)
 
     if bank:
         questions = load_bank(Path(bank), password)
@@ -525,10 +514,7 @@ def enrich(bank, input_dir, output, password, provider, model, api_key, base_url
 
     ctx_cfg    = click.get_current_context().obj.get("config", {})
     ai_cfg     = ctx_cfg.get("ai", {})
-    parser_map = ctx_cfg.get("parser_map", {
-        "com.ahuxueshu":       "ahuyikao",
-        "com.yikaobang.yixue": "yikaobang",
-    })
+    parser_map = ctx_cfg.get("parser_map", DEFAULT_PARSER_MAP)
 
     # 参数优先级：命令行 > config.yaml > 默认值
     provider       = provider       or ai_cfg.get("provider",       "openai")
