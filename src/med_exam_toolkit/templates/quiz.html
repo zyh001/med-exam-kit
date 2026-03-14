@@ -28,7 +28,11 @@
           <div class="brand-sub" id="home-bank-name">加载中…</div>
         </div>
       </div>
-      <button class="icon-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
+      <div class="topbar-right">
+        <span id="sync-badge" class="sync-badge" style="display:none"></span>
+        <button id="sync-now-btn" class="sync-now-btn" onclick="syncNow()" style="display:none" title="立即同步到服务端">立即同步</button>
+        <button class="icon-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
+      </div>
     </div>
     <div class="bank-card">
       <div class="bank-card-name">
@@ -370,9 +374,11 @@
       查看答案 ↓
     </button>
     <!-- 自评按钮 -->
+    <!-- 自评按钮（三档：忘了 / 模糊 / 记住了） -->
     <div class="memo-rate-row hidden" id="memo-rate-row">
-      <button class="memo-rate-btn again" onclick="memoAgain()">↺ 再练一次</button>
-      <button class="memo-rate-btn know"  onclick="memoKnow()">✓ 已掌握</button>
+      <button class="memo-rate-btn again" onclick="memoAgain()" title="完全不记得 (R)">✗ 忘了</button>
+      <button class="memo-rate-btn hard"  onclick="memoHard()"  title="有印象但不确定 (H)">△ 模糊</button>
+      <button class="memo-rate-btn know"  onclick="memoKnow()"  title="轻松答出 (Enter)">✓ 记住了</button>
     </div>
   </div>
 </div>
@@ -503,5 +509,6 @@
 {% endblock %}
 
 {% block page_js %}
+<script src="{{ url_for('static', filename='quiz_sync.js') }}?v={{ asset_ver }}"></script>
 <script src="{{ url_for('static', filename='quiz.js') }}?v={{ asset_ver }}"></script>
 {% endblock %}

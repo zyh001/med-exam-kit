@@ -165,7 +165,13 @@ def record_session(db_path: Path, session: dict, user_id: str = LEGACY_USER) -> 
                  item.get("mode"), item.get("unit"), now_ms),
             )
             if res != -1:
-                _update_sm2(c, user_id, fp, 4 if res == 1 else 1, today)
+                # 优先使用 item 中携带的 SM-2 quality（0-5），
+                # 背题模式会传入精确评分；练习/考试模式回退到二值映射
+                quality = item.get("quality")
+                if quality is None:
+                    quality = 4 if res == 1 else 1
+                quality = max(0, min(5, int(quality)))
+                _update_sm2(c, user_id, fp, quality, today)
 
 
 def _update_sm2(c, user_id: str, fingerprint: str, quality: int, today: str) -> None:
@@ -193,6 +199,89 @@ def _update_sm2(c, user_id: str, fingerprint: str, quality: int, today: str) -> 
         (user_id, fingerprint, ef, interval, reps, next_due,
          int(time.time()*1000)),
     )
+
+
+def record_sessions_batch(
+    db_path: Path,
+    sessions: list[dict],
+    user_id: str = LEGACY_USER,
+) -> dict:
+    """批量写入多条答题会话（供离线同步端点使用）。
+
+    - 已存在的 session_id 用 INSERT OR IGNORE 跳过（不覆盖服务端已有记录）
+    - attempts 同理：重复 (user_id, fingerprint, session_id) 由 UNIQUE INDEX 去重
+    - 返回 {processed: [session_id, ...], skipped: [session_id, ...]}
+    """
+    processed: list[str] = []
+    skipped:   list[str] = []
+    today = date.today().isoformat()
+    now_ms = int(time.time() * 1000)
+
+    with _open(db_path) as c:
+        for session in sessions:
+            sid = session.get("id")
+            if not sid:
+                continue
+
+            # 检查 session 是否已存在（离线重传场景）
+            exists = c.execute(
+                "SELECT 1 FROM sessions WHERE user_id=? AND id=?", (user_id, sid)
+            ).fetchone()
+            if exists:
+                skipped.append(sid)
+                continue
+
+            # 写入 session 行
+            c.execute(
+                """INSERT OR IGNORE INTO sessions
+                   (id,user_id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (sid, user_id, session.get("mode"),
+                 session.get("total", 0), session.get("correct", 0),
+                 session.get("wrong", 0), session.get("skip", 0),
+                 session.get("time_sec", 0), session.get("date", today),
+                 json.dumps(session.get("units", []), ensure_ascii=False), now_ms),
+            )
+
+            # 写入 attempts + 更新 SM-2
+            for item in session.get("items", []):
+                fp  = item.get("fingerprint")
+                res = item.get("result", -1)
+                if not fp:
+                    continue
+                try:
+                    c.execute(
+                        """INSERT INTO attempts
+                           (user_id,fingerprint,session_id,result,mode,unit,ts)
+                           VALUES (?,?,?,?,?,?,?)""",
+                        (user_id, fp, sid, res,
+                         item.get("mode"), item.get("unit"), now_ms),
+                    )
+                except Exception:
+                    pass  # 重复 attempt，跳过
+                if res != -1:
+                    quality = item.get("quality")
+                    if quality is None:
+                        quality = 4 if res == 1 else 1
+                    quality = max(0, min(5, int(quality)))
+                    _update_sm2(c, user_id, fp, quality, today)
+
+            processed.append(sid)
+
+    return {"processed": processed, "skipped": skipped}
+
+
+def get_sync_status(db_path: Path, user_id: str = LEGACY_USER) -> dict:
+    """返回数据库中该用户的会话数和最近同步时间，供前端展示。"""
+    with _open(db_path) as c:
+        row = c.execute(
+            "SELECT COUNT(*) AS cnt, MAX(ts) AS last_ts FROM sessions WHERE user_id=?",
+            (user_id,),
+        ).fetchone()
+    return {
+        "session_count": row["cnt"] if row else 0,
+        "last_ts":       row["last_ts"] if row else None,
+    }
 
 
 def clear_user_data(db_path: Path, user_id: str) -> dict:

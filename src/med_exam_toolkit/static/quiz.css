@@ -68,6 +68,43 @@ input,select{font-family:inherit;outline:none}
 }
 .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
 
+/* ── 同步状态角标 & 手动同步按钮 ──────────────────────────────────── */
+.topbar-right{
+  display:flex;align-items:center;gap:8px;
+}
+.sync-badge{
+  font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;
+  white-space:nowrap;transition:background .2s,color .2s;
+}
+.sync-badge[data-status="offline"]{
+  background:rgba(255,160,0,.15);color:#e07800;
+  border:1px solid rgba(255,160,0,.3);
+}
+[data-theme="light"] .sync-badge[data-status="offline"]{
+  background:rgba(220,120,0,.1);color:#c06000;
+}
+.sync-badge[data-status="pending"]{
+  background:rgba(68,147,248,.12);color:var(--accent);
+  border:1px solid rgba(68,147,248,.25);
+}
+.sync-badge[data-status="syncing"]{
+  background:rgba(68,147,248,.08);color:var(--accent);
+  border:1px solid rgba(68,147,248,.15);
+  animation:sync-pulse 1s ease-in-out infinite;
+}
+@keyframes sync-pulse{
+  0%,100%{opacity:1}
+  50%{opacity:.5}
+}
+.sync-now-btn{
+  font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;
+  background:var(--accent);color:#fff;border:none;
+  transition:opacity .15s;white-space:nowrap;
+}
+.sync-now-btn:hover{opacity:.85}
+.sync-now-btn:disabled{opacity:.45;cursor:not-allowed}
+
+
 .bank-card{
   margin:0 20px 24px;padding:14px 18px;
   background:var(--card);border:1px solid var(--border);border-radius:var(--r);
@@ -606,14 +643,22 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .memo-reveal-btn.hidden{display:none}
 
 /* 自评按钮 */
-.memo-rate-row{display:flex;gap:12px;width:100%;max-width:700px;flex-shrink:0}
+.memo-rate-row{display:flex;gap:8px;width:100%;max-width:700px;flex-shrink:0}
 .memo-rate-row.hidden{display:none}
 .memo-rate-btn{
-  flex:1;padding:14px;border-radius:12px;font-size:14px;font-weight:700;
+  flex:1;padding:14px 8px;border-radius:12px;font-size:13px;font-weight:700;
   transition:all .2s;border:2px solid;
 }
 .memo-rate-btn.again{background:var(--danger-bg);color:var(--danger);border-color:var(--danger)}
 .memo-rate-btn.again:hover{background:var(--danger);color:#fff}
+.memo-rate-btn.hard{
+  background:rgba(255,160,0,.12);color:#c07000;border-color:rgba(255,160,0,.5);
+}
+.memo-rate-btn.hard:hover{background:#f59e0b;color:#fff;border-color:#f59e0b}
+[data-theme="dark"] .memo-rate-btn.hard{
+  background:rgba(255,180,0,.1);color:#f0a030;border-color:rgba(255,180,0,.4);
+}
+[data-theme="dark"] .memo-rate-btn.hard:hover{background:#b45309;color:#fff;border-color:#b45309}
 .memo-rate-btn.know{background:var(--success-bg);color:var(--success);border-color:var(--success)}
 .memo-rate-btn.know:hover{background:var(--success);color:#fff}
 
