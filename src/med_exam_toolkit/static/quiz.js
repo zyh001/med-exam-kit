@@ -274,6 +274,15 @@ async function init() {
   }
   // 异步加载徽章（不阻塞主界面显示）
   _refreshProgressBadges();
+
+  // 注册离线同步状态回调：pending 数变化时更新角标
+  if (typeof SyncManager !== 'undefined') {
+    SyncManager.onStateChange(syncState => {
+      _updateSyncBadge(syncState);
+    });
+    // 初始渲染一次
+    _updateSyncBadge(SyncManager.getState());
+  }
 }
 
 function renderHome() {
@@ -1955,8 +1964,10 @@ function startMemo() {
   S.memoQueue   = [...Array(S.questions.length).keys()];
   S.memoKnown   = new Set();
   S.memoAgainSet= new Set();  // 本轮标记"再练"的
+  S.memoRatings = {};          // {qi: quality(1/2/5)} 每题最终评分
   S.memoCur     = 0;
   S.memoRevealed= false;
+  S.examStart   = Date.now(); // 背题模式也需要计时
   showScreen('s-memo');
   renderMemo('none');
 }
@@ -2109,20 +2120,30 @@ function memoReveal() {
   }, 200);
 }
 
-function memoKnow() {
+/**
+ * memoRate(quality) — 三档评分，对应 SM-2 quality：
+ *   quality=5  已掌握（轻松答对）← 左滑 / Enter
+ *   quality=2  模糊（有印象但不确定）← 中间按钮
+ *   quality=1  忘了（完全不会）← 右滑 / R
+ */
+function memoRate(quality) {
+  if (!S.memoRevealed) return;
   const qi = S.memoQueue[S.memoCur];
-  S.memoKnown.add(qi);
-  S.memoAgainSet.delete(qi);
-  S.memoCur++;
-  renderMemo('forward');
-}
+  S.memoRatings[qi] = quality; // 记录评分，结束时批量上传
 
-function memoAgain() {
-  const qi = S.memoQueue[S.memoCur];
-  S.memoAgainSet.add(qi);
+  if (quality >= 4) {
+    // 已掌握：不再重复
+    S.memoKnown.add(qi);
+    S.memoAgainSet.delete(qi);
+  } else {
+    // 模糊或忘了：标记需复习
+    S.memoAgainSet.add(qi);
+    S.memoKnown.delete(qi);
+  }
+
   S.memoCur++;
   if (S.memoCur >= S.memoQueue.length) {
-    const unknown = S.memoQueue.filter(qi => !S.memoKnown.has(qi));
+    const unknown = S.memoQueue.filter(i => !S.memoKnown.has(i));
     if (unknown.length === 0) { showMemoResults(); return; }
     S.memoQueue = unknown;
     S.memoCur   = 0;
@@ -2132,13 +2153,73 @@ function memoAgain() {
   renderMemo('forward');
 }
 
+// 兼容旧调用点（HTML onclick / 键盘 / 手势）
+function memoKnow()  { memoRate(5); }
+function memoHard()  { memoRate(2); }
+function memoAgain() { memoRate(1); }
+
 function showMemoResults() {
   const total = S.questions.length;
   const known = S.memoKnown.size;
   S.results = { mode:'memo', total, correct: known, wrong: total - known, skip: 0,
                 timeSec: Math.floor((Date.now() - S.examStart) / 1000) };
+
+  // ── 修复 bug：背题模式必须也上传 SM-2 记录 ──
+  // 之前 showMemoResults 直接 renderResults()，跳过了 calculateResults()，
+  // 导致 SM-2 的下次复习时间永远不会更新。
+  _recordMemoSession();
+
   showScreen('s-results');
   renderResults();
+}
+
+/** 把背题评分上传到服务端（携带 quality 字段供 SM-2 精确计算） */
+async function _recordMemoSession() {
+  if (!S.questions.length) return;
+  const items = [];
+  S.questions.forEach((q, qi) => {
+    const fp = q.fingerprint;
+    if (!fp) return;
+    const quality = S.memoRatings[qi];   // 1/2/5；未评分（跳过）= undefined
+    if (quality === undefined) return;   // 未翻牌的题不记录
+    items.push({
+      fingerprint: fp,
+      result:  quality >= 4 ? 1 : 0,    // 服务端 attempts 表用 0/1
+      quality: quality,                  // 精确质量分，progress.py 优先使用
+      mode:    q.mode,
+      unit:    q.unit,
+    });
+  });
+  if (!items.length) return;
+
+  const today = new Date().toLocaleDateString('zh-CN');
+  const units  = [...new Set(items.map(it => it.unit).filter(Boolean))];
+  const payload = {
+    id:       'memo-' + String(Date.now()),
+    mode:     'memo',
+    total:    items.length,
+    correct:  items.filter(it => it.result === 1).length,
+    wrong:    items.filter(it => it.result === 0).length,
+    skip:     0,
+    time_sec: S.results.timeSec,
+    date:     today,
+    units,
+    items,
+  };
+  try {
+    await SyncManager.record(payload);
+  } catch(e) {
+    // 降级直接 POST
+    try {
+      await apiFetch('/api/record', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    } catch(e2) {
+      console.warn('[Quiz] 背题记录上传失败:', e2);
+    }
+  }
 }
 
 // ════════════════════════════════════════════
@@ -2546,7 +2627,7 @@ function filterReview(type, tabEl) {
 // 进度持久化：错题本 + SM-2 + 统计
 // ════════════════════════════════════════════
 
-/** 把本次答题结果 POST 到服务端 */
+/** 把本次答题结果交给 SyncManager（离线优先：先写 IndexedDB，再异步上传服务端） */
 async function _recordSessionToServer(results, questions, ans) {
   if (!results || !questions) return;
   const items = [];
@@ -2584,6 +2665,19 @@ async function _recordSessionToServer(results, questions, ans) {
     units,
     items,
   };
+
+  // 离线优先：交给 SyncManager，先写 IndexedDB，有网时自动上传
+  // 即使服务端宕机或无网络，记录也不会丢失
+  if (typeof SyncManager !== 'undefined') {
+    try {
+      await SyncManager.record(payload);
+      return;
+    } catch (e) {
+      // IndexedDB 不可用（如隐私模式被禁）→ 降级直接 POST
+      console.warn('[Quiz] SyncManager 不可用，降级直接上传:', e);
+    }
+  }
+  // 降级路径：直接 POST（兼容 SyncManager 加载失败的极端情况）
   try {
     await apiFetch('/api/record', {
       method: 'POST',
@@ -2591,7 +2685,7 @@ async function _recordSessionToServer(results, questions, ans) {
       body: JSON.stringify(payload),
     });
   } catch (e) {
-    console.warn('记录上传失败:', e);
+    console.warn('[Quiz] 记录上传失败:', e);
   }
 }
 
@@ -2979,10 +3073,13 @@ document.addEventListener('keydown', e => {
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
       if (!S.memoRevealed) memoReveal();
-      else memoKnow();
+      else memoKnow();    // Enter = 记住了 (quality=5)
     }
     if (e.key === 'ArrowLeft' || e.key === 'r' || e.key === 'R') {
-      if (S.memoRevealed) memoAgain();
+      if (S.memoRevealed) memoAgain(); // R / ← = 忘了 (quality=1)
+    }
+    if (e.key === 'h' || e.key === 'H') {
+      if (S.memoRevealed) memoHard();  // H = 模糊 (quality=2)
     }
   }
 });
@@ -3186,8 +3283,8 @@ function getSwipeDir(dx, dy){
     dragging=false;
     const ok=Math.abs(dx)>=THRESHOLD||vel>=VELOCITY;
     if(ok){
-      if(dx<0){vibrate(10);memoKnow();}
-      else{vibrate([6,30,6]);memoAgain();}
+      if(dx<0){vibrate(10);memoKnow();}   // 左划=记住了
+      else{vibrate([6,30,6]);memoAgain();} // 右划=忘了
     } else if(Math.abs(dx)>8){
       if(c){c.style.transition='transform .2s cubic-bezier(.25,.46,.45,.94)';setTimeout(()=>{c.style.transition='';},220);}
     }
@@ -3211,5 +3308,57 @@ window.addEventListener('beforeunload', () => {
 setInterval(() => {
   if (S.mode === 'exam' && S.questions.length) saveExamSession();
 }, 20000);
+
+// ════════════════════════════════════════════
+// 离线同步角标 & 手动同步
+// ════════════════════════════════════════════
+
+/**
+ * 根据 SyncManager 状态更新同步角标。
+ * 角标元素 #sync-badge 在 quiz.html 中定义：
+ *   pending > 0 且 offline → 显示橙色"离线 N"
+ *   pending > 0 且 online  → 显示蓝色"同步中 N"（短暂）
+ *   pending = 0            → 隐藏
+ */
+function _updateSyncBadge(syncState) {
+  const badge = document.getElementById('sync-badge');
+  const btn   = document.getElementById('sync-now-btn');
+  if (!badge) return;
+
+  const { pending, online, syncing } = syncState;
+  if (pending === 0) {
+    badge.style.display = 'none';
+    if (btn) btn.style.display = 'none';
+    return;
+  }
+
+  badge.style.display = '';
+  if (btn) btn.style.display = '';
+
+  if (!online) {
+    badge.textContent    = `离线 · ${pending} 待同步`;
+    badge.dataset.status = 'offline';
+  } else if (syncing) {
+    badge.textContent    = `同步中…`;
+    badge.dataset.status = 'syncing';
+  } else {
+    badge.textContent    = `${pending} 条待同步`;
+    badge.dataset.status = 'pending';
+  }
+}
+
+/** 手动触发同步（绑定到"立即同步"按钮） */
+async function syncNow() {
+  if (typeof SyncManager === 'undefined') return;
+  const btn = document.getElementById('sync-now-btn');
+  if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
+  try {
+    await SyncManager.flush();
+    // 同步成功后刷新一次服务端统计徽章
+    _refreshProgressBadges();
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '立即同步'; }
+  }
+}
 
 init();
