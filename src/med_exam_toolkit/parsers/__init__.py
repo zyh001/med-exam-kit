@@ -6,6 +6,13 @@ if TYPE_CHECKING:
 
 _REGISTRY: dict[str, type[BaseParser]] = {}
 
+# 内置 App 包名 → 解析器名称的默认映射表
+# cli.py 和其他模块应统一引用此常量，避免多处重复维护
+DEFAULT_PARSER_MAP: dict[str, str] = {
+    "com.ahuxueshu":       "ahuyikao",   # 阿虎医考
+    "com.yikaobang.yixue": "yikaobang",  # 医考帮
+}
+
 
 def register(name: str):
     """装饰器：注册解析器"""
