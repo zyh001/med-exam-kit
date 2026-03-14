@@ -1,9 +1,11 @@
 """题目过滤器"""
 from __future__ import annotations
+import logging
 import re
 from dataclasses import dataclass, field
 from med_exam_toolkit.models import Question
 
+logger = logging.getLogger(__name__)
 
 @dataclass
 class FilterCriteria:
@@ -66,5 +68,5 @@ def apply_filters(questions: list[Question], criteria: FilterCriteria) -> list[Q
 
         result.append(q)
 
-    print(f"[INFO] 过滤完成: {len(questions)} -> {len(result)}")
+    logger.info("过滤完成: %d -> %d (去除 %d 条)", len(questions), len(result), len(questions) - len(result))
     return result
