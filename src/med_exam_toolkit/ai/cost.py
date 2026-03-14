@@ -113,6 +113,47 @@ _PRICING: list[tuple[str, _Price]] = [
     ("deepseek-reasoner",  _Price( 0.28,    0.42, "DeepSeek-V3.2 Thinking (cache miss)")),
     ("deepseek-chat",      _Price( 0.28,    0.42, "DeepSeek-V3.2 Non-thinking (cache miss)")),
     
+    # ── Kimi / 月之暗面 ──
+    # 汇率说明：CNY 价格 / 6.9 = USD 价格
+    # 价格来源：月之暗面官方定价（https://platform.moonshot.cn/docs/pricing/chat）
+    # 说明：kimi-k2.5 支持 thinking 参数，kimi-k2-thinking 为纯思考模型
+    
+    # ── Kimi-K2.5（多模态模型，支持思考开关）──
+    ("kimi-k2.5",          _Price( 0.58,    3.04, "Kimi-K2.5 (CNY4/21)")),
+    
+    # ── Kimi-K2 系列（含 preview/turbo 变体）──
+    ("kimi-k2-turbo-preview", _Price(1.16, 8.41, "Kimi-K2-Turbo-Preview (CNY8/58)")),
+    ("kimi-k2-thinking-turbo", _Price(1.16, 8.41, "Kimi-K2-Thinking-Turbo (CNY8/58)")),
+    ("kimi-k2-0905-preview", _Price(0.58,   2.32, "Kimi-K2-0905-Preview (CNY4/16)")),
+    ("kimi-k2-0711-preview", _Price(0.58,   2.32, "Kimi-K2-0711-Preview (CNY4/16)")),
+    ("kimi-k2-thinking",   _Price( 0.58,    2.32, "Kimi-K2-Thinking (CNY4/16)")),
+    ("kimi-k2",            _Price( 0.58,    2.32, "Kimi-K2 (CNY4/16)")),
+    
+    # ── Moonshot-V1 系列（通用生成模型）──
+    ("moonshot-v1-128k-vision-preview", _Price(1.45, 4.35, "Moonshot-V1-128K-Vision-Preview (CNY10/30)")),
+    ("moonshot-v1-32k-vision-preview",  _Price(0.72, 2.90, "Moonshot-V1-32K-Vision-Preview (CNY5/20)")),
+    ("moonshot-v1-8k-vision-preview",   _Price(0.29, 1.45, "Moonshot-V1-8K-Vision-Preview (CNY2/10)")),
+    ("moonshot-v1-128k", _Price( 1.45,    4.35, "Moonshot-V1-128K (CNY10/30)")),
+    ("moonshot-v1-32k",  _Price( 0.72,    2.90, "Moonshot-V1-32K (CNY5/20)")),
+    ("moonshot-v1-8k",   _Price( 0.29,    1.45, "Moonshot-V1-8K (CNY2/10)")),
+    
+    # ── MiniMax / 月之暗面 ──
+    # 汇率说明：CNY 价格 / 6.9 = USD 价格
+    # 价格来源：MiniMax 官方定价（https://platform.minimaxi.com/docs/guides/pricing-paygo）
+    # 说明：MiniMax 模型为混合思考模型，通过 reasoning_split 参数控制思维链分离
+    # 缓存价格：读取 ¥0.21/1M, 写入 ¥2.625/1M（未单独列出，按标准价格计算）
+    
+    # ── MiniMax-M2.5 系列（高性能模型）──
+    ("minimax-m2.5-highspeed", _Price(0.61, 2.43, "MiniMax-M2.5-Highspeed (CNY4.2/16.8)")),
+    ("minimax-m2.5",           _Price(0.30, 1.22, "MiniMax-M2.5 (CNY2.1/8.4)")),
+    
+    # ── MiniMax-M2.1 系列（编程与多语言）──
+    ("minimax-m2.1-highspeed", _Price(0.61, 2.43, "MiniMax-M2.1-Highspeed (CNY4.2/16.8)")),
+    ("minimax-m2.1",           _Price(0.30, 1.22, "MiniMax-M2.1 (CNY2.1/8.4)")),
+    
+    # ── MiniMax-M2（编码与 Agent）──
+    ("minimax-m2",             _Price(0.30, 1.22, "MiniMax-M2 (CNY2.1/8.4)")),
+    
     # ── Qwen / 通义千问 ──
     # 汇率说明：CNY 价格 / 6.9 = USD 价格
     # - 价格来源：阿里云百炼官方定价（https://help.aliyun.com/zh/model-studio/model-pricing）
