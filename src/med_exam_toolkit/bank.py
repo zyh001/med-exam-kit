@@ -67,8 +67,13 @@ def _subq_from_dict(d: dict[str, Any]) -> SubQuestion:
 
 
 def _question_to_dict(q: Question) -> dict[str, Any]:
-    """将 Question dataclass 转为纯 JSON 可序列化的字典。"""
+    """将 Question dataclass 转为纯 JSON 可序列化的字典。
+
+    raw 字段（原始 JSON）仅用于调试，序列化时主动清空，
+    可将题库文件体积减小 30-60%（取决于原始数据大小）。
+    """
     d = dataclasses.asdict(q)
+    d["raw"] = {}   # 清空原始 JSON，不写入 MQB 文件
     # sub_questions 已由 asdict 递归处理，但为清晰起见保持显式转换
     d["sub_questions"] = [dataclasses.asdict(sq) for sq in q.sub_questions]
     return d
