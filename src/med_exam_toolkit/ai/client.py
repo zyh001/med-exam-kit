@@ -12,6 +12,8 @@ _PROVIDER_BASE_URLS: dict[str, str] = {
     "ollama":    "http://localhost:11434/v1",
     "qwen":      "https://dashscope.aliyuncs.com/compatible-mode/v1",
     "qwen-intl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    "kimi":      "https://api.moonshot.cn/v1",
+    "minimax":   "https://api.minimaxi.com/v1",
 }
 
 # 各 provider 的推荐默认模型
@@ -21,23 +23,35 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "ollama":    "qwen2.5:14b",
     "qwen":      "qwen-plus",
     "qwen-intl": "qwen-plus",
+    "kimi":      "kimi-k2.5",
+    "minimax":   "MiniMax-M2.5",
 }
 
 # ── 模型分类 ──
 
 # 1. 纯推理模型（始终走推理模式，不可关闭）
 _PURE_REASONING_KEYWORDS = (
-    "o1", "o3",
+    "o1", "o3", "o4",
     "deepseek-reasoner",
     "-r1",
+    "kimi-k2-thinking",
 )
 
 # 2. 混合思考模型（通过 enable_thinking 开关控制，默认关闭）
+# 匹配规则：按顺序匹配，使用关键词前缀匹配覆盖更多模型
 _HYBRID_THINKING_KEYWORDS = (
+    # Qwen3.5 系列（含 Plus/Flash 等变体）
     "qwen3.5-plus",
+    "qwen3.5-flash",
     "qwen3.5",
-    "qwen-plus",
-    "qwen3",      # 覆盖所有 qwen3-* 系列
+    # Qwen3-Max 系列（由 qwen3 前缀覆盖）
+    "qwen-max",      # 覆盖 qwen-max, qwen-max-latest, qwen-max-2025-01-25 等
+    "qwen-plus",     # 覆盖 qwen-plus 及其所有版本
+    "qwen3",         # 覆盖所有 qwen3-* 系列（含 qwen3-max, qwen3-coder 等）
+    # Kimi-K2.5（支持 thinking 参数开关）
+    "kimi-k2.5",
+    # MiniMax 系列（混合推理模型，通过 reasoning_split 参数控制）
+    "minimax",
 )
 
 
@@ -99,6 +113,7 @@ def build_chat_params(
     temperature:    float = 0.2,
     max_tokens:     int   = 1200,
     enable_thinking: bool | None = None,
+    provider:       str | None = None,
 ) -> dict:
     """
     根据模型类型构建 chat.completions.create 的参数字典。
@@ -106,15 +121,15 @@ def build_chat_params(
     三类模型的差异：
     ┌──────────────────┬────────────┬──────────────────┬──────────────────────┐
     │                  │ 普通模型   │ 纯推理模型        │ 混合思考模型          │
-    │                  │ (gpt-4o等) │ (o1/o3/R1)       │ (Qwen3等)            │
+    │                  │ (gpt-4o 等) │ (o1/o3/R1)       │ (Qwen3 等)            │
     ├──────────────────┼────────────┼──────────────────┼──────────────────────┤
-    │ temperature      │ 任意值     │ DeepSeek须为1    │ 思考模式须为1，       │
-    │                  │            │ o1系列须省略      │ 普通模式任意值        │
-    │ max_tokens       │ 支持       │ o1用             │ 支持                  │
+    │ temperature      │ 任意值     │ DeepSeek 须为 1    │ 思考模式须为 1，       │
+    │                  │            │ o1 系列须省略      │ 普通模式任意值        │
+    │ max_tokens       │ 支持       │ o1 用             │ 支持                  │
     │                  │            │ max_completion_  │                      │
     │                  │            │ tokens           │                      │
-    │ system role      │ 支持       │ o1须合并进user   │ 支持                  │
-    │ extra_body       │ 不需要     │ 不需要            │ enable_thinking开关  │
+    │ system role      │ 支持       │ o1 须合并进 user   │ 支持                  │
+    │ extra_body       │ 不需要     │ 不需要            │ 思考参数（因 provider 而异）│
     └──────────────────┴────────────┴──────────────────┴──────────────────────┘
 
     参数说明
@@ -123,10 +138,12 @@ def build_chat_params(
         None  → 自动判断（混合模型默认关闭，纯推理模型忽略此参数）
         True  → 强制开启思考（混合模型生效，普通模型忽略）
         False → 强制关闭思考
+    provider : 模型提供商名称（qwen/kimi/minimax 等），用于确定思考参数的格式
     """
     m         = model.lower()
     pure_r    = is_reasoning_model(model)
     hybrid    = is_hybrid_thinking_model(model)
+    provider  = (provider or "").lower()
 
     # 混合模型：enable_thinking 为 None 时默认关闭（除非调用方显式开启）
     use_thinking = False
@@ -149,14 +166,32 @@ def build_chat_params(
         # 混合模型开启思考时：temperature 须为 1
         params["temperature"] = 1
         params["max_tokens"]  = max_tokens
-        params["extra_body"]  = {"enable_thinking": True}
+        # 根据 provider 使用不同的思考参数格式
+        if provider == "kimi":
+            # 月之暗面 Kimi：{"thinking": {"type": "enabled"}}
+            params["extra_body"] = {"thinking": {"type": "enabled"}}
+        elif provider == "minimax":
+            # MiniMax：{"reasoning_split": True}
+            params["extra_body"] = {"reasoning_split": True}
+        else:
+            # 阿里系 Qwen（默认）：{"enable_thinking": True}
+            params["extra_body"] = {"enable_thinking": True}
     else:
         # 普通模式（含混合模型关闭思考时）
         params["temperature"] = temperature
         params["max_tokens"]  = max_tokens
         if hybrid:
             # 混合模型显式关闭，避免 API 端默认开启
-            params["extra_body"] = {"enable_thinking": False}
+            # 根据 provider 使用不同的思考参数格式
+            if provider == "kimi":
+                # 月之暗面 Kimi：{"thinking": {"type": "disabled"}}
+                params["extra_body"] = {"thinking": {"type": "disabled"}}
+            elif provider == "minimax":
+                # MiniMax：{"reasoning_split": False}
+                params["extra_body"] = {"reasoning_split": False}
+            else:
+                # 阿里系 Qwen（默认）：{"enable_thinking": False}
+                params["extra_body"] = {"enable_thinking": False}
 
     return params
 
@@ -193,14 +228,36 @@ def extract_response_text(response: Any) -> tuple[str, str]:
     - 普通模型：content 有值，reasoning_content 为空
     - DeepSeek-R1 / Qwen3 思考模式：content 为最终答案，
       reasoning_content 为思维链（通过 message 属性或 extra 字段）
+    - MiniMax 混合模型：
+      - reasoning_split=True: reasoning_content 来自 reasoning_details 字段
+      - reasoning_split=False: 从 content 中提取 <thought> 标签内容
     """
+    import re
+    
     msg = response.choices[0].message
 
     content          = (msg.content or "").strip()
     reasoning_content = ""
 
-    # 标准属性（DeepSeek-R1、Qwen3 均支持）
+    # 1. 标准属性（DeepSeek-R1、Qwen3 均支持）
     if hasattr(msg, "reasoning_content") and msg.reasoning_content:
         reasoning_content = msg.reasoning_content
+
+    # 2. MiniMax 特殊格式：reasoning_details 字段
+    if hasattr(msg, "reasoning_details") and msg.reasoning_details:
+        # reasoning_details 是一个列表，每个元素包含 type 和 text 字段
+        for detail in msg.reasoning_details:
+            if hasattr(detail, "text") and detail.text:
+                reasoning_content = detail.text
+                break
+    
+    # 3. MiniMax 原生格式：从 content 中提取 <think> 标签内容
+    # 当 reasoning_split=False 时，思维链包裹在 <think>...</think> 标签中
+    if not reasoning_content and content:
+        thought_match = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
+        if thought_match:
+            reasoning_content = thought_match.group(1).strip()
+            # 从 content 中移除 <thought> 标签，只保留最终答案
+            content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
 
     return content, reasoning_content

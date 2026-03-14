@@ -531,6 +531,7 @@ class BankEnricher:
             temperature     = 0.2,
             max_tokens      = max_tokens,
             enable_thinking = thinking,
+            provider        = self.provider,
         )
 
         # 带指数退避的重试：应对速率限制（429）和瞬时网络抖动
