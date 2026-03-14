@@ -60,6 +60,8 @@ def _get_user_id() -> str:
 def _create_app() -> Flask:
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_AS_ASCII"] = False
+    # 刷题应用只接收答题结果 JSON，限制请求体为 32 MB 防止 OOM
+    app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024  # 32 MB
     Compress(app)
 
     @app.before_request
@@ -119,6 +121,11 @@ def _create_app() -> Flask:
 
 
 app = _create_app()
+
+
+@app.errorhandler(413)
+def _too_large(e):
+    return jsonify({"error": "请求体过大，单次请求不得超过 32 MB"}), 413
 
 
 # ════════════════════════════════════════════
@@ -334,6 +341,54 @@ def api_wrongbook():
     from med_exam_toolkit.progress import get_wrong_fingerprints
     items = get_wrong_fingerprints(_db_path, user_id=_get_user_id())
     return jsonify({"items": items, "count": len(items)})
+
+
+@app.post("/api/sync")
+def api_sync():
+    """离线同步端点：接收浏览器 IndexedDB 队列中积压的答题会话，批量写入数据库。
+
+    请求体：{ "sessions": [ <session_payload>, ... ] }
+    响应：  { "processed": ["id1",...], "skipped": ["id2",...], "failed": [] }
+
+    - processed: 成功写入的 session_id 列表（前端据此从 IndexedDB 删除对应条目）
+    - skipped:   服务端已存在的 session_id（重传安全，前端同样可删除）
+    - failed:    写入异常的 session_id（前端保留，下次重试）
+    """
+    if not _record_enabled:
+        return jsonify({"ok": True, "skipped_all": True, "processed": [], "skipped": [], "failed": []})
+    if _db_path is None:
+        return jsonify({"ok": False, "error": "进度数据库未初始化"}), 503
+
+    data     = request.get_json(silent=True) or {}
+    sessions = data.get("sessions", [])
+
+    if not isinstance(sessions, list) or not sessions:
+        return jsonify({"ok": True, "processed": [], "skipped": [], "failed": []})
+
+    # 单次批量上限 200 条，防滥用
+    if len(sessions) > 200:
+        return jsonify({"ok": False, "error": "单次同步不超过 200 条"}), 400
+
+    try:
+        from med_exam_toolkit.progress import record_sessions_batch
+        uid    = _get_user_id()
+        result = record_sessions_batch(_db_path, sessions, user_id=uid)
+        return jsonify({"ok": True, "failed": [], **result})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.get("/api/sync/status")
+def api_sync_status():
+    """返回服务端数据库中当前用户的会话总数与最近同步时间，供前端同步状态栏展示。"""
+    if _db_path is None or not _db_path.exists():
+        return jsonify({"session_count": 0, "last_ts": None, "db_ready": False})
+    try:
+        from med_exam_toolkit.progress import get_sync_status
+        status = get_sync_status(_db_path, user_id=_get_user_id())
+        return jsonify({"db_ready": True, **status})
+    except Exception as e:
+        return jsonify({"db_ready": False, "error": str(e)}), 500
 
 
 @app.get("/api/info")
