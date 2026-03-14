@@ -61,10 +61,18 @@ def _get_lan_ip() -> str:
 
 app = Flask(__name__, template_folder="templates", static_folder="static")
 app.config["JSON_AS_ASCII"] = False
+# 防止超大请求体导致 OOM：编辑器只处理题库文件，限制为 64 MB
+# 超过此限制 Flask 自动返回 413 Request Entity Too Large
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024 * 1024  # 64 MB
 Compress(app)
 
 
-@app.before_request
+@app.errorhandler(413)
+def _too_large(e):
+    return jsonify({"error": "请求体过大，单次请求不得超过 64 MB"}), 413
+
+
+
 def _guard():
     # 1. 放行首页 HTML
     if request.path == "/" and request.method == "GET":
