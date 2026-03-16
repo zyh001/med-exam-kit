@@ -1587,7 +1587,7 @@ function selectOpt(letter, btn) {
             const total = S.questions.length;
             if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
             else finishPractice();
-          }, 1400);
+          }, 1000);
         }
         setTimeout(() => {
           const explain = document.getElementById('explain-panel');
