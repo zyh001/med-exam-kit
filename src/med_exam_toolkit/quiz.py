@@ -21,6 +21,10 @@ _server_port:    int         = 5174
 _server_host:    str         = "127.0.0.1"
 _record_enabled: bool        = True   # --no-record 时为 False
 
+# ── 访问码验证 ──
+_access_code:    str         = ""     # 8 位访问码，启动时生成
+_cookie_secret:  str         = ""     # HMAC 签名密钥，启动时生成
+
 # ── 速率限制：滑动窗口，每 IP 最多 120 次/分钟 ──
 _RATE_LIMIT  = 120
 _RATE_WINDOW = 60   # 秒
@@ -45,7 +49,7 @@ def _get_lan_ip() -> str:
     """获取本机局域网 IP，失败时回退到 127.0.0.1。"""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
+            s.connect(("114.114.114.114", 80))
             return s.getsockname()[0]
     except OSError:
         return "127.0.0.1"
@@ -66,18 +70,15 @@ def _create_app() -> Flask:
 
     @app.before_request
     def _guard():
-        # 1. 放行首页 HTML（浏览器直接访问，尚未拿到 token）
-        if request.path == "/" and request.method == "GET":
+        from med_exam_toolkit.auth import is_authenticated, render_pin_page
+        from flask import Response
+
+        # ── 0. 放行 POST /auth（PIN 表单提交）──────────────────────────
+        if request.path == "/auth" and request.method == "POST":
             return None
 
-        # 2. Host 头校验 —— 阻断 DNS 重绑定攻击
-        #
-        #   策略根据绑定地址分两种：
-        #   • 仅本机 (127.0.0.1)：严格白名单，只接受 127.0.0.1 / localhost
-        #   • 局域网 (0.0.0.0)：只校验端口是否匹配，不限制主机名
-        #     （此时用户已主动开放网络，Token 是主要防线）
+        # ── 1. Host 头校验（DNS 重绑定防护）──────────────────────────
         host_header = request.headers.get("Host", "")
-        # 提取 Host 头中的端口（格式可能是 "hostname:port" 或 "hostname"）
         if ":" in host_header:
             host_name, host_port_str = host_header.rsplit(":", 1)
             try:
@@ -86,10 +87,9 @@ def _create_app() -> Flask:
                 host_port = None
         else:
             host_name  = host_header
-            host_port  = None  # 浏览器省略默认端口时
+            host_port  = None
 
         if _server_host in ("127.0.0.1", "localhost"):
-            # 严格模式：只允许回环地址，阻断所有外部域名重绑定
             allowed = {
                 f"127.0.0.1:{_server_port}",
                 f"localhost:{_server_port}",
@@ -99,12 +99,17 @@ def _create_app() -> Flask:
             if host_header not in allowed:
                 return jsonify({"error": "Forbidden"}), 403
         else:
-            # 宽松模式：只验证端口，拒绝端口不匹配的请求
-            # （防止请求被误路由到其他服务，Token 提供主要认证）
             if host_port is not None and host_port != _server_port:
                 return jsonify({"error": "Forbidden"}), 403
 
-        # 3. API 路由：校验 Session Token
+        # ── 2. 访问码验证（所有路由均需通过，包括首页）────────────────
+        if not is_authenticated(_cookie_secret, _access_code):
+            if request.path == "/" and request.method == "GET":
+                return Response(render_pin_page("医考练习"), mimetype="text/html")
+            # API / 静态资源未通过验证 → 401
+            return jsonify({"error": "Unauthorized", "auth": False}), 401
+
+        # ── 3. API 路由：校验 Session Token ───────────────────────────
         if request.path.startswith("/api/"):
             token = request.headers.get("X-Session-Token", "")
             if not secrets.compare_digest(token, _session_token):
@@ -118,6 +123,7 @@ def _create_app() -> Flask:
         return None
 
     return app
+
 
 
 app = _create_app()
@@ -574,12 +580,13 @@ def api_questions():
 
 @app.get("/")
 def index():
+    from med_exam_toolkit.auth import set_auth_cookie
     uid = request.cookies.get("med_exam_uid", "")
     resp = make_response(render_template(
         "quiz.html", session_token=_session_token, asset_ver=_asset_ver))
     if not uid:
         # 首次访问：生成并写入持久 Cookie（有效期 1 年）
-        uid = secrets.token_hex(16)   # 32 位十六进制，每用户独立
+        uid = secrets.token_hex(16)
         resp.set_cookie(
             "med_exam_uid", uid,
             max_age=365 * 24 * 3600,
@@ -587,6 +594,25 @@ def index():
             samesite="Strict",
         )
     return resp
+
+
+@app.post("/auth")
+def auth():
+    """验证访问码，通过后写入签名 Cookie 并重定向首页。"""
+    from med_exam_toolkit.auth import render_pin_page, set_auth_cookie
+    code = request.form.get("code", "").strip().upper()
+    if secrets.compare_digest(code, _access_code):
+        resp = make_response("", 302)
+        resp.headers["Location"] = "/"
+        set_auth_cookie(resp, _cookie_secret, _access_code)
+        return resp
+    # 验证失败：重新显示 PIN 页并提示错误
+    from flask import Response
+    return Response(
+        render_pin_page("医考练习", error="访问码不正确，请重新输入"),
+        mimetype="text/html",
+        status=200,
+    )
 
 
 def start_quiz(
@@ -600,15 +626,20 @@ def start_quiz(
     """启动医考练习 Web 应用"""
     from med_exam_toolkit.bank import load_bank
     global _questions, _bank_path, _password, _session_token, _asset_ver, \
-           _server_port, _server_host, _db_path, _record_enabled
+           _server_port, _server_host, _db_path, _record_enabled, \
+           _access_code, _cookie_secret
 
     _bank_path      = Path(bank_path).resolve()
     _password       = password
     _server_port    = port
     _server_host    = host
     _session_token  = secrets.token_hex(32)
-    _asset_ver      = secrets.token_hex(8)    # 每次启动刷新，强制浏览器拉新静态文件
+    _asset_ver      = secrets.token_hex(8)
     _record_enabled = not no_record
+
+    # ── 生成访问码 ──────────────────────────────────────────────────
+    from med_exam_toolkit.auth import generate_access_code
+    _access_code, _cookie_secret = generate_access_code()
 
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
@@ -630,6 +661,14 @@ def start_quiz(
         lan_ip  = _get_lan_ip()
         lan_url = f"http://{lan_ip}:{port}"
         print(f"[INFO] 局域网访问: {lan_url}  （同网段其他设备可用此地址）")
+
+    # ── 访问码（醒目展示）──────────────────────────────────────────
+    mid   = _CODE_DISPLAY = _access_code[:4] + " " + _access_code[4:]
+    print(f"\n{'━'*40}")
+    print(f"  🔑 访问码：  {mid}")
+    print(f"  首次打开浏览器时需要输入此码")
+    print(f"  重启服务后访问码会自动更新")
+    print(f"{'━'*40}\n")
     print("[INFO] Ctrl+C 退出")
 
     if not no_browser:

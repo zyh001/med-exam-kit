@@ -12,7 +12,7 @@ from collections import defaultdict, deque
 from pathlib import Path
 from typing import Any
 
-from flask import Flask, jsonify, request, render_template
+from flask import Flask, jsonify, request, render_template, make_response
 from flask_compress import Compress
 
 # ── 全局状态 ──
@@ -21,9 +21,13 @@ _bank_path:     Path | None = None
 _dirty                      = False
 _password:      str  | None = None
 _session_token: str         = ""
-_asset_ver:     str         = ""     # 静态文件版本号，用于缓存破坏
+_asset_ver:     str         = ""
 _server_port:   int         = 5173
 _server_host:   str         = "127.0.0.1"
+
+# ── 访问码验证 ──
+_access_code:   str         = ""
+_cookie_secret: str         = ""
 
 # ── 写操作锁：多线程并发时保护 _questions 的结构完整性 ──
 # 使用 RLock（可重入锁），允许同一线程在持有锁时再次加锁（防死锁）。
@@ -53,7 +57,7 @@ def _get_lan_ip() -> str:
     """获取本机局域网 IP，失败时回退到 127.0.0.1。"""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("8.8.8.8", 80))
+            s.connect(("114.114.114.114", 80))
             return s.getsockname()[0]
     except OSError:
         return "127.0.0.1"
@@ -73,14 +77,16 @@ def _too_large(e):
 
 
 
+@app.before_request
 def _guard():
-    # 1. 放行首页 HTML
-    if request.path == "/" and request.method == "GET":
+    from med_exam_toolkit.auth import is_authenticated, render_pin_page
+    from flask import Response
+
+    # ── 0. 放行 POST /auth ────────────────────────────────────────
+    if request.path == "/auth" and request.method == "POST":
         return None
 
-    # 2. Host 头校验
-    #   • 仅本机 (127.0.0.1)：严格白名单
-    #   • 局域网 (0.0.0.0)：只校验端口匹配
+    # ── 1. Host 头校验 ────────────────────────────────────────────
     host_header = request.headers.get("Host", "")
     if ":" in host_header:
         _, host_port_str = host_header.rsplit(":", 1)
@@ -104,7 +110,13 @@ def _guard():
         if host_port is not None and host_port != _server_port:
             return jsonify({"error": "Forbidden"}), 403
 
-    # 3. API 路由：校验 Session Token
+    # ── 2. 访问码验证 ─────────────────────────────────────────────
+    if not is_authenticated(_cookie_secret, _access_code):
+        if request.path == "/" and request.method == "GET":
+            return Response(render_pin_page("题库编辑器"), mimetype="text/html")
+        return jsonify({"error": "Unauthorized", "auth": False}), 401
+
+    # ── 3. API 路由：校验 Session Token ───────────────────────────
     if request.path.startswith("/api/"):
         token = request.headers.get("X-Session-Token", "")
         if not secrets.compare_digest(token, _session_token):
@@ -488,6 +500,25 @@ def index():
     return render_template("editor.html", session_token=_session_token, asset_ver=_asset_ver)
 
 
+@app.post("/auth")
+def auth():
+    """验证访问码，通过后写入签名 Cookie 并重定向首页。"""
+    from med_exam_toolkit.auth import render_pin_page, set_auth_cookie
+    from flask import Response
+    code = request.form.get("code", "").strip().upper()
+    if secrets.compare_digest(code, _access_code):
+        resp = make_response("", 302)
+        resp.headers["Location"] = "/"
+        set_auth_cookie(resp, _cookie_secret, _access_code)
+        return resp
+    return Response(
+        render_pin_page("题库编辑器", error="访问码不正确，请重新输入"),
+        mimetype="text/html",
+        status=200,
+    )
+
+
+
 # ═══════════════════════════════════════════════════════════════════
 # 启动入口
 # ═══════════════════════════════════════════════════════════════════
@@ -495,14 +526,20 @@ def index():
 def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
                  no_browser: bool = False, password: str | None = None) -> None:
     from med_exam_toolkit.bank import load_bank
+    from med_exam_toolkit.auth import generate_access_code
 
-    global _questions, _bank_path, _password, _session_token, _asset_ver, _server_port, _server_host
+    global _questions, _bank_path, _password, _session_token, _asset_ver, \
+           _server_port, _server_host, _access_code, _cookie_secret
     _bank_path     = Path(bank_path).resolve()
     _password      = password
     _server_port   = port
     _server_host   = host
     _session_token = secrets.token_hex(32)
-    _asset_ver     = secrets.token_hex(8)    # 每次启动刷新缓存
+    _asset_ver     = secrets.token_hex(8)
+
+    # ── 生成访问码 ──────────────────────────────────────────────────
+    _access_code, _cookie_secret = generate_access_code()
+
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
     print(f"[INFO] 已加载 {len(_questions)} 道大题")
@@ -515,6 +552,14 @@ def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
         print(f"[INFO] 局域网访问: {lan_url}  （同网段其他设备可用此地址）")
         print("[WARN] ⚠️  编辑器已开放局域网访问，所有持有 Token 的用户均可修改题库。")
         print("[WARN]    建议仅在受信任的私有网络中使用，不要暴露到公网。")
+
+    # ── 访问码（醒目展示）──────────────────────────────────────────
+    mid = _access_code[:4] + " " + _access_code[4:]
+    print(f"\n{'━'*40}")
+    print(f"  🔑 访问码：  {mid}")
+    print(f"  首次打开浏览器时需要输入此码")
+    print(f"  重启服务后访问码会自动更新")
+    print(f"{'━'*40}\n")
     print("[INFO] 按 Ctrl+C 退出")
 
     if not no_browser:
