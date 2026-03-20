@@ -6,36 +6,42 @@
   3. 用户提交 POST /auth → 验证访问码 → 写入 HMAC 签名 Cookie → 重定向 GET /
   4. 后续所有请求在 _guard 中先检查 Cookie，通过后才进入正常逻辑
 
+当 access_code 为空字符串时，auth 功能完全关闭（--no-auth 模式），
+is_authenticated() 始终返回 True，/auth 路由不会被注册。
+
 Cookie 安全：
   - Cookie 值 = HMAC-SHA256(cookie_secret, access_code)，服务端签名
   - 客户端无法伪造（不知道 cookie_secret）
   - httponly + samesite=Strict，无法被 JS 读取或跨站发送
+  - 非 localhost 时自动加 Secure 标志（适配 HTTPS 反向代理）
   - 每次服务器重启 cookie_secret 随机刷新，旧 Cookie 自动失效
+
+暴力破解防护：
+  - 每 IP 每 10 分钟最多 10 次失败尝试
+  - 超限后锁定 15 分钟，期间返回 429 Too Many Requests
 """
 from __future__ import annotations
 
-import hmac
 import hashlib
+import hmac
 import secrets
-import string
-from flask import request, make_response, redirect, url_for
+import threading
+import time
 
-# ── 访问码字符集：去掉易混淆字符（0/O、1/I、l/L、S/5、Z/2）──────────
-_CHARSET = "ABCDEFGHJKMNPQRTUVWXY346789"   # 26 个，输入友好
+from flask import request
+
+_CHARSET  = "ABCDEFGHJKMNPQRTUVWXY346789"
 _CODE_LEN = 8
-
 _AUTH_COOKIE = "med_exam_auth"
 
 
 def generate_access_code() -> tuple[str, str]:
-    """生成访问码和 Cookie 签名密钥，返回 (access_code, cookie_secret)。"""
     code   = "".join(secrets.choice(_CHARSET) for _ in range(_CODE_LEN))
     secret = secrets.token_hex(32)
     return code, secret
 
 
 def _sign(cookie_secret: str, access_code: str) -> str:
-    """用 cookie_secret 对 access_code HMAC 签名，得到 Cookie 值。"""
     return hmac.new(
         cookie_secret.encode(),
         access_code.encode(),
@@ -44,7 +50,9 @@ def _sign(cookie_secret: str, access_code: str) -> str:
 
 
 def is_authenticated(cookie_secret: str, access_code: str) -> bool:
-    """检查当前请求是否持有有效的访问 Cookie。"""
+    """access_code 为空字符串时始终返回 True（已禁用访问码）。"""
+    if not access_code:
+        return True
     cookie_val = request.cookies.get(_AUTH_COOKIE, "")
     if not cookie_val:
         return False
@@ -52,22 +60,104 @@ def is_authenticated(cookie_secret: str, access_code: str) -> bool:
     return hmac.compare_digest(cookie_val, expected)
 
 
-def set_auth_cookie(response, cookie_secret: str, access_code: str) -> None:
-    """在 response 上写入已验证的 Cookie（有效期 7 天）。"""
+def set_auth_cookie(
+    response,
+    cookie_secret: str,
+    access_code: str,
+    secure: bool | None = None,
+) -> None:
+    """写入已验证的 Cookie（有效期 7 天）。
+    secure=None 时自动判断：非 localhost → True，localhost → False。
+    传入 True/False 可手动覆盖（例如 quiz.py 根据 _server_host 决定）。
+    """
+    if secure is None:
+        host = request.headers.get("Host", "").split(":")[0]
+        secure = host not in ("127.0.0.1", "localhost", "::1")
     response.set_cookie(
         _AUTH_COOKIE,
         _sign(cookie_secret, access_code),
         max_age=7 * 24 * 3600,
         httponly=True,
         samesite="Strict",
+        secure=secure,
     )
 
+
+# ════════════════════════════════════════════════════════════════════════
+# 暴力破解防护
+# ════════════════════════════════════════════════════════════════════════
+
+_WINDOW_SEC   = 600
+_MAX_FAILURES = 10
+_LOCKOUT_SEC  = 900
+
+_brute: dict[str, dict] = {}
+_brute_lock = threading.Lock()
+
+
+def check_brute_force(ip: str) -> tuple[bool, int]:
+    """返回 (allowed, retry_after_seconds)。"""
+    now = time.monotonic()
+    with _brute_lock:
+        state = _brute.get(ip)
+        if not state:
+            return True, 0
+        locked_until = state.get("locked_until", 0)
+        if locked_until > now:
+            return False, int(locked_until - now)
+        state["failures"] = [t for t in state["failures"] if now - t < _WINDOW_SEC]
+        return True, 0
+
+
+def record_failure(ip: str) -> None:
+    now = time.monotonic()
+    with _brute_lock:
+        if ip not in _brute:
+            _brute[ip] = {"failures": [], "locked_until": 0}
+        state = _brute[ip]
+        state["failures"] = [t for t in state["failures"] if now - t < _WINDOW_SEC]
+        state["failures"].append(now)
+        if len(state["failures"]) >= _MAX_FAILURES:
+            state["locked_until"] = now + _LOCKOUT_SEC
+            state["failures"] = []
+
+
+def record_success(ip: str) -> None:
+    with _brute_lock:
+        _brute.pop(ip, None)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 安全响应头
+# ════════════════════════════════════════════════════════════════════════
+
+def apply_security_headers(response) -> None:
+    """注入常用安全响应头（在 after_request 中调用）。"""
+    h = response.headers
+    h.setdefault("X-Frame-Options", "DENY")
+    h.setdefault("X-Content-Type-Options", "nosniff")
+    h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    h.setdefault(
+        "Content-Security-Policy",
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline'; "
+        "style-src 'self' 'unsafe-inline'; "
+        "img-src 'self' data:; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none';",
+    )
+    h.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=(), payment=()",
+    )
+
+
+# ════════════════════════════════════════════════════════════════════════
+# PIN 页面 HTML
+# ════════════════════════════════════════════════════════════════════════
 
 def render_pin_page(app_name: str, error: str = "") -> str:
-    """返回 PIN 输入页的 HTML（纯内联，不依赖任何静态文件）。"""
-    error_html = (
-        f'<div class="error">{error}</div>' if error else ""
-    )
+    error_html = f'<div class="error">{error}</div>' if error else ""
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -131,7 +221,7 @@ def render_pin_page(app_name: str, error: str = "") -> str:
     <label>访问码</label>
     <input
       type="text" name="code" id="code"
-      maxlength="8" placeholder="XXXX XXXX"
+      maxlength="8" placeholder="XXXXXXXX"
       autofocus autocomplete="off" spellcheck="false"
     >
     <button class="btn" type="submit">验证并进入 →</button>
@@ -139,10 +229,32 @@ def render_pin_page(app_name: str, error: str = "") -> str:
   <p class="hint">访问码在服务器启动时打印到终端<br>每次重启服务器后需重新验证</p>
 </div>
 <script>
-  // 自动大写、忽略空格
   document.getElementById('code').addEventListener('input', function() {{
     this.value = this.value.toUpperCase().replace(/[^A-Z0-9]/g, '');
   }});
 </script>
 </body>
 </html>"""
+
+
+# ════════════════════════════════════════════════════════════════════════
+# 公网安全警告
+# ════════════════════════════════════════════════════════════════════════
+
+def print_public_internet_warning(port: int) -> None:
+    print(f"\n{'⚠️  ' * 3}  安全警告  {'⚠️  ' * 3}")
+    print("━" * 48)
+    print("  你正在将服务监听在 0.0.0.0（所有网卡），")
+    print("  若服务器有公网 IP，此服务将对外网完全开放。")
+    print()
+    print("  已知安全风险：")
+    print("  • HTTP 明文传输，访问码/Cookie 可被中间人截获")
+    print("  • 即使有访问码，仍建议搭配 HTTPS 反向代理")
+    print()
+    print("  推荐配置（以 Caddy 为例）：")
+    print(f"    yourdomain.com {{")
+    print(f"      reverse_proxy 127.0.0.1:{port}")
+    print(f"    }}")
+    print()
+    print("  配置反向代理后请改为 --host 127.0.0.1")
+    print("━" * 48 + "\n")
