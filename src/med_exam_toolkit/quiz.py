@@ -24,6 +24,7 @@ _record_enabled: bool        = True   # --no-record 时为 False
 # ── 访问码验证 ──
 _access_code:    str         = ""     # 8 位访问码，启动时生成
 _cookie_secret:  str         = ""     # HMAC 签名密钥，启动时生成
+_pin_enabled:    bool        = True   # False 时跳过访问码验证（--no-pin）
 
 # ── 速率限制：滑动窗口，每 IP 最多 120 次/分钟 ──
 _RATE_LIMIT  = 120
@@ -49,7 +50,7 @@ def _get_lan_ip() -> str:
     """获取本机局域网 IP，失败时回退到 127.0.0.1。"""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("114.114.114.114", 80))
+            s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
     except OSError:
         return "127.0.0.1"
@@ -73,8 +74,18 @@ def _create_app() -> Flask:
         from med_exam_toolkit.auth import is_authenticated, render_pin_page
         from flask import Response
 
-        # ── 0. 放行 POST /auth（PIN 表单提交）──────────────────────────
+        # ── 0. /auth POST：单独速率限制后放行 ────────────────────────
         if request.path == "/auth" and request.method == "POST":
+            if _pin_enabled:
+                ip = request.remote_addr or "unknown"
+                from med_exam_toolkit.auth import check_brute_force
+                allowed, retry_after = check_brute_force(ip)
+                if not allowed:
+                    reason = f"尝试次数过多，请 {retry_after} 秒后重试"
+                    return Response(
+                        render_pin_page("医考练习", error=reason),
+                        mimetype="text/html", status=429,
+                    )
             return None
 
         # ── 1. Host 头校验（DNS 重绑定防护）──────────────────────────
@@ -102,11 +113,10 @@ def _create_app() -> Flask:
             if host_port is not None and host_port != _server_port:
                 return jsonify({"error": "Forbidden"}), 403
 
-        # ── 2. 访问码验证（所有路由均需通过，包括首页）────────────────
-        if not is_authenticated(_cookie_secret, _access_code):
+        # ── 2. 访问码验证（_pin_enabled=False 时跳过）────────────────
+        if _pin_enabled and not is_authenticated(_cookie_secret, _access_code):
             if request.path == "/" and request.method == "GET":
                 return Response(render_pin_page("医考练习"), mimetype="text/html")
-            # API / 静态资源未通过验证 → 401
             return jsonify({"error": "Unauthorized", "auth": False}), 401
 
         # ── 3. API 路由：校验 Session Token ───────────────────────────
@@ -115,14 +125,20 @@ def _create_app() -> Flask:
             if not secrets.compare_digest(token, _session_token):
                 return jsonify({"error": "Unauthorized"}), 401
 
-            # 4. 速率限制
             ip = request.remote_addr or "unknown"
             if not _check_rate_limit(ip):
                 return jsonify({"error": "Too Many Requests"}), 429
 
         return None
 
+    @app.after_request
+    def _security_headers(response):
+        from med_exam_toolkit.auth import apply_security_headers
+        apply_security_headers(response)
+        return response
+
     return app
+
 
 
 
@@ -600,14 +616,20 @@ def index():
 def auth():
     """验证访问码，通过后写入签名 Cookie 并重定向首页。"""
     from med_exam_toolkit.auth import render_pin_page, set_auth_cookie
+    from flask import Response
+    ip   = request.remote_addr or "unknown"
     code = request.form.get("code", "").strip().upper()
-    if secrets.compare_digest(code, _access_code):
+    if _pin_enabled and secrets.compare_digest(code, _access_code):
+        from med_exam_toolkit.auth import record_success
+        record_success(ip)
         resp = make_response("", 302)
         resp.headers["Location"] = "/"
         set_auth_cookie(resp, _cookie_secret, _access_code)
         return resp
-    # 验证失败：重新显示 PIN 页并提示错误
-    from flask import Response
+    # 验证失败：记录失败次数，防暴力破解
+    if _pin_enabled:
+        from med_exam_toolkit.auth import record_failure
+        record_failure(ip)
     return Response(
         render_pin_page("医考练习", error="访问码不正确，请重新输入"),
         mimetype="text/html",
@@ -622,12 +644,13 @@ def start_quiz(
     no_browser: bool = False,
     password:   str | None = None,
     no_record:  bool = False,
+    no_pin:     bool = False,
 ) -> None:
     """启动医考练习 Web 应用"""
     from med_exam_toolkit.bank import load_bank
     global _questions, _bank_path, _password, _session_token, _asset_ver, \
            _server_port, _server_host, _db_path, _record_enabled, \
-           _access_code, _cookie_secret
+           _access_code, _cookie_secret, _pin_enabled
 
     _bank_path      = Path(bank_path).resolve()
     _password       = password
@@ -636,10 +659,14 @@ def start_quiz(
     _session_token  = secrets.token_hex(32)
     _asset_ver      = secrets.token_hex(8)
     _record_enabled = not no_record
+    _pin_enabled    = not no_pin
 
-    # ── 生成访问码 ──────────────────────────────────────────────────
+    # ── 生成访问码（--no-pin 时跳过）────────────────────────────────
     from med_exam_toolkit.auth import generate_access_code
-    _access_code, _cookie_secret = generate_access_code()
+    if _pin_enabled:
+        _access_code, _cookie_secret = generate_access_code()
+    else:
+        _access_code = _cookie_secret = ""
 
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
@@ -661,14 +688,21 @@ def start_quiz(
         lan_ip  = _get_lan_ip()
         lan_url = f"http://{lan_ip}:{port}"
         print(f"[INFO] 局域网访问: {lan_url}  （同网段其他设备可用此地址）")
+        from med_exam_toolkit.auth import print_public_internet_warning
+        print_public_internet_warning(port)
 
-    # ── 访问码（醒目展示）──────────────────────────────────────────
-    mid   = _CODE_DISPLAY = _access_code[:4] + " " + _access_code[4:]
-    print(f"\n{'━'*40}")
-    print(f"  🔑 访问码：  {mid}")
-    print(f"  首次打开浏览器时需要输入此码")
-    print(f"  重启服务后访问码会自动更新")
-    print(f"{'━'*40}\n")
+    # ── 访问码（醒目展示）或无 PIN 提示 ────────────────────────────
+    if _pin_enabled:
+        mid = _access_code[:4] + " " + _access_code[4:]
+        print(f"\n{'━'*40}")
+        print(f"  🔑 访问码：  {mid}")
+        print(f"  首次打开浏览器时需要输入此码")
+        print(f"  重启服务后访问码会自动更新")
+        print(f"{'━'*40}\n")
+    else:
+        print()
+        print("  ⚠️  访问码验证已关闭（--no-pin），任何人可直接访问")
+        print()
     print("[INFO] Ctrl+C 退出")
 
     if not no_browser:

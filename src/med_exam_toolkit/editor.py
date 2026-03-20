@@ -28,6 +28,7 @@ _server_host:   str         = "127.0.0.1"
 # ── 访问码验证 ──
 _access_code:   str         = ""
 _cookie_secret: str         = ""
+_pin_enabled:   bool        = True   # False 时跳过验证（--no-pin）
 
 # ── 写操作锁：多线程并发时保护 _questions 的结构完整性 ──
 # 使用 RLock（可重入锁），允许同一线程在持有锁时再次加锁（防死锁）。
@@ -57,7 +58,7 @@ def _get_lan_ip() -> str:
     """获取本机局域网 IP，失败时回退到 127.0.0.1。"""
     try:
         with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
-            s.connect(("114.114.114.114", 80))
+            s.connect(("8.8.8.8", 80))
             return s.getsockname()[0]
     except OSError:
         return "127.0.0.1"
@@ -82,8 +83,18 @@ def _guard():
     from med_exam_toolkit.auth import is_authenticated, render_pin_page
     from flask import Response
 
-    # ── 0. 放行 POST /auth ────────────────────────────────────────
+    # ── 0. /auth POST：速率限制后放行 ────────────────────────────
     if request.path == "/auth" and request.method == "POST":
+        if _pin_enabled:
+            ip = request.remote_addr or "unknown"
+            from med_exam_toolkit.auth import check_brute_force
+            allowed, retry_after = check_brute_force(ip)
+            if not allowed:
+                reason = f"尝试次数过多，请 {retry_after} 秒后重试"
+                return Response(
+                    render_pin_page("题库编辑器", error=reason),
+                    mimetype="text/html", status=429,
+                )
         return None
 
     # ── 1. Host 头校验 ────────────────────────────────────────────
@@ -110,8 +121,8 @@ def _guard():
         if host_port is not None and host_port != _server_port:
             return jsonify({"error": "Forbidden"}), 403
 
-    # ── 2. 访问码验证 ─────────────────────────────────────────────
-    if not is_authenticated(_cookie_secret, _access_code):
+    # ── 2. 访问码验证（_pin_enabled=False 时跳过）────────────────
+    if _pin_enabled and not is_authenticated(_cookie_secret, _access_code):
         if request.path == "/" and request.method == "GET":
             return Response(render_pin_page("题库编辑器"), mimetype="text/html")
         return jsonify({"error": "Unauthorized", "auth": False}), 401
@@ -122,12 +133,18 @@ def _guard():
         if not secrets.compare_digest(token, _session_token):
             return jsonify({"error": "Unauthorized"}), 401
 
-        # 4. 速率限制
         ip = request.remote_addr or "unknown"
         if not _check_rate_limit(ip):
             return jsonify({"error": "Too Many Requests"}), 429
 
     return None
+
+
+@app.after_request
+def _security_headers(response):
+    from med_exam_toolkit.auth import apply_security_headers
+    apply_security_headers(response)
+    return response
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -505,12 +522,18 @@ def auth():
     """验证访问码，通过后写入签名 Cookie 并重定向首页。"""
     from med_exam_toolkit.auth import render_pin_page, set_auth_cookie
     from flask import Response
+    ip   = request.remote_addr or "unknown"
     code = request.form.get("code", "").strip().upper()
-    if secrets.compare_digest(code, _access_code):
+    if _pin_enabled and secrets.compare_digest(code, _access_code):
+        from med_exam_toolkit.auth import record_success
+        record_success(ip)
         resp = make_response("", 302)
         resp.headers["Location"] = "/"
         set_auth_cookie(resp, _cookie_secret, _access_code)
         return resp
+    if _pin_enabled:
+        from med_exam_toolkit.auth import record_failure
+        record_failure(ip)
     return Response(
         render_pin_page("题库编辑器", error="访问码不正确，请重新输入"),
         mimetype="text/html",
@@ -524,12 +547,13 @@ def auth():
 # ═══════════════════════════════════════════════════════════════════
 
 def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
-                 no_browser: bool = False, password: str | None = None) -> None:
+                 no_browser: bool = False, password: str | None = None,
+                 no_pin: bool = False) -> None:
     from med_exam_toolkit.bank import load_bank
     from med_exam_toolkit.auth import generate_access_code
 
     global _questions, _bank_path, _password, _session_token, _asset_ver, \
-           _server_port, _server_host, _access_code, _cookie_secret
+           _server_port, _server_host, _access_code, _cookie_secret, _pin_enabled
     _bank_path     = Path(bank_path).resolve()
     _password      = password
     _server_port   = port
@@ -537,8 +561,13 @@ def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
     _session_token = secrets.token_hex(32)
     _asset_ver     = secrets.token_hex(8)
 
-    # ── 生成访问码 ──────────────────────────────────────────────────
-    _access_code, _cookie_secret = generate_access_code()
+    _pin_enabled = not no_pin
+
+    # ── 生成访问码（--no-pin 时跳过）────────────────────────────────
+    if _pin_enabled:
+        _access_code, _cookie_secret = generate_access_code()
+    else:
+        _access_code = _cookie_secret = ""
 
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
@@ -553,13 +582,22 @@ def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
         print("[WARN] ⚠️  编辑器已开放局域网访问，所有持有 Token 的用户均可修改题库。")
         print("[WARN]    建议仅在受信任的私有网络中使用，不要暴露到公网。")
 
-    # ── 访问码（醒目展示）──────────────────────────────────────────
-    mid = _access_code[:4] + " " + _access_code[4:]
-    print(f"\n{'━'*40}")
-    print(f"  🔑 访问码：  {mid}")
-    print(f"  首次打开浏览器时需要输入此码")
-    print(f"  重启服务后访问码会自动更新")
-    print(f"{'━'*40}\n")
+    if host == "0.0.0.0":
+        from med_exam_toolkit.auth import print_public_internet_warning
+        print_public_internet_warning(port)
+
+    # ── 访问码（醒目展示）或无 PIN 提示 ────────────────────────────
+    if _pin_enabled:
+        mid = _access_code[:4] + " " + _access_code[4:]
+        print(f"\n{'━'*40}")
+        print(f"  🔑 访问码：  {mid}")
+        print(f"  首次打开浏览器时需要输入此码")
+        print(f"  重启服务后访问码会自动更新")
+        print(f"{'━'*40}\n")
+    else:
+        print()
+        print("  ⚠️  访问码验证已关闭（--no-pin），任何人可直接访问")
+        print()
     print("[INFO] 按 Ctrl+C 退出")
 
     if not no_browser:
