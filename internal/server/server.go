@@ -17,9 +17,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/auth"
-	"github.com/med-exam-kit/med-exam-kit/internal/models"
-	"github.com/med-exam-kit/med-exam-kit/internal/progress"
+	"github.com/zyh001/med-exam-kit/internal/auth"
+	"github.com/zyh001/med-exam-kit/internal/models"
+	"github.com/zyh001/med-exam-kit/internal/progress"
 )
 
 type Config struct {

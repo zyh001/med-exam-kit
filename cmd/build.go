@@ -3,11 +3,11 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/bank"
-	"github.com/med-exam-kit/med-exam-kit/internal/dedup"
-	"github.com/med-exam-kit/med-exam-kit/internal/loader"
-	"github.com/med-exam-kit/med-exam-kit/internal/parsers"
 	"github.com/spf13/cobra"
+	"github.com/zyh001/med-exam-kit/internal/bank"
+	"github.com/zyh001/med-exam-kit/internal/dedup"
+	"github.com/zyh001/med-exam-kit/internal/loader"
+	"github.com/zyh001/med-exam-kit/internal/parsers"
 )
 
 var buildCmd = &cobra.Command{

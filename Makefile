@@ -2,7 +2,7 @@
 # Pure Go SQLite (modernc.org/sqlite) - no CGO required.
 
 BINARY  := med-exam
-MODULE  := github.com/med-exam-kit/med-exam-kit
+MODULE  := github.com/zyh001/med-exam-kit
 LDFLAGS := -ldflags="-s -w"
 
 # ── 默认：本机编译 ─────────────────────────────────────────────────────

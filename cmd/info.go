@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/bank"
 	"github.com/spf13/cobra"
+	"github.com/zyh001/med-exam-kit/internal/bank"
 )
 
 var infoCmd = &cobra.Command{

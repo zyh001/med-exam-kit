@@ -14,7 +14,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/models"
+	"github.com/zyh001/med-exam-kit/internal/models"
 )
 
 const (
