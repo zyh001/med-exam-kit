@@ -5,7 +5,6 @@
 *.dylib
 *.test
 # Go 构建缓存和模块文件
-/go.sum
 /go.work
 # 临时文件和目录
 *.log
