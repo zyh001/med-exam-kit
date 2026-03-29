@@ -7,6 +7,7 @@ import (
 	"os/exec"
 
 	"github.com/spf13/cobra"
+	"github.com/zyh001/med-exam-kit/internal/bank"
 	"github.com/zyh001/med-exam-kit/internal/server"
 )
 
@@ -23,11 +24,24 @@ func init() {
 }
 
 func runEditor(cmd *cobra.Command, args []string) error {
+	bankPath, _ := cmd.Root().PersistentFlags().GetString("bank")
+	password, _ := cmd.Root().PersistentFlags().GetString("password")
 	host, _ := cmd.Flags().GetString("host")
 	port, _ := cmd.Flags().GetInt("port")
 
+	if bankPath == "" {
+		return fmt.Errorf("请用 -b 指定题库路径")
+	}
+
+	fmt.Printf("📂 加载题库：%s\n", bankPath)
+	questions, err := bank.LoadBank(bankPath, password)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("   共 %d 道题\n", len(questions))
+
 	cfg := server.Config{
-		Questions:     nil,
+		Questions:     questions,
 		Host:          host,
 		Port:          port,
 		RecordEnabled: false,

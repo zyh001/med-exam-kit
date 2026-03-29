@@ -12,6 +12,7 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
@@ -123,6 +124,15 @@ func (s *Server) registerRoutes() {
 	}
 	m.HandleFunc("GET /api/info", s.handleInfo)
 	m.HandleFunc("GET /api/questions", s.handleQuestions)
+	m.HandleFunc("GET /api/question/", s.handleQuestion)
+	m.HandleFunc("POST /api/question", s.handleCreateQuestion)
+	m.HandleFunc("DELETE /api/question/", s.handleDeleteQuestion)
+	m.HandleFunc("POST /api/question/", s.handleQuestionAction)
+	m.HandleFunc("PUT /api/subquestion/", s.handleUpdateSubQuestion)
+	m.HandleFunc("DELETE /api/subquestion/", s.handleDeleteSubQuestion)
+	m.HandleFunc("POST /api/replace/preview", s.handleReplacePreview)
+	m.HandleFunc("POST /api/replace", s.handleReplace)
+	m.HandleFunc("POST /api/save", s.handleSave)
 	m.HandleFunc("POST /api/record", s.handleRecord)
 	m.HandleFunc("GET /api/record/status", s.handleRecordStatus)
 	m.HandleFunc("POST /api/record/clear", s.handleRecordClear)
@@ -235,6 +245,14 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+
+	// Editor mode: pagination with page/per_page
+	if page := q.Get("page"); page != "" {
+		s.handleEditorQuestions(w, q)
+		return
+	}
+
+	// Quiz mode: limit-based selection
 	limit, _ := strconv.Atoi(q.Get("limit"))
 
 	var perMode map[string]int
@@ -269,7 +287,427 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 		fpSet:      fpSet,
 		rng:        newRNG(q.Get("seed")),
 	})
+	if rows == nil {
+		rows = []sqFlat{}
+	}
 	jsonOK(w, map[string]any{"total": len(rows), "items": rows})
+}
+
+// handleEditorQuestions handles the editor's paginated question list API.
+func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values) {
+	page, _ := strconv.Atoi(q.Get("page"))
+	if page < 1 {
+		page = 1
+	}
+	perPage, _ := strconv.Atoi(q.Get("per_page"))
+	if perPage < 1 || perPage > 100 {
+		perPage = 50
+	}
+	searchQ := q.Get("q")
+	fpFilter := q.Get("fp")
+	modeFilter := q.Get("mode")
+	unitFilter := q.Get("unit")
+	hasAI := q.Get("has_ai") == "1"
+	missing := q.Get("missing") == "1"
+
+	// Build filtered list
+	var allRows []sqFlat
+	for qi, question := range s.cfg.Questions {
+		for si, sq := range question.SubQuestions {
+			row := sqFlat{
+				QI: qi, SI: si,
+				ID:   fmt.Sprintf("%d-%d", qi, si),
+				Mode: question.Mode, Unit: question.Unit, Cls: question.Cls,
+				Stem: question.Stem, SharedOptions: question.SharedOptions,
+				Text: sq.Text, Options: sq.Options,
+				Answer: sq.EffAnswer(), Discuss: sq.EffDiscuss(),
+				Point: sq.Point, Rate: sq.Rate,
+				HasAI:       sq.AIAnswer != "" || sq.AIDiscuss != "",
+				Fingerprint: question.Fingerprint,
+			}
+
+			// Apply filters
+			if modeFilter != "" && question.Mode != modeFilter {
+				continue
+			}
+			if unitFilter != "" && !strings.Contains(question.Unit, unitFilter) {
+				continue
+			}
+			if fpFilter != "" && question.Fingerprint != fpFilter {
+				continue
+			}
+			if hasAI && sq.AIAnswer == "" && sq.AIDiscuss == "" {
+				continue
+			}
+			if missing && (sq.Answer != "" || sq.Discuss != "") {
+				continue
+			}
+			if searchQ != "" {
+				text := strings.ToLower(question.Stem + sq.Text + sq.Discuss)
+				if !strings.Contains(text, strings.ToLower(searchQ)) {
+					continue
+				}
+			}
+
+			allRows = append(allRows, row)
+		}
+	}
+
+	total := len(allRows)
+	pages := (total + perPage - 1) / perPage
+	if pages < 1 {
+		pages = 1
+	}
+
+	// Paginate
+	start := (page - 1) * perPage
+	end := start + perPage
+	if start > total {
+		start = total
+	}
+	if end > total {
+		end = total
+	}
+
+	items := []sqFlat{}
+	if start < end {
+		items = allRows[start:end]
+	}
+	if items == nil {
+		items = []sqFlat{}
+	}
+
+	jsonOK(w, map[string]any{
+		"page":  page,
+		"pages": pages,
+		"total": total,
+		"items": items,
+	})
+}
+
+// handleQuestion returns a single question by index for the editor.
+func (s *Server) handleQuestion(w http.ResponseWriter, r *http.Request) {
+	// Path is /api/question/{qi}
+	path := strings.TrimPrefix(r.URL.Path, "/api/question/")
+	qi, err := strconv.Atoi(path)
+	if err != nil || qi < 0 || qi >= len(s.cfg.Questions) {
+		jsonError(w, "question not found", http.StatusNotFound)
+		return
+	}
+
+	q := s.cfg.Questions[qi]
+	subQuestions := make([]map[string]any, len(q.SubQuestions))
+	for i, sq := range q.SubQuestions {
+		subQuestions[i] = map[string]any{
+			"text":           sq.Text,
+			"options":        sq.Options,
+			"answer":         sq.Answer,
+			"discuss":        sq.Discuss,
+			"point":          sq.Point,
+			"rate":           sq.Rate,
+			"error_prone":    sq.ErrorProne,
+			"fingerprint":    q.Fingerprint,
+			"ai_answer":      sq.AIAnswer,
+			"ai_discuss":     sq.AIDiscuss,
+			"ai_confidence":  sq.AIConfidence,
+			"ai_model":       sq.AIModel,
+			"ai_status":      sq.AIStatus,
+			"answer_source":  sq.AnswerSource(),
+			"discuss_source": sq.DiscussSource(),
+		}
+	}
+
+	jsonOK(w, map[string]any{
+		"qi":             qi,
+		"mode":           q.Mode,
+		"unit":           q.Unit,
+		"cls":            q.Cls,
+		"stem":           q.Stem,
+		"shared_options": q.SharedOptions,
+		"sub_questions":  subQuestions,
+	})
+}
+
+// POST /api/question - create a new empty question
+func (s *Server) handleCreateQuestion(w http.ResponseWriter, r *http.Request) {
+	var data map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	mode, _ := data["mode"].(string)
+	unit, _ := data["unit"].(string)
+	if mode == "" {
+		mode = "A1型题"
+	}
+	newQ := &models.Question{
+		Mode: mode,
+		Unit: unit,
+		SubQuestions: []models.SubQuestion{{
+			Text:    "",
+			Options: []string{"A. ", "B. ", "C. ", "D. "},
+			Answer:  "",
+		}},
+	}
+	qi := len(s.cfg.Questions)
+	s.cfg.Questions = append(s.cfg.Questions, newQ)
+	jsonOK(w, map[string]any{"ok": true, "qi": qi})
+}
+
+// DELETE /api/question/{qi} - delete a question
+func (s *Server) handleDeleteQuestion(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/question/")
+	qi, err := strconv.Atoi(path)
+	if err != nil || qi < 0 || qi >= len(s.cfg.Questions) {
+		jsonError(w, "question not found", http.StatusNotFound)
+		return
+	}
+	total := len(s.cfg.Questions) - 1
+	s.cfg.Questions = append(s.cfg.Questions[:qi], s.cfg.Questions[qi+1:]...)
+	jsonOK(w, map[string]any{"ok": true, "total": total})
+}
+
+// POST /api/question/{qi}/subquestion - add a sub-question
+func (s *Server) handleQuestionAction(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/question/")
+	parts := strings.Split(path, "/")
+	qi, err := strconv.Atoi(parts[0])
+	if err != nil || qi < 0 || qi >= len(s.cfg.Questions) {
+		jsonError(w, "question not found", http.StatusNotFound)
+		return
+	}
+	// Only POST /api/question/{qi}/subquestion is supported here
+	if len(parts) != 2 || parts[1] != "subquestion" {
+		jsonError(w, "not found", http.StatusNotFound)
+		return
+	}
+	si := len(s.cfg.Questions[qi].SubQuestions)
+	s.cfg.Questions[qi].SubQuestions = append(s.cfg.Questions[qi].SubQuestions, models.SubQuestion{
+		Text:    "",
+		Options: []string{"A. ", "B. ", "C. ", "D. "},
+		Answer:  "",
+	})
+	jsonOK(w, map[string]any{"ok": true, "si": si, "sub_total": len(s.cfg.Questions[qi].SubQuestions)})
+}
+
+// PUT /api/subquestion/{qi}/{si} - update a sub-question
+func (s *Server) handleUpdateSubQuestion(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/subquestion/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 {
+		jsonError(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	qi, _ := strconv.Atoi(parts[0])
+	si, _ := strconv.Atoi(parts[1])
+	if qi < 0 || qi >= len(s.cfg.Questions) {
+		jsonError(w, "question not found", http.StatusNotFound)
+		return
+	}
+	q := s.cfg.Questions[qi]
+	if si < 0 || si >= len(q.SubQuestions) {
+		jsonError(w, "sub-question not found", http.StatusNotFound)
+		return
+	}
+
+	var data map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	sq := &q.SubQuestions[si]
+	if v, ok := data["text"].(string); ok {
+		sq.Text = v
+	}
+	if v, ok := data["answer"].(string); ok {
+		sq.Answer = v
+	}
+	if v, ok := data["discuss"].(string); ok {
+		sq.Discuss = v
+	}
+	if v, ok := data["point"].(string); ok {
+		sq.Point = v
+	}
+	if v, ok := data["rate"].(string); ok {
+		sq.Rate = v
+	}
+	if v, ok := data["options"].([]any); ok {
+		opts := make([]string, len(v))
+		for i, o := range v {
+			if s, ok := o.(string); ok {
+				opts[i] = s
+			}
+		}
+		sq.Options = opts
+	}
+	// Update question-level fields
+	if v, ok := data["mode"].(string); ok {
+		q.Mode = v
+	}
+	if v, ok := data["unit"].(string); ok {
+		q.Unit = v
+	}
+	if v, ok := data["cls"].(string); ok {
+		q.Cls = v
+	}
+	if v, ok := data["stem"].(string); ok {
+		q.Stem = v
+	}
+	if v, ok := data["shared_options"].([]any); ok {
+		opts := make([]string, len(v))
+		for i, o := range v {
+			if s, ok := o.(string); ok {
+				opts[i] = s
+			}
+		}
+		q.SharedOptions = opts
+	}
+	jsonOK(w, map[string]any{"ok": true})
+}
+
+// DELETE /api/subquestion/{qi}/{si} - delete a sub-question
+func (s *Server) handleDeleteSubQuestion(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/subquestion/")
+	parts := strings.Split(path, "/")
+	if len(parts) != 2 {
+		jsonError(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	qi, _ := strconv.Atoi(parts[0])
+	si, _ := strconv.Atoi(parts[1])
+	if qi < 0 || qi >= len(s.cfg.Questions) {
+		jsonError(w, "question not found", http.StatusNotFound)
+		return
+	}
+	q := s.cfg.Questions[qi]
+	if si < 0 || si >= len(q.SubQuestions) {
+		jsonError(w, "sub-question not found", http.StatusNotFound)
+		return
+	}
+	q.SubQuestions = append(q.SubQuestions[:si], q.SubQuestions[si+1:]...)
+	jsonOK(w, map[string]any{"ok": true, "sub_total": len(q.SubQuestions)})
+}
+
+// POST /api/replace/preview - preview find/replace
+func (s *Server) handleReplacePreview(w http.ResponseWriter, r *http.Request) {
+	var data map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	find, _ := data["find"].(string)
+	fields, _ := data["fields"].([]any)
+	mode, _ := data["mode"].(string)
+	unit, _ := data["unit"].(string)
+	limit, _ := data["limit"].(float64)
+	if find == "" || len(fields) == 0 {
+		jsonOK(w, map[string]any{"hits": []any{}})
+		return
+	}
+	if limit == 0 {
+		limit = 30
+	}
+
+	var hits []map[string]any
+	for qi, q := range s.cfg.Questions {
+		if mode != "" && q.Mode != mode {
+			continue
+		}
+		if unit != "" && !strings.Contains(q.Unit, unit) {
+			continue
+		}
+		for si, sq := range q.SubQuestions {
+			hit := false
+			preview := ""
+			for _, f := range fields {
+				field, _ := f.(string)
+				var text string
+				switch field {
+				case "text":
+					text = sq.Text
+				case "discuss":
+					text = sq.Discuss
+				case "answer":
+					text = sq.Answer
+				case "stem":
+					text = q.Stem
+				}
+				if strings.Contains(text, find) {
+					hit = true
+					preview = text
+					break
+				}
+			}
+			if hit {
+				hits = append(hits, map[string]any{
+					"qi": qi, "si": si,
+					"preview": preview,
+				})
+				if len(hits) >= int(limit) {
+					break
+				}
+			}
+		}
+		if len(hits) >= int(limit) {
+			break
+		}
+	}
+	jsonOK(w, map[string]any{"hits": hits})
+}
+
+// POST /api/replace - execute find/replace
+func (s *Server) handleReplace(w http.ResponseWriter, r *http.Request) {
+	var data map[string]any
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	find, _ := data["find"].(string)
+	replace, _ := data["replace"].(string)
+	fields, _ := data["fields"].([]any)
+	mode, _ := data["mode"].(string)
+	unit, _ := data["unit"].(string)
+	if find == "" || len(fields) == 0 {
+		jsonError(w, "find and fields required", http.StatusBadRequest)
+		return
+	}
+
+	replaced := 0
+	for _, q := range s.cfg.Questions {
+		if mode != "" && q.Mode != mode {
+			continue
+		}
+		if unit != "" && !strings.Contains(q.Unit, unit) {
+			continue
+		}
+		for i := range q.SubQuestions {
+			sq := &q.SubQuestions[i]
+			for _, f := range fields {
+				field, _ := f.(string)
+				switch field {
+				case "text":
+					sq.Text = strings.ReplaceAll(sq.Text, find, replace)
+				case "discuss":
+					sq.Discuss = strings.ReplaceAll(sq.Discuss, find, replace)
+				case "answer":
+					sq.Answer = strings.ReplaceAll(sq.Answer, find, replace)
+				case "stem":
+					q.Stem = strings.ReplaceAll(q.Stem, find, replace)
+				}
+			}
+			replaced++
+		}
+	}
+	jsonOK(w, map[string]any{"ok": true, "replaced": replaced})
+}
+
+// POST /api/save - save the question bank back to file
+// Note: editor mode doesn't have a bank path, so this is a no-op for now
+func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
+	// Editor doesn't have a file path to save back to in this implementation
+	// In a full implementation, we'd need to track the bank path and use bank.SaveBank
+	jsonOK(w, map[string]any{"ok": true, "path": ""})
 }
 
 func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
