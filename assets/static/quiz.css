@@ -925,7 +925,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
    Toast
 ════════════════════════════════════════════ */
 #toast{
-  position:fixed;bottom:calc(env(safe-area-inset-bottom)+80px);left:50%;
+  position:fixed;bottom:calc(env(safe-area-inset-bottom) + 80px);left:50%;
   transform:translateX(-50%) translateY(20px);
   background:var(--surface);border:1px solid var(--border);border-radius:24px;
   padding:9px 20px;font-size:13px;color:var(--text);
@@ -1341,7 +1341,7 @@ button,a,[role=button],label{touch-action:manipulation}
 /* 趋势折线图 */
 .trend-chart-wrap{position:relative;height:90px}
 .trend-chart{width:100%;height:90px;overflow:visible}
-.trend-bar{fill:var(--accent);opacity:.7;rx:3;ry:3;transition:opacity .2s}
+.trend-bar{fill:var(--accent);opacity:.7;border-radius:3px;transition:opacity .2s}
 .trend-bar:hover{opacity:1}
 .trend-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .trend-dot{fill:var(--accent)}
