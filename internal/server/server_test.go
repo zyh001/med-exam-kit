@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/models"
+	"github.com/zyh001/med-exam-kit/internal/models"
 )
 
 func makeServer() *Server {

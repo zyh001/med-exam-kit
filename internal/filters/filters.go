@@ -4,7 +4,7 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/models"
+	"github.com/zyh001/med-exam-kit/internal/models"
 )
 
 // FilterCriteria holds all filter conditions (AND semantics).

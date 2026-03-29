@@ -3,7 +3,7 @@ package dedup
 import (
 	"testing"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/models"
+	"github.com/zyh001/med-exam-kit/internal/models"
 )
 
 func makeQ(mode, text, answer string, opts []string) *models.Question {

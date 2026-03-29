@@ -7,8 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/models"
-	"github.com/med-exam-kit/med-exam-kit/internal/parsers"
+	"github.com/zyh001/med-exam-kit/internal/models"
+	"github.com/zyh001/med-exam-kit/internal/parsers"
 )
 
 // Load scans inputDir for *.json files, dispatches each to the correct parser

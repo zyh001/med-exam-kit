@@ -6,11 +6,11 @@ import (
 	"net"
 	"os"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/auth"
-	"github.com/med-exam-kit/med-exam-kit/internal/bank"
-	"github.com/med-exam-kit/med-exam-kit/internal/progress"
-	"github.com/med-exam-kit/med-exam-kit/internal/server"
 	"github.com/spf13/cobra"
+	"github.com/zyh001/med-exam-kit/internal/auth"
+	"github.com/zyh001/med-exam-kit/internal/bank"
+	"github.com/zyh001/med-exam-kit/internal/progress"
+	"github.com/zyh001/med-exam-kit/internal/server"
 )
 
 var quizCmd = &cobra.Command{

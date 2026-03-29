@@ -3,7 +3,7 @@ package main
 import (
 	"embed"
 
-	"github.com/med-exam-kit/med-exam-kit/cmd"
+	"github.com/zyh001/med-exam-kit/cmd"
 )
 
 // Assets holds all frontend static files and HTML templates embedded into

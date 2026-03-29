@@ -1,4 +1,4 @@
-module github.com/med-exam-kit/med-exam-kit
+module github.com/zyh001/med-exam-kit
 
 go 1.22
 

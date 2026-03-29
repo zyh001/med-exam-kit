@@ -6,10 +6,10 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/med-exam-kit/med-exam-kit/internal/bank"
-	"github.com/med-exam-kit/med-exam-kit/internal/exporters"
-	"github.com/med-exam-kit/med-exam-kit/internal/filters"
 	"github.com/spf13/cobra"
+	"github.com/zyh001/med-exam-kit/internal/bank"
+	"github.com/zyh001/med-exam-kit/internal/exporters"
+	"github.com/zyh001/med-exam-kit/internal/filters"
 )
 
 var exportCmd = &cobra.Command{
