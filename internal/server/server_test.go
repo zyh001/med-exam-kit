@@ -63,8 +63,8 @@ func TestHandleInfo(t *testing.T) {
 	}
 	var resp map[string]any
 	json.Unmarshal(w.Body.Bytes(), &resp)
-	if v, ok := resp["question_count"].(float64); !ok || int(v) != 3 {
-		t.Fatalf("wrong question_count: %v", resp["question_count"])
+	if v, ok := resp["total_sq"].(float64); !ok || int(v) != 4 {
+		t.Fatalf("wrong total_sq: %v", resp["total_sq"])
 	}
 }
 
