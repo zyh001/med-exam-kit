@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>题库编辑器</title>
+<link rel="stylesheet" href="/static/common.css">
+<link rel="stylesheet" href="/static/editor.css?v={{ASSET_VER}}">
+<script>window.SESSION_TOKEN = "{{SESSION_TOKEN}}";</script>
+<script src="/static/common.js?v={{ASSET_VER}}"></script>
+</head>
+<body>
+
+<div id="topbar">
+  <div class="topbar-brand">
+    <div class="brand-icon">编</div>
+    <div><div class="brand-title">题库编辑器</div></div>
+  </div>
+  <div class="topbar-meta">
+    <span class="bank-name" id="bankName">加载中…</span>
+    <span id="topStats"></span>
+    <div class="dirty-dot" id="dirtyDot" title="有未保存的改动"></div>
+  </div>
+  <button class="top-btn" id="btnStats"   onclick="openStats()">📊 统计</button>
+  <button class="top-btn" id="btnNewQ"    onclick="openNewQuestion()">＋ 新题</button>
+  <button class="top-btn" id="btnReplace" onclick="openReplace()">🔄 替换</button>
+  <button class="top-btn" id="btnSave"    onclick="doSave()">保存</button>
+  <button id="btnTheme" onclick="toggleThemeMenu()" title="切换主题">🎨</button>
+</div>
+
+<div id="themeMenu">
+  <div class="theme-opt" data-t="dark"><span class="theme-swatch" style="background:linear-gradient(135deg,#0d1117 50%,#4493f8 50%)"></span>夜间</div>
+  <div class="theme-opt" data-t="light"><span class="theme-swatch" style="background:linear-gradient(135deg,#f0f4f8 50%,#0969da 50%)"></span>日间</div>
+  <div class="theme-opt" data-t="warm"><span class="theme-swatch" style="background:linear-gradient(135deg,#1a1510 50%,#f59e0b 50%)"></span>暖调</div>
+  <div class="theme-opt" data-t="terminal"><span class="theme-swatch" style="background:linear-gradient(135deg,#0a0f0a 50%,#22c55e 50%)"></span>终端</div>
+</div>
+
+<div id="layout">
+  <div id="sidebar">
+    <div id="search-area">
+      <div class="search-field">
+        <span class="search-icon">🔍</span>
+        <input id="searchInput" placeholder="搜索题目文字、解析…" oninput="debounceSearch()">
+      </div>
+      <input id="fpInput" placeholder="指纹搜索（前缀或完整 MD5）" oninput="debounceSearch()">
+      <div class="filter-row">
+        <select class="filter-select" id="filterMode" onchange="loadList()"><option value="">全部题型</option></select>
+        <select class="filter-select" id="filterUnit" onchange="loadList()"><option value="">全部章节</option></select>
+      </div>
+      <div class="filter-checks">
+        <label><input type="checkbox" id="filterAI" onchange="loadList()"> 含 AI 内容</label>
+        <label><input type="checkbox" id="filterMissing" onchange="loadList()"> 缺答案/解析</label>
+      </div>
+    </div>
+    <div id="result-count"></div>
+    <div id="qlist"></div>
+    <div id="pagination">
+      <button class="page-btn" id="btnPrev" onclick="prevPage()">‹</button>
+      <span id="pageInfo"></span>
+      <button class="page-btn" id="btnNext" onclick="nextPage()">›</button>
+      <div class="page-jump">
+        <span>跳转</span>
+        <input id="jumpInput" type="number" min="1" placeholder="页" onkeydown="if(event.key==='Enter')jumpPage(this.value)">
+      </div>
+    </div>
+  </div>
+  <div id="editor">
+    <div id="mobileBack" onclick="closeMobileEditor()">← 返回列表</div>
+    <div class="empty" id="emptyHint"><span class="empty-icon">✎</span>从左侧选择一道题目开始编辑</div>
+  </div>
+</div>
+
+<!-- 批量替换 -->
+<div class="modal-backdrop" id="replaceModal" style="display:none" onclick="if(event.target===this)closeReplace()">
+  <div class="modal wide">
+    <div class="modal-title"><div class="modal-title-icon primary">🔄</div>批量替换</div>
+    <div class="field-group"><span class="field-label">查找文本</span><input class="field-input" id="rFind" placeholder="输入要查找的文本"></div>
+    <div class="field-group"><span class="field-label">替换为</span><input class="field-input" id="rReplace" placeholder="替换后的文本（留空即删除）"></div>
+    <div class="field-group">
+      <span class="field-label">作用字段</span>
+      <div class="checkbox-group">
+        <label><input type="checkbox" value="text" checked> 题目文字</label>
+        <label><input type="checkbox" value="discuss" checked> 解析</label>
+        <label><input type="checkbox" value="answer"> 答案</label>
+        <label><input type="checkbox" value="point"> 考点</label>
+      </div>
+    </div>
+    <div class="field-group">
+      <span class="field-label">范围限制（可选）</span>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <select class="field-input" id="rMode" style="flex:1;min-width:120px"><option value="">全部题型</option></select>
+        <select class="field-input" id="rUnit" style="flex:1;min-width:120px"><option value="">全部章节</option></select>
+      </div>
+    </div>
+    <div id="replacePreviewBox"></div>
+    <div id="replacePreviewStatus" style="font-size:12px;color:var(--muted)"></div>
+    <div class="modal-btns">
+      <button class="btn btn-ghost"   onclick="closeReplace()">取消</button>
+      <button class="btn btn-ghost"   onclick="doReplacePreview()">👁 预览</button>
+      <button class="btn btn-primary" onclick="doReplace()" id="btnReplaceExec" disabled>执行替换</button>
+    </div>
+  </div>
+</div>
+
+<!-- 删除确认 -->
+<div class="modal-backdrop" id="deleteModal" style="display:none">
+  <div class="modal">
+    <div class="modal-title"><div class="modal-title-icon danger">🗑</div>确认删除</div>
+    <p class="modal-desc" id="deleteModalDesc">删除后不可撤销。确定要删除吗？</p>
+    <div class="modal-btns">
+      <button class="btn btn-ghost"  onclick="closeDelete()">取消</button>
+      <button class="btn btn-danger" onclick="confirmDelete()">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建题目 -->
+<div class="modal-backdrop" id="newQModal" style="display:none" onclick="if(event.target===this)closeNewQuestion()">
+  <div class="modal">
+    <div class="modal-title"><div class="modal-title-icon primary">＋</div>新建题目</div>
+    <div class="field-group"><span class="field-label">题型</span><select class="field-input" id="newQMode"></select></div>
+    <div class="field-group"><span class="field-label">章节</span><select class="field-input" id="newQUnit"></select></div>
+    <p class="modal-desc">将创建一道空白题目，请在编辑区补充内容后保存。</p>
+    <div class="modal-btns">
+      <button class="btn btn-ghost"   onclick="closeNewQuestion()">取消</button>
+      <button class="btn btn-primary" onclick="confirmNewQuestion()">创建</button>
+    </div>
+  </div>
+</div>
+
+<!-- 统计看板 -->
+<div class="modal-backdrop" id="statsModal" style="display:none" onclick="if(event.target===this)closeStats()">
+  <div class="modal wide">
+    <div class="modal-title"><div class="modal-title-icon success">📊</div>题库统计</div>
+    <div id="statsContent"><div style="text-align:center;color:var(--muted);padding:24px">加载中…</div></div>
+    <div class="modal-btns"><button class="btn btn-ghost" onclick="closeStats()">关闭</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="/static/editor.js?v={{ASSET_VER}}"></script>
+</body>
+</html>

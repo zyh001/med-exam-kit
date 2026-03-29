@@ -1,0 +1,23 @@
+# Go 编译生成的二进制文件
+*.exe
+*.dll
+*.so
+*.dylib
+*.test
+# Go 构建缓存和模块文件
+/go.sum
+/go.work
+# 临时文件和目录
+*.log
+*.tmp
+*.out
+*.prof
+# IDE 和编辑器生成的文件
+.idea/
+.vscode/
+*.sublime*
+# 系统生成的文件
+DS_Store
+Thumbs.db
+# 第三方依赖目录
+vendor/
