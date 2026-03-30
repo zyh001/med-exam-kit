@@ -58,11 +58,13 @@ func IsAuthenticated(r *http.Request, secret, accessCode string) bool {
 
 // SetAuthCookie writes the HMAC-signed auth cookie to the response.
 func SetAuthCookie(w http.ResponseWriter, r *http.Request, secret, accessCode string) {
-	host := r.Host
-	if idx := strings.LastIndex(host, ":"); idx >= 0 {
-		host = host[:idx]
+	proto := r.Header.Get("X-Forwarded-Proto")
+	var secure bool
+	if proto != "" {
+		secure = strings.EqualFold(proto, "https")
+	} else {
+		secure = r.TLS != nil
 	}
-	secure := host != "127.0.0.1" && host != "localhost" && host != "::1"
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCook,
 		Value:    sign(secret, accessCode),
