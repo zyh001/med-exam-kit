@@ -71,8 +71,11 @@ def set_auth_cookie(
     传入 True/False 可手动覆盖（例如 quiz.py 根据 _server_host 决定）。
     """
     if secure is None:
-        host = request.headers.get("Host", "").split(":")[0]
-        secure = host not in ("127.0.0.1", "localhost", "::1")
+        forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
+        if forwarded_proto:
+            secure = forwarded_proto.lower() == "https"
+        else:
+            secure = request.scheme == "https"
     response.set_cookie(
         _AUTH_COOKIE,
         _sign(cookie_secret, access_code),
