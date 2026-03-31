@@ -292,7 +292,7 @@ func (e *BankEnricher) process(pending []Task, questions []*models.Question) {
 	total := len(pending)
 	var success, failed int64
 
-	fmt.Println("\n  🚀 开始处理  按 Ctrl+C 可安全中断\n")
+	fmt.Println("\n  🚀 开始处理  按 Ctrl+C 可安全中断")
 
 	sem := make(chan struct{}, e.cfg.MaxWorkers)
 	var wg sync.WaitGroup
