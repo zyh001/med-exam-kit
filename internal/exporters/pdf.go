@@ -41,9 +41,10 @@ func ExportPDF(questions []*models.Question, outPath string) error {
 	p := &pdfWriter{w: f}
 	p.begin()
 
-	for qi, q := range questions {
-		for si, sq := range q.SubQuestions {
-			num := qi*len(q.SubQuestions) + si + 1
+	num := 0
+	for _, q := range questions {
+		for _, sq := range q.SubQuestions {
+			num++
 
 			// Question header
 			p.addText(fmt.Sprintf("第 %d 题  [%s]  %s", num, q.Mode, q.Unit), true, false)
@@ -233,16 +234,17 @@ func pdfEncode(s string) string {
 }
 
 func wrapText(text string, maxCols int) []string {
-	if len(text) <= maxCols {
+	runes := []rune(text)
+	if len(runes) <= maxCols {
 		return []string{text}
 	}
 	var lines []string
-	for len(text) > maxCols {
-		lines = append(lines, text[:maxCols])
-		text = text[maxCols:]
+	for len(runes) > maxCols {
+		lines = append(lines, string(runes[:maxCols]))
+		runes = runes[maxCols:]
 	}
-	if text != "" {
-		lines = append(lines, text)
+	if len(runes) > 0 {
+		lines = append(lines, string(runes))
 	}
 	return lines
 }
