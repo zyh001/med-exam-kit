@@ -8,8 +8,12 @@ import (
 
 	"github.com/spf13/cobra"
 	"github.com/zyh001/med-exam-kit/internal/bank"
+	"github.com/zyh001/med-exam-kit/internal/dedup"
 	"github.com/zyh001/med-exam-kit/internal/exporters"
 	"github.com/zyh001/med-exam-kit/internal/filters"
+	"github.com/zyh001/med-exam-kit/internal/loader"
+	"github.com/zyh001/med-exam-kit/internal/models"
+	"github.com/zyh001/med-exam-kit/internal/parsers"
 )
 
 var exportCmd = &cobra.Command{
@@ -20,9 +24,11 @@ var exportCmd = &cobra.Command{
 
 func init() {
 	rootCmd.AddCommand(exportCmd)
+	exportCmd.Flags().StringP("input", "i", "", "JSON 文件目录（与 --bank 二选一）")
 	exportCmd.Flags().StringP("output-dir", "o", "data/output", "输出目录")
 	exportCmd.Flags().StringSliceP("format", "f", []string{"xlsx"}, "导出格式：xlsx,csv,docx,pdf,json,db")
 	exportCmd.Flags().Bool("split-options", false, "拆分选项为独立列（xlsx/csv）")
+	exportCmd.Flags().Bool("dedup", true, "是否去重（仅 --input 模式）")
 	exportCmd.Flags().StringSlice("mode", nil, "题型过滤")
 	exportCmd.Flags().StringSlice("unit", nil, "章节关键词过滤")
 	exportCmd.Flags().StringSlice("pkg", nil, "来源过滤")
@@ -34,9 +40,11 @@ func init() {
 func runExport(cmd *cobra.Command, args []string) error {
 	bankPath, _ := cmd.Root().PersistentFlags().GetString("bank")
 	password, _ := cmd.Root().PersistentFlags().GetString("password")
+	inputDir, _ := cmd.Flags().GetString("input")
 	outDir, _ := cmd.Flags().GetString("output-dir")
 	formats, _ := cmd.Flags().GetStringSlice("format")
 	splitOpts, _ := cmd.Flags().GetBool("split-options")
+	doDedup, _ := cmd.Flags().GetBool("dedup")
 	modes, _ := cmd.Flags().GetStringSlice("mode")
 	units, _ := cmd.Flags().GetStringSlice("unit")
 	pkgs, _ := cmd.Flags().GetStringSlice("pkg")
@@ -44,14 +52,26 @@ func runExport(cmd *cobra.Command, args []string) error {
 	minRate, _ := cmd.Flags().GetInt("min-rate")
 	maxRate, _ := cmd.Flags().GetInt("max-rate")
 
-	if bankPath == "" {
-		return fmt.Errorf("请用 -b 指定题库路径")
-	}
+	var questions []*models.Question
+	var err error
 
-	fmt.Printf("📂 加载题库：%s\n", bankPath)
-	questions, err := bank.LoadBank(bankPath, password)
-	if err != nil {
-		return err
+	if bankPath != "" {
+		fmt.Printf("📂 加载题库：%s\n", bankPath)
+		questions, err = bank.LoadBank(bankPath, password)
+		if err != nil {
+			return err
+		}
+	} else if inputDir != "" {
+		fmt.Printf("📂 加载目录：%s\n", inputDir)
+		questions, err = loader.Load(inputDir, parsers.DefaultParserMap)
+		if err != nil {
+			return err
+		}
+		if doDedup && len(questions) > 0 {
+			questions = dedup.Deduplicate(questions, "strict")
+		}
+	} else {
+		return fmt.Errorf("请用 -b 指定题库路径 或 -i 指定 JSON 目录")
 	}
 	fmt.Printf("   共 %d 道题\n", len(questions))
 
