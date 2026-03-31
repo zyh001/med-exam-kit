@@ -2055,6 +2055,7 @@ function renderMemo(dir = 'forward') {
   newCard.className = 'memo-card';
   newCard.id = 'memo-card';
   newCard.innerHTML = `
+    <div class="memo-swipe-overlay" id="memo-swipe-overlay"></div>
     <div class="memo-card-question" id="memo-question-area">${questionHtml}</div>
     <div class="memo-card-answer" id="memo-answer-area">${answerHtml}</div>`;
 
