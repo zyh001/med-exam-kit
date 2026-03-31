@@ -126,7 +126,7 @@ func sheetXML(rows []Row, cols []string, ssIdx map[string]int) string {
 	var b strings.Builder
 	b.WriteString(`<?xml version="1.0" encoding="UTF-8" standalone="yes"?>`)
 	b.WriteString(`<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">`)
-	b.WriteString(`<sheetView showGridLines="1" tabSelected="1" workbookViewId="0"/>`)
+	b.WriteString(`<sheetViews><sheetView showGridLines="1" tabSelected="1" workbookViewId="0"/></sheetViews>`)
 	b.WriteString("<sheetData>")
 
 	// Header row (style 1 = bold)
