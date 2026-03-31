@@ -33,14 +33,6 @@ jobs:
             goos: linux
             goarch: amd64
             artifact: med-exam-linux-amd64
-          - os: ubuntu-latest
-            goos: linux
-            goarch: 386
-            artifact: med-exam-linux-386
-          - os: ubuntu-latest
-            goos: linux
-            goarch: arm64
-            artifact: med-exam-linux-arm64
           - os: macos-latest
             goos: darwin
             goarch: amd64
@@ -49,10 +41,6 @@ jobs:
             goos: darwin
             goarch: arm64
             artifact: med-exam-darwin-arm64
-          - os: windows-latest
-            goos: windows
-            goarch: 386
-            artifact: med-exam-windows-386.exe
           - os: windows-latest
             goos: windows
             goarch: amd64
