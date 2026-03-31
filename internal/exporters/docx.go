@@ -43,10 +43,11 @@ func buildDocumentXML(questions []*models.Question) string {
 	b.WriteString(`<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">`)
 	b.WriteString(`<w:body>`)
 
-	for qi, q := range questions {
-		for si, sq := range q.SubQuestions {
+	num := 0
+	for _, q := range questions {
+		for _, sq := range q.SubQuestions {
 			// Question number heading
-			num := qi*len(q.SubQuestions) + si + 1
+			num++
 			b.WriteString(para("heading", fmt.Sprintf("第 %d 题　[%s]　%s", num, q.Mode, q.Unit), false))
 
 			// Shared stem (A3/A4)
