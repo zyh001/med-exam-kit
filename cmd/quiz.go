@@ -72,6 +72,8 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		AccessCode:    accessCode,
 		CookieSecret:  cookieSecret,
 		RecordEnabled: recordEnabled,
+		BankPath:      bankPath,
+		Password:      password,
 	}
 
 	// Try to use embedded assets from main package (injected via build tag)
