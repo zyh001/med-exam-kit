@@ -13,6 +13,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -233,8 +234,15 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		unitSq[q.Unit] += cnt
 		unitModeSq[q.Unit][q.Mode] += cnt
 	}
+	bankName := "医考练习"
+	if s.cfg.BankPath != "" {
+		// e.g. "口腔执业医师题库.mqb" → "口腔执业医师题库"
+		base := filepath.Base(s.cfg.BankPath)
+		ext := filepath.Ext(base)
+		bankName = strings.TrimSuffix(base, ext)
+	}
 	jsonOK(w, map[string]any{
-		"bank_name":      "医考练习",
+		"bank_name":      bankName,
 		"total_sq":       total,
 		"units":          unitSet,
 		"modes":          modeSet,
