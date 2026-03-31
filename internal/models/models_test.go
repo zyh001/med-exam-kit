@@ -23,11 +23,11 @@ func TestEffAnswer_Empty(t *testing.T) {
 	}
 }
 
-func TestAnswerSource_OfficialWhenBothPresent(t *testing.T) {
-	// Core bug fix: official answer wins even when AI answer matches
+func TestAnswerSource_AIWhenBothSame(t *testing.T) {
+	// Python behaviour: when AI matches effective answer → source = "ai"
 	sq := SubQuestion{Answer: "C", AIAnswer: "C"}
-	if got := sq.AnswerSource(); got != "official" {
-		t.Fatalf("AnswerSource: want official, got %s", got)
+	if got := sq.AnswerSource(); got != "ai" {
+		t.Fatalf("AnswerSource: want ai, got %s", got)
 	}
 }
 

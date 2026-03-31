@@ -35,24 +35,31 @@ func (sq *SubQuestion) EffDiscuss() string {
 }
 
 // AnswerSource returns "official", "ai", or "".
-// Official always takes priority when present.
+// When ai_answer matches eff_answer → "ai" (includes: official empty, or official == AI).
+// Otherwise official has value → "official".
+// Matches Python behaviour exactly.
 func (sq *SubQuestion) AnswerSource() string {
-	if strings.TrimSpace(sq.Answer) != "" {
-		return "official"
-	}
-	if strings.TrimSpace(sq.AIAnswer) != "" {
+	ai := strings.TrimSpace(sq.AIAnswer)
+	eff := sq.EffAnswer()
+	if ai != "" && ai == eff {
 		return "ai"
+	}
+	if eff != "" {
+		return "official"
 	}
 	return ""
 }
 
 // DiscussSource returns "official", "ai", or "".
+// Same logic as AnswerSource but for the discuss field.
 func (sq *SubQuestion) DiscussSource() string {
-	if strings.TrimSpace(sq.Discuss) != "" {
-		return "official"
-	}
-	if strings.TrimSpace(sq.AIDiscuss) != "" {
+	ai := strings.TrimSpace(sq.AIDiscuss)
+	eff := sq.EffDiscuss()
+	if ai != "" && ai == eff {
 		return "ai"
+	}
+	if eff != "" {
+		return "official"
 	}
 	return ""
 }
