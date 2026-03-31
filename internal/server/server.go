@@ -19,6 +19,7 @@ import (
 	"time"
 
 	"github.com/zyh001/med-exam-kit/internal/auth"
+	"github.com/zyh001/med-exam-kit/internal/bank"
 	"github.com/zyh001/med-exam-kit/internal/models"
 	"github.com/zyh001/med-exam-kit/internal/progress"
 )
@@ -32,6 +33,8 @@ type Config struct {
 	AccessCode    string
 	CookieSecret  string
 	RecordEnabled bool
+	BankPath      string // path to .mqb file for saving
+	Password      string // encryption password
 }
 
 type Server struct {
@@ -703,11 +706,17 @@ func (s *Server) handleReplace(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/save - save the question bank back to file
-// Note: editor mode doesn't have a bank path, so this is a no-op for now
 func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
-	// Editor doesn't have a file path to save back to in this implementation
-	// In a full implementation, we'd need to track the bank path and use bank.SaveBank
-	jsonOK(w, map[string]any{"ok": true, "path": ""})
+	if s.cfg.BankPath == "" {
+		jsonError(w, "未配置题库路径，无法保存", http.StatusBadRequest)
+		return
+	}
+	outPath, err := bank.SaveBank(s.cfg.Questions, s.cfg.BankPath, s.cfg.Password, true, 6)
+	if err != nil {
+		jsonError(w, fmt.Sprintf("保存失败: %v", err), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]any{"ok": true, "path": outPath, "count": len(s.cfg.Questions)})
 }
 
 func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
