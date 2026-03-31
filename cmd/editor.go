@@ -3,8 +3,8 @@ package cmd
 import (
 	"fmt"
 	"net"
-	"os"
 	"os/exec"
+	"runtime"
 
 	"github.com/spf13/cobra"
 	"github.com/zyh001/med-exam-kit/internal/bank"
@@ -45,6 +45,8 @@ func runEditor(cmd *cobra.Command, args []string) error {
 		Host:          host,
 		Port:          port,
 		RecordEnabled: false,
+		BankPath:      bankPath,
+		Password:      password,
 	}
 	cfg.Assets = Assets
 
@@ -62,12 +64,12 @@ func runEditor(cmd *cobra.Command, args []string) error {
 
 func openBrowser(url string) {
 	var err error
-	switch os := os.Getenv("OSTYPE"); {
-	case os == "darwin":
+	switch runtime.GOOS {
+	case "darwin":
 		err = exec.Command("open", url).Run()
-	case os == "linux-gnu":
+	case "linux":
 		err = exec.Command("xdg-open", url).Run()
-	case os == "windows":
+	case "windows":
 		err = exec.Command("cmd", "/c", "start", url).Run()
 	}
 	_ = err
