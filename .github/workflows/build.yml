@@ -52,25 +52,26 @@ jobs:
           pip install pyinstaller
 
       - name: Build with PyInstaller
+        shell: bash
         run: |
-          pyinstaller ${{ matrix.pyinstaller_args }} \
-            --name "${{ matrix.artifact_name }}" \
-            --add-data "src/med_exam_toolkit/templates;templates" \
-            --add-data "src/med_exam_toolkit/static;static" \
-            --console \
-            --hidden-import click \
-            --hidden-import openpyxl \
-            --hidden-import docx \
-            --hidden-import reportlab \
-            --hidden-import cryptography \
-            --hidden-import sqlalchemy \
-            --hidden-import yaml \
-            --hidden-import openai \
-            --hidden-import flask \
-            --hidden-import flask_compress \
-            --hidden-import tqdm \
-            --hidden-import termcolor \
-            --hidden-import lxml \
+          pyinstaller --onefile --noconfirm `
+            --name "${{ matrix.artifact_name }}" `
+            --add-data "src/med_exam_toolkit/templates;templates" `
+            --add-data "src/med_exam_toolkit/static;static" `
+            --console `
+            --hidden-import click `
+            --hidden-import openpyxl `
+            --hidden-import docx `
+            --hidden-import reportlab `
+            --hidden-import cryptography `
+            --hidden-import sqlalchemy `
+            --hidden-import yaml `
+            --hidden-import openai `
+            --hidden-import flask `
+            --hidden-import flask_compress `
+            --hidden-import tqdm `
+            --hidden-import termcolor `
+            --hidden-import lxml `
             src/med_exam_toolkit/cli.py
 
       - name: Rename artifact with version
