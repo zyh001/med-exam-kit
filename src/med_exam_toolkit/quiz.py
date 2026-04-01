@@ -651,6 +651,19 @@ def index():
     return resp
 
 
+@app.get("/manifest.json")
+def pwa_manifest():
+    return app.send_static_file("manifest.json")
+
+
+@app.get("/sw.js")
+def pwa_sw():
+    resp = make_response(app.send_static_file("sw.js"))
+    resp.headers["Content-Type"] = "application/javascript"
+    resp.headers["Service-Worker-Allowed"] = "/"
+    return resp
+
+
 @app.post("/auth")
 def auth():
     """验证访问码，通过后写入签名 Cookie 并重定向首页。"""

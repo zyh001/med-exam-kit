@@ -28,6 +28,7 @@ const S = {
   caseMaxReached: {},      // 案例分析组内已到达的最远题目索引
   _groupModalCb: null,     // 题型切换确认框回调
   practiceSessionId: null, // 当前练习进度 ID
+  streak: 0,              // 练习模式连续答对计数
 };
 
 const CFG = {
@@ -1242,6 +1243,7 @@ async function startSession() {
   S.marked = new Set();
   S.revealed = new Set();
   S.examStart = Date.now();
+  S.streak = 0;
   S.modeGroups       = buildModeGroups(S.questions);
   S.currentGroupIdx  = 0;
   S.caseMaxReached   = {};
@@ -1579,6 +1581,7 @@ function selectOpt(letter, btn) {
       // 练习：立即揭示答案，原地重渲
       document.querySelectorAll('.opt').forEach(b => b.disabled = true);
       S.revealed.add(S.cur);
+      _trackStreak(letter === q.answer);
       savePracticeSession();  // 每次答题立即保存进度
       setTimeout(() => {
         renderQ('none');
@@ -1638,6 +1641,10 @@ function submitMulti() {
   } else {
     // 练习模式：揭示答案，原地重渲
     S.revealed.add(S.cur);
+    // 多选正确判定：选中集合与正确集合完全一致
+    const correctSet = new Set(q.answer.split(''));
+    const isCorrect = sel.size === correctSet.size && [...correctSet].every(l => sel.has(l));
+    _trackStreak(isCorrect);
     savePracticeSession();  // 保存进度
     setTimeout(() => {
       renderQ('none');
@@ -1936,6 +1943,7 @@ function retryQuiz() {
     S.revealed = new Set();
     S.marked = new Set();
     S.examStart = Date.now();
+    S.streak = 0;
     S.modeGroups = buildModeGroups(S.questions);
     S.currentGroupIdx = 0;
     S.caseMaxReached = {};
@@ -2732,6 +2740,7 @@ async function startReview() {
     S.modeGroups = buildModeGroups(data.items);
     S.currentGroupIdx = 0; S.caseMaxReached = {};
     S.practiceSessionId = String(Date.now());
+    S.streak = 0;
     toast(`🔄 复习模式：共 ${data.items.length} 题`);
     startQuiz();
   } catch(e) { toast('加载复习题目失败'); }
@@ -2756,6 +2765,7 @@ async function startWrongBookReview() {
     S.modeGroups = buildModeGroups(data.items);
     S.currentGroupIdx = 0; S.caseMaxReached = {};
     S.practiceSessionId = String(Date.now());
+    S.streak = 0;
     toast(`📕 错题模式：共 ${data.items.length} 题`);
     startQuiz();
   } catch(e) { toast('加载错题失败'); }
@@ -3369,6 +3379,63 @@ async function syncNow() {
   } finally {
     if (btn) { btn.disabled = false; btn.textContent = '立即同步'; }
   }
+}
+
+// ════════════════════════════════════════════
+// Streak celebration (practice mode)
+// ════════════════════════════════════════════
+
+function _trackStreak(correct) {
+  if (S.mode !== 'practice') return;
+  if (correct) {
+    S.streak++;
+    // Trigger at 5, 10, 15, 20, ...
+    if (S.streak >= 5 && S.streak % 5 === 0) {
+      _showStreakCelebration(S.streak);
+    }
+  } else {
+    S.streak = 0;
+  }
+}
+
+function _showStreakCelebration(count) {
+  // Remove existing overlay if any
+  const old = document.getElementById('streak-overlay');
+  if (old) old.remove();
+
+  const emojis = ['🔥','⚡','🎯','💪','🏆','✨','🌟','💫'];
+  const emoji = count >= 20 ? '🏆' : count >= 15 ? '💪' : count >= 10 ? '⚡' : '🔥';
+  const texts = count >= 20 ? '太强了！' : count >= 15 ? '势不可挡！' : count >= 10 ? '超级棒！' : '继续保持！';
+
+  const overlay = document.createElement('div');
+  overlay.id = 'streak-overlay';
+  overlay.innerHTML = `
+    <div class="streak-particles"></div>
+    <div class="streak-card">
+      <div class="streak-emoji">${emoji}</div>
+      <div class="streak-count">连对 ${count} 题</div>
+      <div class="streak-text">${texts}</div>
+    </div>`;
+  document.body.appendChild(overlay);
+
+  // Spawn particles
+  const particleBox = overlay.querySelector('.streak-particles');
+  for (let i = 0; i < 24; i++) {
+    const p = document.createElement('span');
+    p.className = 'streak-p';
+    p.textContent = emojis[Math.floor(Math.random() * emojis.length)];
+    p.style.setProperty('--x', (Math.random() * 200 - 100) + 'px');
+    p.style.setProperty('--y', (Math.random() * -200 - 60) + 'px');
+    p.style.setProperty('--r', (Math.random() * 360) + 'deg');
+    p.style.setProperty('--d', (Math.random() * 0.5 + 0.3) + 's');
+    p.style.left = (40 + Math.random() * 20) + '%';
+    p.style.top = (40 + Math.random() * 20) + '%';
+    particleBox.appendChild(p);
+  }
+
+  // Auto dismiss after 2s
+  setTimeout(() => { overlay.classList.add('streak-fade-out'); }, 1800);
+  setTimeout(() => { overlay.remove(); }, 2500);
 }
 
 init();
