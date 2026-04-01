@@ -2827,7 +2827,16 @@ async function _confirmClearRecord() {
     if (res.ok) {
       const d = res.deleted;
       toast(`已清空：${d.attempts} 条答题记录、${d.sessions} 个会话、${d.sm2_cards} 条复习卡`);
-      openStats();   // 刷新统计页
+
+      // 同步清空本地缓存（服务端已清空，本地也要一致）
+      S.history = [];
+      localStorage.removeItem('quiz-history');
+      localStorage.removeItem(PRACTICE_SESSIONS_KEY);
+      localStorage.removeItem(EXAM_SESSION_KEY);
+
+      // 刷新主页最近记录区域 + 统计页
+      renderHistorySection();
+      openStats();
     } else {
       toast('清空失败：' + (res.error || '未知错误'));
     }
