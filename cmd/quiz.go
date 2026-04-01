@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/zyh001/med-exam-kit/internal/auth"
@@ -25,6 +26,7 @@ func init() {
 	quizCmd.Flags().String("host", "127.0.0.1", "监听地址")
 	quizCmd.Flags().Bool("no-record", false, "禁用做题记录")
 	quizCmd.Flags().Bool("no-pin", false, "禁用访问码验证")
+	quizCmd.Flags().String("pin", "", "自定义访问码（留空则自动生成）")
 }
 
 func runQuiz(cmd *cobra.Command, args []string) error {
@@ -34,6 +36,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	host, _ := cmd.Flags().GetString("host")
 	noRecord, _ := cmd.Flags().GetBool("no-record")
 	noPin, _ := cmd.Flags().GetBool("no-pin")
+	customPin, _ := cmd.Flags().GetString("pin")
 
 	if bankPath == "" {
 		return fmt.Errorf("请用 -b 指定题库路径")
@@ -59,8 +62,15 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	}
 
 	var accessCode, cookieSecret string
-	if !noPin {
+	pinLen := 0
+	if customPin != "" {
+		// User-specified PIN — uppercase for consistency
+		accessCode = strings.ToUpper(strings.TrimSpace(customPin))
+		_, cookieSecret = auth.GenerateAccessCode() // only need a fresh secret
+		fmt.Printf("\n🔑  访问码（自定义）：%s\n", accessCode)
+	} else if !noPin {
 		accessCode, cookieSecret = auth.GenerateAccessCode()
+		pinLen = 8
 		fmt.Printf("\n🔑  访问码：%s\n", accessCode)
 	}
 
@@ -74,6 +84,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		RecordEnabled: recordEnabled,
 		BankPath:      bankPath,
 		Password:      password,
+		PinLen:        pinLen,
 	}
 
 	// Try to use embedded assets from main package (injected via build tag)

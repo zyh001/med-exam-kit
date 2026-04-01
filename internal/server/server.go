@@ -36,6 +36,7 @@ type Config struct {
 	RecordEnabled bool
 	BankPath      string // path to .mqb file for saving
 	Password      string // encryption password
+	PinLen        int    // expected PIN length (0=custom, 8=auto-generated)
 }
 
 type Server struct {
@@ -94,7 +95,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.AccessCode != "" && !auth.IsAuthenticated(r, s.cfg.CookieSecret, s.cfg.AccessCode) {
 		if (r.URL.Path == "/" || r.URL.Path == "") && r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			io.WriteString(w, auth.RenderPINPage("医考练习", ""))
+			io.WriteString(w, auth.RenderPINPage("医考练习", "", s.cfg.PinLen))
 			return
 		}
 		jsonError(w, "Unauthorized", http.StatusUnauthorized)
@@ -207,7 +208,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	}
 	auth.RecordFailure(ip)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	io.WriteString(w, auth.RenderPINPage("医考练习", "访问码错误，请重试"))
+	io.WriteString(w, auth.RenderPINPage("医考练习", "访问码错误，请重试", s.cfg.PinLen))
 }
 
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
