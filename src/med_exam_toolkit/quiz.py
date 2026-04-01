@@ -224,9 +224,12 @@ def _distribute_by_ratio(total: int, weights: dict) -> dict:
 
 def _greedy_fill(pool: list, target: int) -> list:
     """
-    从 pool（每项为一组子题 list）中贪心抽取，使子题总数尽量逼近但不超过 target。
-    绝不拆散大题（子题组）。两轮策略：顺序贪心 → 最优匹配（找放得下的最大题）。
-    宁可略少于 target，也不截断多子题大题。
+    从 pool（每项为一组子题 list）中贪心抽取，使子题总数精确等于 target。
+
+    三轮策略：
+      1. 顺序贪心 — 依次挑能放下的组
+      2. 最优匹配 — 从剩余组中找最大的能放进 gap 的
+      3. 截断补齐 — 仍有差额时，取最小的超额组并截断至恰好填满
     """
     available = list(pool)
     picked: list = []
@@ -257,7 +260,20 @@ def _greedy_fill(pool: list, target: int) -> list:
             picked.append(remaining.pop(best_idx))
             total += best_c
         else:
-            break  # 剩余的每题都超过 gap，宁可停在这里
+            break
+
+    # 第三轮：截断补齐 — 取最小的超额组，截断至恰好填满 gap
+    if total < target and remaining:
+        gap = target - total
+        best_idx, best_size = -1, 0
+        for i, grp in enumerate(remaining):
+            c = len(grp)
+            if c > gap and (best_idx == -1 or c < best_size):
+                best_idx = i
+                best_size = c
+        if best_idx >= 0:
+            picked.append(remaining[best_idx][:gap])
+            # total += gap
 
     return picked
 
@@ -494,6 +510,8 @@ def api_questions():
 
     # ── 3. 抽题策略 ──────────────────────────────────────────────────
 
+    _target = 0  # 期望的小题总数，用于后续差额补齐
+
     if per_unit:
         # 按章节配额：每章节独立贪心抽取，再合并后按题型排序输出
         # 先按章节抽出各章节的 groups
@@ -526,6 +544,7 @@ def api_questions():
             mk = grp[0]["mode"] if grp else ""
             reorder.setdefault(mk, []).append(grp)
         result_groups = [g for mk in mode_order if mk in reorder for g in reorder[mk]]
+        _target = sum(v for v in per_unit.values() if v > 0)
 
     elif not shuffle:
         result_groups = [g for mk in mode_order for g in mode_map[mk]]
@@ -538,6 +557,7 @@ def api_questions():
                 if n >= limit:
                     break
             result_groups = cut
+        # 顺序模式不做差额补齐（按组顺序截取，不涉及 greedyFill 差额）
 
     elif per_mode:
         # 精细配额：每种题型独立指定小题数，用贪心填充
@@ -553,6 +573,7 @@ def api_questions():
             else:
                 picked = _greedy_fill(pool, need)
             result_groups.extend(picked)
+        _target = sum(v for v in per_mode.values() if v > 0)
 
     else:
         # 普通随机：按各题型小题数比例分配配额，保证每种都有题
@@ -589,6 +610,23 @@ def api_questions():
             else:
                 picked = _greedy_fill(pool, need)
             result_groups.extend(picked)
+        _target = total_need
+
+    # ── 4. 兜底补齐（极少触发）─────────────────────────────────────
+    # greedyFill 已内置截断逻辑，正常情况下能精确填满配额。
+    # 此处仅在题型池彻底耗尽、连截断都无法凑够时才从其他题型补齐。
+    if _target > 0:
+        _actual = sum(len(grp) for grp in result_groups)
+        _shortfall = _target - _actual
+        if _shortfall > 0:
+            _picked_ids = {id(grp) for grp in result_groups}
+            for grp in groups:
+                if _shortfall <= 0:
+                    break
+                if id(grp) not in _picked_ids and len(grp) <= _shortfall:
+                    result_groups.append(grp)
+                    _picked_ids.add(id(grp))
+                    _shortfall -= len(grp)
 
     rows = [sq for grp in result_groups for sq in grp]
     return jsonify({"total": len(rows), "items": rows})
