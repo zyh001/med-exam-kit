@@ -63,8 +63,8 @@ function _setPracticeSessions(arr) {
 function _practiceTitle() {
   const units = [...new Set(S.questions.map(q => q.unit).filter(Boolean))];
   const unitLabel = units.length === 0 ? '全部章节'
-                  : units.length <= 2  ? units.join('、')
-                  : units.slice(0,2).join('、') + ' 等';
+      : units.length <= 2  ? units.join('、')
+          : units.slice(0,2).join('、') + ' 等';
   return `${unitLabel} · ${S.questions.length} 题`;
 }
 
@@ -479,7 +479,7 @@ function toggleChip(btn, type, mode) {
       chips.forEach(c => c.classList.toggle('active', c.dataset.val === '__all__'));
     } else {
       chips.forEach(c => c.classList.toggle('active',
-        c.dataset.val !== '__all__' && set.has(c.dataset.val)));
+          c.dataset.val !== '__all__' && set.has(c.dataset.val)));
       document.querySelector(`#${container} .chip[data-val="__all__"]`)?.classList.remove('active');
     }
   }
@@ -509,7 +509,7 @@ function selectAllUnits() {
 /** 反选：未选的选上，已选的取消 */
 function invertUnits() {
   const chips = [...document.querySelectorAll('#unit-chips .chip')]
-    .filter(c => c.dataset.val !== '__all__' && c.style.display !== 'none');
+      .filter(c => c.dataset.val !== '__all__' && c.style.display !== 'none');
   const wasAll = CFG.units.has('__all__');
   CFG.units.clear();
   chips.forEach(c => {
@@ -569,7 +569,7 @@ function buildScoringPanel() {
 
   // 判断是否有需要多选规则的题型
   const hasMultiMode = modes.some(m =>
-    m.includes('X型') || m.includes('不定项') || m.includes('案例分析')
+      m.includes('X型') || m.includes('不定项') || m.includes('案例分析')
   );
 
   const wrap = document.createElement('div');
@@ -646,7 +646,7 @@ function updateScorePerMode(input) {
 function setMultiScoreMode(mode, btn) {
   CFG.multiScoreMode = mode;
   btn.closest('.scoring-multi-chips').querySelectorAll('.scoring-multi-chip')
-     .forEach(b => b.classList.toggle('active', b === btn));
+      .forEach(b => b.classList.toggle('active', b === btn));
 }
 
 // ── 章节配额 ──────────────────────────────────────────────────────
@@ -884,7 +884,7 @@ function _refreshCountRatioDisplay() {
   const ratioSum = Object.values(CFG.countRatio).reduce((a, b) => a + b, 0);
   document.getElementById('cr-total-pct').textContent = ratioSum + '%';
   document.getElementById('cr-total-pct').style.color =
-    ratioSum === 100 ? 'var(--success)' : ratioSum > 100 ? 'var(--danger)' : 'var(--warning)';
+      ratioSum === 100 ? 'var(--success)' : ratioSum > 100 ? 'var(--danger)' : 'var(--warning)';
 
   let totalExp = 0;
   S.bankInfo.modes.forEach(mode => {
@@ -1181,7 +1181,7 @@ async function startSession() {
   if (isPU && CFG.perUnit) {
     // ── 章节配额：传 per_unit JSON，章节 unit 参数由后端从 per_unit key 中推断 ──
     const nonZero = Object.fromEntries(
-      Object.entries(CFG.perUnit).filter(([, v]) => v > 0)
+        Object.entries(CFG.perUnit).filter(([, v]) => v > 0)
     );
     if (!Object.keys(nonZero).length) { toast('请至少为一个章节设置题目数量'); return; }
     params.set('per_unit', JSON.stringify(nonZero));
@@ -1190,7 +1190,7 @@ async function startSession() {
   } else if (isPM && CFG.perMode) {
     // ── 题型精细配额：传 per_mode JSON，忽略题型 chips 和数量滑杆 ──
     const nonZero = Object.fromEntries(
-      Object.entries(CFG.perMode).filter(([, v]) => v > 0)
+        Object.entries(CFG.perMode).filter(([, v]) => v > 0)
     );
     if (!Object.keys(nonZero).length) { toast('请至少为一种题型设置题目数量'); return; }
     params.set('per_mode', JSON.stringify(nonZero));
@@ -1206,8 +1206,8 @@ async function startSession() {
     let allocated = 0;
     modes.forEach((m, i) => {
       const n = i < modes.length - 1
-        ? Math.round(total * CFG.countRatio[m] / ratioSum)
-        : total - allocated;
+          ? Math.round(total * CFG.countRatio[m] / ratioSum)
+          : total - allocated;
       if (n > 0) perMode[m] = n;
       allocated += n;
     });
@@ -1226,7 +1226,7 @@ async function startSession() {
   // 难度分布（两种模式均可叠加）
   if (isDiff && CFG.difficulty) {
     const nonZeroDiff = Object.fromEntries(
-      Object.entries(CFG.difficulty).filter(([, v]) => v > 0)
+        Object.entries(CFG.difficulty).filter(([, v]) => v > 0)
     );
     if (Object.keys(nonZeroDiff).length) {
       params.set('difficulty', JSON.stringify(nonZeroDiff));
@@ -1403,8 +1403,8 @@ function _fillQ(wrap, q, isExam, isPractice) {
   if (q.stem) {
     const siblingCount = S.questions.filter(sq => sq.qi === q.qi).length;
     const label = siblingCount > 1
-      ? `共用题干（共 ${siblingCount} 小题 · 第 ${q.si + 1} 题）`
-      : '共用题干';
+        ? `共用题干（共 ${siblingCount} 小题 · 第 ${q.si + 1} 题）`
+        : '共用题干';
     const stemDiv = document.createElement('div');
     stemDiv.className = 'q-stem q-stem-collapsible';
     stemDiv.innerHTML = `
@@ -1423,8 +1423,8 @@ function _fillQ(wrap, q, isExam, isPractice) {
     const soDiv = document.createElement('div');
     soDiv.className = 'q-shared-opts';
     const soLabel = siblingCount > 1
-      ? `B型题共享选项（共 ${siblingCount} 小题 · 第 ${q.si + 1} 题）`
-      : 'B型题共享选项';
+        ? `B型题共享选项（共 ${siblingCount} 小题 · 第 ${q.si + 1} 题）`
+        : 'B型题共享选项';
     const soItems = q.shared_options.map((o, i) => {
       const l = String.fromCharCode(65 + i);
       const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
@@ -1471,8 +1471,8 @@ function _fillQ(wrap, q, isExam, isPractice) {
     if (isRevealed) {
       const inCorrect = correctSet.has(letter);
       const wasSelected = isMulti
-        ? (curSel instanceof Set ? curSel.has(letter) : false)
-        : curSel === letter;
+          ? (curSel instanceof Set ? curSel.has(letter) : false)
+          : curSel === letter;
       if (inCorrect) btn.classList.add('correct');
       else if (wasSelected) btn.classList.add('wrong');
       else btn.classList.add('dim');
@@ -1658,7 +1658,7 @@ function buildExplain(q, selected) {
   if (isMulti) {
     const selSet = selected instanceof Set ? selected : new Set();
     isCorrect = selSet.size === correctSet.size &&
-      [...correctSet].every(l => selSet.has(l));
+        [...correctSet].every(l => selSet.has(l));
   } else {
     isCorrect = selected === q.answer;
   }
@@ -2006,15 +2006,15 @@ function renderMemo(dir = 'forward') {
   const stemHtml = q.stem ? `<div class="memo-stem-block">${esc(q.stem)}</div>` : '';
   // B型题共享选项块
   const sharedOptsHtml = (q.shared_options && q.shared_options.length > 0)
-    ? `<div class="memo-shared-opts">
+      ? `<div class="memo-shared-opts">
         <div class="memo-shared-opts-title">B型题共享选项</div>
         ${q.shared_options.map((o,i) => {
-          const l = String.fromCharCode(65+i);
-          const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
-          return `<div class="memo-shared-opt-row"><span class="opt-lbl">${l}</span><span>${esc(co)}</span></div>`;
-        }).join('')}
+        const l = String.fromCharCode(65+i);
+        const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+        return `<div class="memo-shared-opt-row"><span class="opt-lbl">${l}</span><span>${esc(co)}</span></div>`;
+      }).join('')}
       </div>`
-    : '';
+      : '';
   const optsHtml = q.options.map((o, i) => {
     const l = String.fromCharCode(65 + i);
     const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
@@ -2023,12 +2023,12 @@ function renderMemo(dir = 'forward') {
     </div>`;
   }).join('');
   const explainHtml = q.discuss
-    ? `<div class="memo-explain-text">${esc(q.discuss)}</div>
+      ? `<div class="memo-explain-text">${esc(q.discuss)}</div>
        ${q.point ? `<div class="memo-explain-point">考点：${esc(q.point)}</div>` : ''}`
-    : `<div class="memo-explain-text" style="color:var(--muted)">暂无解析</div>`;
+      : `<div class="memo-explain-text" style="color:var(--muted)">暂无解析</div>`;
 
   const questionHtml = metaTags + stemHtml + sharedOptsHtml +
-    `<div class="memo-q-text">${esc(q.text)}</div>
+      `<div class="memo-q-text">${esc(q.text)}</div>
      <div class="memo-opts">${optsHtml}</div>`;
   const answerHtml = `<div class="memo-answer-inner">
      <div class="memo-answer-label">正确答案</div>
@@ -2163,7 +2163,7 @@ function showMemoResults() {
   const total = S.questions.length;
   const known = S.memoKnown.size;
   S.results = { mode:'memo', total, correct: known, wrong: total - known, skip: 0,
-                timeSec: Math.floor((Date.now() - S.examStart) / 1000) };
+    timeSec: Math.floor((Date.now() - S.examStart) / 1000) };
 
   // ── 修复 bug：背题模式必须也上传 SM-2 记录 ──
   // 之前 showMemoResults 直接 renderResults()，跳过了 calculateResults()，
@@ -2308,7 +2308,7 @@ function calculateResults() {
         if (CFG.multiScoreMode === 'strict') {
           // 严格：完全正确才得分
           const allCorrect = selSet.size === correctSet.size &&
-            [...correctSet].every(l => selSet.has(l));
+              [...correctSet].every(l => selSet.has(l));
           if (allCorrect) {
             earnedScore += perSq;
             scoreByMode[mode].earned += perSq;
@@ -2365,7 +2365,7 @@ function renderResults() {
   document.getElementById('score-pct').textContent = pct + '%';
   document.getElementById('score-verdict').textContent = pass ? '🎉 通过！' : '继续努力';
   document.getElementById('score-sub').textContent =
-    `答对 ${R.correct} 题，共 ${R.total} 题`;
+      `答对 ${R.correct} 题，共 ${R.total} 题`;
 
   // Ring（r=80）
   const circumference = 2 * Math.PI * 80; // 502.65
@@ -2404,7 +2404,7 @@ function renderResults() {
   const sb = document.getElementById('score-block');
   if (R.scoring && R.scoreByMode) {
     const pctScore = R.totalScore > 0
-      ? Math.round(R.earnedScore / R.totalScore * 100) : 0;
+        ? Math.round(R.earnedScore / R.totalScore * 100) : 0;
     const modeRows = Object.entries(R.scoreByMode).map(([mode, d]) => {
       const barPct = d.total > 0 ? Math.round(d.earned / d.total * 100) : 0;
       return `<div class="score-mode-row">
@@ -2436,7 +2436,7 @@ function renderResults() {
 // ════════════════════════════════════════════
 function esc(s) {
   return (s||'').replace(/&/g,'&').replace(/</g,'<').replace(/>/g,'>')
-                .replace(/"/g,'"').replace(/'/g,'&#39;');
+      .replace(/"/g,'"').replace(/'/g,'&#39;');
 }
 
 function highlightInductiveWords(text) {
@@ -2556,18 +2556,18 @@ function filterReview(type, tabEl) {
 
     // B型题：共享选项回显（高亮正确答案行）
     const sharedOptsReviewHtml = (q.shared_options && q.shared_options.length > 0)
-      ? `<div class="review-shared-opts">
+        ? `<div class="review-shared-opts">
           <div class="review-shared-opts-title">B型题共享选项</div>
           ${q.shared_options.map((o,oi) => {
-            const l = String.fromCharCode(65+oi);
-            const isCor = correctSet.has(l);
-            const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
-            return `<div class="review-shared-opt-row${isCor ? ' is-ans' : ''}">
+          const l = String.fromCharCode(65+oi);
+          const isCor = correctSet.has(l);
+          const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+          return `<div class="review-shared-opt-row${isCor ? ' is-ans' : ''}">
               <span class="opt-lbl">${l}</span><span>${esc(clean)}</span>
             </div>`;
-          }).join('')}
+        }).join('')}
         </div>`
-      : '';
+        : '';
     const optsHtml = q.options.map((o, oi) => {
       const l = String.fromCharCode(65 + oi);
       const isCor = correctSet.has(l);
@@ -2722,7 +2722,7 @@ async function startReview() {
     const fps  = res.fingerprints || [];
     if (!fps.length) { toast('🎉 今日没有待复习题目！'); return; }
     const data = await apiFetch(
-      '/api/questions?shuffle=1&fingerprints=' + fps.join(',')
+        '/api/questions?shuffle=1&fingerprints=' + fps.join(',')
     ).then(r => r.json());
     if (!data.items || !data.items.length) { toast('找不到对应题目，题库可能已更新'); return; }
     S.mode      = 'practice';
@@ -2746,7 +2746,7 @@ async function startWrongBookReview() {
     // 最多取 100 道最高频错题
     const topFps = fps.slice(0, 100);
     const data = await apiFetch(
-      '/api/questions?shuffle=1&fingerprints=' + topFps.join(',')
+        '/api/questions?shuffle=1&fingerprints=' + topFps.join(',')
     ).then(r => r.json());
     if (!data.items || !data.items.length) { toast('找不到对应题目'); return; }
     S.mode      = 'practice';
@@ -2777,7 +2777,7 @@ async function openStats() {
     _renderRecordStatus(rs);
   } catch(e) {
     document.getElementById('unit-stats-list').innerHTML =
-      '<div style="color:var(--danger);font-size:13px">加载失败，请稍后重试</div>';
+        '<div style="color:var(--danger);font-size:13px">加载失败，请稍后重试</div>';
   }
 }
 
@@ -2797,8 +2797,8 @@ function _renderRecordStatus(rs) {
 
   const shortId = rs.user_id === '_legacy' ? '（未识别）' : rs.user_id.slice(0, 8) + '…';
   const idTip   = rs.user_id === '_legacy'
-    ? '刷新页面后将自动分配新 ID'
-    : '此 ID 存储在浏览器 Cookie 中，清除 Cookie 将获得新 ID';
+      ? '刷新页面后将自动分配新 ID'
+      : '此 ID 存储在浏览器 Cookie 中，清除 Cookie 将获得新 ID';
 
   el.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:10px">
@@ -2827,7 +2827,16 @@ async function _confirmClearRecord() {
     if (res.ok) {
       const d = res.deleted;
       toast(`已清空：${d.attempts} 条答题记录、${d.sessions} 个会话、${d.sm2_cards} 条复习卡`);
-      openStats();   // 刷新统计页
+
+      // 同步清空本地缓存（服务端已清空，本地也要一致）
+      S.history = [];
+      localStorage.removeItem('quiz-history');
+      localStorage.removeItem(PRACTICE_SESSIONS_KEY);
+      localStorage.removeItem(EXAM_SESSION_KEY);
+
+      // 刷新主页最近记录区域 + 统计页
+      renderHistorySection();
+      openStats();
     } else {
       toast('清空失败：' + (res.error || '未知错误'));
     }
@@ -2876,8 +2885,8 @@ function _renderTrendChart(history) {
   // 填充区域
   if (pts.length > 1) {
     const areaD = `M ${pts[0].x} ${H - PAD} ` +
-      pts.map(p => `L ${p.x} ${p.y}`).join(' ') +
-      ` L ${pts[pts.length-1].x} ${H - PAD} Z`;
+        pts.map(p => `L ${p.x} ${p.y}`).join(' ') +
+        ` L ${pts[pts.length-1].x} ${H - PAD} Z`;
     svg.innerHTML += `<path d="${areaD}" fill="url(#${gradId})"/>`;
     const lineD = `M ` + pts.map(p => `${p.x} ${p.y}`).join(' L ');
     svg.innerHTML += `<path d="${lineD}" class="trend-line"/>`;
@@ -2909,8 +2918,8 @@ function _renderUnitStats(units) {
   const sorted = [...units].sort((a, b) => a.accuracy - b.accuracy);
   el.innerHTML = sorted.map(u => {
     const color = u.accuracy >= 80 ? 'var(--success)'
-                : u.accuracy >= 60 ? 'var(--warning)'
-                : 'var(--danger)';
+        : u.accuracy >= 60 ? 'var(--warning)'
+            : 'var(--danger)';
     return `<div class="unit-stat-row">
       <span class="unit-stat-name" title="${esc(u.unit)}">${esc(u.unit)}</span>
       <div class="unit-stat-bar-wrap">
@@ -3090,7 +3099,7 @@ document.addEventListener('keydown', e => {
 // ════════════════════════════════════════════
 function esc(s) {
   return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-                .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+      .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
 function formatTime(sec) {
   if (sec < 60) return sec + '秒';
