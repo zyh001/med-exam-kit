@@ -156,59 +156,80 @@ func RecordSuccess(ip string) {
 }
 
 // RenderPINPage returns the HTML login page.
-func RenderPINPage(appName, errMsg string) string {
+// pinLen hints the expected PIN length (0 = unknown/custom).
+func RenderPINPage(appName, errMsg string, pinLen int) string {
 	errHTML := ""
 	if errMsg != "" {
-		errHTML = fmt.Sprintf(`<div class="error">%s</div>`, errMsg)
+		errHTML = `<div class="error">` + errMsg + `</div>`
 	}
-	return fmt.Sprintf(`<!DOCTYPE html>
+	maxAttr := ""
+	placeholder := "请输入访问码"
+	hint := "访问码在服务器启动时打印到终端<br>每次重启服务器后需重新验证"
+	if pinLen > 0 {
+		maxAttr = fmt.Sprintf(` maxlength="%d"`, pinLen)
+		placeholder = strings.Repeat("X", pinLen)
+		hint = fmt.Sprintf("请输入终端显示的 %d 位访问码<br>每次重启服务器后需重新验证", pinLen)
+	}
+
+	const tpl = `<!DOCTYPE html>
 <html lang="zh-CN"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>%s · 访问验证</title>
+<title>{{APP}} · 访问验证</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
-body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-  background:#0f1117;color:#e8e6e1;display:flex;align-items:center;
+body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',-apple-system,sans-serif;
+  background:#0d1117;color:#e6edf3;display:flex;align-items:center;
   justify-content:center;min-height:100vh;padding:20px}
-.card{background:#1a1d27;border:1px solid rgba(255,255,255,.08);border-radius:16px;
-  padding:40px 36px;width:100%%;max-width:380px;box-shadow:0 20px 60px rgba(0,0,0,.4)}
+.card{background:#161b22;border:1px solid #30363d;border-radius:16px;
+  padding:40px 36px;width:100%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
 .icon{width:52px;height:52px;border-radius:14px;
   background:linear-gradient(135deg,#4493f8,#7c5ef8);
   display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:20px}
-h1{font-size:20px;font-weight:600;margin-bottom:6px;color:#f0ede8}
-p{font-size:13px;color:#888;margin-bottom:28px;line-height:1.6}
-label{font-size:12px;color:#888;display:block;margin-bottom:8px;letter-spacing:.04em}
-input{width:100%%;padding:12px 16px;border-radius:10px;background:#0f1117;
-  border:1.5px solid rgba(255,255,255,.1);color:#f0ede8;font-size:18px;
+h1{font-size:20px;font-weight:600;margin-bottom:6px;color:#e6edf3}
+p{font-size:13px;color:#7d8590;margin-bottom:28px;line-height:1.6}
+label{font-size:12px;color:#7d8590;display:block;margin-bottom:8px;letter-spacing:.04em}
+input{width:100%;padding:12px 16px;border-radius:10px;background:#0d1117;
+  border:1.5px solid #30363d;color:#e6edf3;font-size:18px;
   letter-spacing:.18em;font-weight:600;text-align:center;text-transform:uppercase;
   transition:border-color .2s;outline:none}
 input:focus{border-color:#4493f8}
-.btn{width:100%%;padding:13px;border-radius:10px;border:none;
+input::placeholder{color:#484f58;letter-spacing:.04em;font-size:14px;font-weight:400}
+.btn{width:100%;padding:13px;border-radius:10px;border:none;
   background:linear-gradient(135deg,#4493f8,#7c5ef8);color:#fff;
   font-size:15px;font-weight:600;cursor:pointer;margin-top:16px;transition:opacity .2s}
 .btn:hover{opacity:.88}
-.error{background:rgba(220,53,69,.12);border:1px solid rgba(220,53,69,.3);
-  color:#f87171;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px}
-.hint{font-size:11px;color:#555;text-align:center;margin-top:16px;line-height:1.5}
+.btn:active{opacity:.75}
+.error{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.3);
+  color:#f85149;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px}
+.hint{font-size:11px;color:#484f58;text-align:center;margin-top:16px;line-height:1.5}
 </style></head><body>
 <div class="card">
   <div class="icon">🔑</div>
-  <h1>%s</h1>
-  <p>服务已启动，请输入终端显示的 8 位访问码继续。</p>
-  %s
+  <h1>{{APP}}</h1>
+  <p>服务已启动，请输入访问码继续。</p>
+  {{ERROR}}
   <form method="POST" action="/auth" autocomplete="off">
     <label>访问码</label>
-    <input type="text" name="code" id="code" maxlength="8"
-      placeholder="XXXXXXXX" autofocus autocomplete="off" spellcheck="false">
+    <input type="text" name="code" id="code"{{MAXATTR}}
+      placeholder="{{PLACEHOLDER}}" autofocus autocomplete="off" spellcheck="false">
     <button class="btn" type="submit">验证并进入 →</button>
   </form>
-  <p class="hint">访问码在服务器启动时打印到终端<br>每次重启服务器后需重新验证</p>
+  <p class="hint">{{HINT}}</p>
 </div>
 <script>
 document.getElementById('code').addEventListener('input',function(){
   this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
 });
-</script></body></html>`, appName, appName, errHTML)
+</script></body></html>`
+
+	r := strings.NewReplacer(
+		"{{APP}}", appName,
+		"{{ERROR}}", errHTML,
+		"{{MAXATTR}}", maxAttr,
+		"{{PLACEHOLDER}}", placeholder,
+		"{{HINT}}", hint,
+	)
+	return r.Replace(tpl)
 }
 
 // PrintPublicWarning prints a security warning when listening on non-localhost.
