@@ -925,7 +925,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
    Toast
 ════════════════════════════════════════════ */
 #toast{
-  position:fixed;bottom:calc(env(safe-area-inset-bottom)+80px);left:50%;
+  position:fixed;bottom:calc(env(safe-area-inset-bottom) + 80px);left:50%;
   transform:translateX(-50%) translateY(20px);
   background:var(--surface);border:1px solid var(--border);border-radius:24px;
   padding:9px 20px;font-size:13px;color:var(--text);
@@ -1341,7 +1341,7 @@ button,a,[role=button],label{touch-action:manipulation}
 /* 趋势折线图 */
 .trend-chart-wrap{position:relative;height:90px}
 .trend-chart{width:100%;height:90px;overflow:visible}
-.trend-bar{fill:var(--accent);opacity:.7;rx:3;ry:3;transition:opacity .2s}
+.trend-bar{fill:var(--accent);opacity:.7;border-radius:3px;transition:opacity .2s}
 .trend-bar:hover{opacity:1}
 .trend-line{fill:none;stroke:var(--accent);stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .trend-dot{fill:var(--accent)}
@@ -1385,4 +1385,60 @@ button,a,[role=button],label{touch-action:manipulation}
   display:inline-flex;align-items:center;gap:5px;padding:3px 9px;
   border-radius:20px;font-size:11px;font-weight:700;
   background:var(--warn-bg);color:var(--warning);margin-left:8px;
+}
+
+/* ═══════════════════════════════════════════════
+   Streak celebration overlay
+   ═══════════════════════════════════════════════ */
+#streak-overlay{
+  position:fixed;inset:0;z-index:9999;
+  pointer-events:none;
+  display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at center,rgba(68,147,248,.10) 0%,transparent 70%);
+  animation:streakIn .4s ease-out;
+}
+#streak-overlay.streak-fade-out{
+  animation:streakOut .7s ease-in forwards;
+}
+.streak-card{
+  text-align:center;
+  animation:streakBounce .5s cubic-bezier(.34,1.56,.64,1);
+}
+.streak-emoji{
+  font-size:56px;
+  filter:drop-shadow(0 0 20px rgba(68,147,248,.5));
+  animation:streakPulse 1s ease-in-out infinite;
+}
+.streak-count{
+  font-size:28px;font-weight:800;
+  color:var(--text,#e6edf3);
+  margin:8px 0 4px;
+  text-shadow:0 0 24px rgba(68,147,248,.6);
+}
+.streak-text{
+  font-size:15px;
+  color:var(--muted,#7d8590);
+  font-weight:500;
+}
+.streak-particles{
+  position:absolute;inset:0;overflow:hidden;pointer-events:none;
+}
+.streak-p{
+  position:absolute;font-size:20px;opacity:0;
+  animation:streakParticle 1.2s ease-out var(--d) forwards;
+}
+@keyframes streakIn{from{opacity:0}to{opacity:1}}
+@keyframes streakOut{to{opacity:0}}
+@keyframes streakBounce{
+  0%{transform:scale(0) rotate(-8deg)}
+  60%{transform:scale(1.15) rotate(2deg)}
+  100%{transform:scale(1) rotate(0)}
+}
+@keyframes streakPulse{
+  0%,100%{transform:scale(1)}
+  50%{transform:scale(1.15)}
+}
+@keyframes streakParticle{
+  0%{opacity:1;transform:translate(0,0) rotate(0) scale(1)}
+  100%{opacity:0;transform:translate(var(--x),var(--y)) rotate(var(--r)) scale(0)}
 }
