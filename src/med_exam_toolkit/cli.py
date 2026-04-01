@@ -638,7 +638,9 @@ def edit(bank, password, port, host, no_browser, no_pin):
 @click.option("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
 @click.option("--no-browser", is_flag=True, default=False, help="不自动打开浏览器")
 @click.option("--no-record", is_flag=True, default=False, help="不记录做题历史（不创建 .progress.db）")
-def quiz(bank, password, port, host, no_browser, no_record):
+@click.option("--no-pin", is_flag=True, default=False, help="禁用访问码验证（仅限受信任的本地网络）")
+@click.option("--pin", default=None, help="自定义访问码（留空则自动生成 8 位随机码）")
+def quiz(bank, password, port, host, no_browser, no_record, no_pin, pin):
     """启动医考练习 Web 应用（练习/考试/背题模式）
 
     \b
@@ -648,7 +650,7 @@ def quiz(bank, password, port, host, no_browser, no_record):
     """
     from med_exam_toolkit.quiz import start_quiz
     start_quiz(bank, port=port, host=host, no_browser=no_browser,
-               password=password, no_record=no_record)
+               password=password, no_record=no_record, no_pin=no_pin, pin=pin)
 
 
 def main():

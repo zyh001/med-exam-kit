@@ -159,8 +159,20 @@ def apply_security_headers(response) -> None:
 # PIN 页面 HTML
 # ════════════════════════════════════════════════════════════════════════
 
-def render_pin_page(app_name: str, error: str = "") -> str:
+def render_pin_page(app_name: str, error: str = "", pin_len: int = 0) -> str:
+    """渲染 PIN 验证页面。
+
+    pin_len > 0 时显示固定长度限制和占位符（自动生成的 PIN），
+    pin_len == 0 时不限长度（自定义 PIN）。
+    """
     error_html = f'<div class="error">{error}</div>' if error else ""
+    max_attr = f' maxlength="{pin_len}"' if pin_len > 0 else ""
+    placeholder = "X" * pin_len if pin_len > 0 else "请输入访问码"
+    hint = (
+        f"请输入终端显示的 {pin_len} 位访问码<br>每次重启服务器后需重新验证"
+        if pin_len > 0
+        else "访问码在服务器启动时打印到终端<br>每次重启服务器后需重新验证"
+    )
     return f"""<!DOCTYPE html>
 <html lang="zh-CN">
 <head>
@@ -170,15 +182,15 @@ def render_pin_page(app_name: str, error: str = "") -> str:
 <style>
   *{{box-sizing:border-box;margin:0;padding:0}}
   body{{
-    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-    background:#0f1117;color:#e8e6e1;
+    font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',-apple-system,sans-serif;
+    background:#0d1117;color:#e6edf3;
     display:flex;align-items:center;justify-content:center;
     min-height:100vh;padding:20px;
   }}
   .card{{
-    background:#1a1d27;border:1px solid rgba(255,255,255,.08);
+    background:#161b22;border:1px solid #30363d;
     border-radius:16px;padding:40px 36px;width:100%;max-width:380px;
-    box-shadow:0 20px 60px rgba(0,0,0,.4);
+    box-shadow:0 8px 32px rgba(0,0,0,.5);
   }}
   .icon{{
     width:52px;height:52px;border-radius:14px;
@@ -186,18 +198,18 @@ def render_pin_page(app_name: str, error: str = "") -> str:
     display:flex;align-items:center;justify-content:center;
     font-size:24px;margin-bottom:20px;
   }}
-  h1{{font-size:20px;font-weight:600;margin-bottom:6px;color:#f0ede8}}
-  p{{font-size:13px;color:#888;margin-bottom:28px;line-height:1.6}}
-  label{{font-size:12px;color:#888;display:block;margin-bottom:8px;letter-spacing:.04em}}
+  h1{{font-size:20px;font-weight:600;margin-bottom:6px;color:#e6edf3}}
+  p{{font-size:13px;color:#7d8590;margin-bottom:28px;line-height:1.6}}
+  label{{font-size:12px;color:#7d8590;display:block;margin-bottom:8px;letter-spacing:.04em}}
   input{{
     width:100%;padding:12px 16px;border-radius:10px;
-    background:#0f1117;border:1.5px solid rgba(255,255,255,.1);
-    color:#f0ede8;font-size:18px;letter-spacing:.18em;font-weight:600;
+    background:#0d1117;border:1.5px solid #30363d;
+    color:#e6edf3;font-size:18px;letter-spacing:.18em;font-weight:600;
     text-align:center;text-transform:uppercase;transition:border-color .2s;
     outline:none;
   }}
   input:focus{{border-color:#4493f8}}
-  input::placeholder{{color:#444;letter-spacing:.04em;font-size:14px;font-weight:400}}
+  input::placeholder{{color:#484f58;letter-spacing:.04em;font-size:14px;font-weight:400}}
   .btn{{
     width:100%;padding:13px;border-radius:10px;border:none;
     background:linear-gradient(135deg,#4493f8,#7c5ef8);
@@ -207,29 +219,29 @@ def render_pin_page(app_name: str, error: str = "") -> str:
   .btn:hover{{opacity:.88}}
   .btn:active{{opacity:.75}}
   .error{{
-    background:rgba(220,53,69,.12);border:1px solid rgba(220,53,69,.3);
-    color:#f87171;border-radius:8px;padding:10px 14px;
+    background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.3);
+    color:#f85149;border-radius:8px;padding:10px 14px;
     font-size:13px;margin-bottom:16px;
   }}
-  .hint{{font-size:11px;color:#555;text-align:center;margin-top:16px;line-height:1.5}}
+  .hint{{font-size:11px;color:#484f58;text-align:center;margin-top:16px;line-height:1.5}}
 </style>
 </head>
 <body>
 <div class="card">
   <div class="icon">🔑</div>
   <h1>{app_name}</h1>
-  <p>服务已启动，请输入终端显示的 8 位访问码继续。</p>
+  <p>服务已启动，请输入访问码继续。</p>
   {error_html}
   <form method="POST" action="/auth" autocomplete="off">
     <label>访问码</label>
     <input
-      type="text" name="code" id="code"
-      maxlength="8" placeholder="XXXXXXXX"
+      type="text" name="code" id="code"{max_attr}
+      placeholder="{placeholder}"
       autofocus autocomplete="off" spellcheck="false"
     >
     <button class="btn" type="submit">验证并进入 →</button>
   </form>
-  <p class="hint">访问码在服务器启动时打印到终端<br>每次重启服务器后需重新验证</p>
+  <p class="hint">{hint}</p>
 </div>
 <script>
   document.getElementById('code').addEventListener('input', function() {{
