@@ -234,7 +234,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		unitSq[q.Unit] += cnt
 		unitModeSq[q.Unit][q.Mode] += cnt
 	}
-	bankName := "医考练习"
+	bankName := "题库"
 	if s.cfg.BankPath != "" {
 		// e.g. "口腔执业医师题库.mqb" → "口腔执业医师题库"
 		base := filepath.Base(s.cfg.BankPath)
@@ -968,14 +968,44 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 		}
 
 	case opts.perMode != nil:
+		totalNeedPM := 0
 		for _, mk := range modeOrder {
 			need := opts.perMode[mk]
 			if need <= 0 {
 				continue
 			}
+			totalNeedPM += need
 			pool := append([]group(nil), modeMap[mk]...)
 			opts.rng.shuffle(pool)
 			resultGroups = append(resultGroups, greedyFill(pool, need)...)
+		}
+		// Last-resort: with truncation in greedyFill, this rarely triggers
+		actualPM := 0
+		for _, grp := range resultGroups {
+			actualPM += len(grp)
+		}
+		if shortfallPM := totalNeedPM - actualPM; shortfallPM > 0 {
+			pickedPM := map[string]bool{}
+			for _, grp := range resultGroups {
+				if len(grp) > 0 {
+					pickedPM[grp[0].ID] = true
+				}
+			}
+			for _, mk := range modeOrder {
+				if shortfallPM <= 0 {
+					break
+				}
+				for _, grp := range modeMap[mk] {
+					if shortfallPM <= 0 {
+						break
+					}
+					if !pickedPM[grp[0].ID] && len(grp) <= shortfallPM {
+						resultGroups = append(resultGroups, grp)
+						pickedPM[grp[0].ID] = true
+						shortfallPM -= len(grp)
+					}
+				}
+			}
 		}
 
 	default:
@@ -1024,6 +1054,38 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 			opts.rng.shuffle(pool)
 			resultGroups = append(resultGroups, greedyFill(pool, need)...)
 		}
+
+		// ── Last-resort shortfall recovery ──
+		// With truncation in greedyFill, this should rarely trigger.
+		// Only activates if a mode's pool is completely exhausted and still
+		// cannot reach its quota even with truncation.
+		actual := 0
+		for _, grp := range resultGroups {
+			actual += len(grp)
+		}
+		if shortfall := totalNeed - actual; shortfall > 0 {
+			picked := map[string]bool{}
+			for _, grp := range resultGroups {
+				if len(grp) > 0 {
+					picked[grp[0].ID] = true
+				}
+			}
+			for _, mk := range modeOrder {
+				if shortfall <= 0 {
+					break
+				}
+				for _, grp := range modeMap[mk] {
+					if shortfall <= 0 {
+						break
+					}
+					if !picked[grp[0].ID] && len(grp) <= shortfall {
+						resultGroups = append(resultGroups, grp)
+						picked[grp[0].ID] = true
+						shortfall -= len(grp)
+					}
+				}
+			}
+		}
 	}
 
 	var rows []sqFlat
@@ -1037,6 +1099,8 @@ func greedyFill(pool []group, target int) []group {
 	var picked []group
 	n := 0
 	var remaining []group
+
+	// Pass 1: sequential greedy — pick groups that fit without exceeding target
 	for _, grp := range pool {
 		c := len(grp)
 		if n+c <= target {
@@ -1049,6 +1113,8 @@ func greedyFill(pool []group, target int) []group {
 			remaining = append(remaining, grp)
 		}
 	}
+
+	// Pass 2: best-fit — find the largest remaining group that still fits in the gap
 	for n < target && len(remaining) > 0 {
 		gap := target - n
 		bestIdx, bestC := -1, 0
@@ -1066,6 +1132,28 @@ func greedyFill(pool []group, target int) []group {
 		n += bestC
 		remaining = append(remaining[:bestIdx], remaining[bestIdx+1:]...)
 	}
+
+	// Pass 3: truncate — if gap remains, take the smallest oversized group
+	// and truncate it to exactly fill the gap (preserving user's mode selection).
+	if n < target && len(remaining) > 0 {
+		gap := target - n
+		bestIdx := -1
+		bestSize := 0
+		for i, grp := range remaining {
+			c := len(grp)
+			if c > gap && (bestIdx == -1 || c < bestSize) {
+				bestIdx = i
+				bestSize = c
+			}
+		}
+		if bestIdx >= 0 {
+			truncated := make(group, gap)
+			copy(truncated, remaining[bestIdx][:gap])
+			picked = append(picked, truncated)
+			// n += gap  (no need, we're returning)
+		}
+	}
+
 	return picked
 }
 
