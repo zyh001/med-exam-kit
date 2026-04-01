@@ -22,9 +22,10 @@ _server_host:    str         = "127.0.0.1"
 _record_enabled: bool        = True   # --no-record 时为 False
 
 # ── 访问码验证 ──
-_access_code:    str         = ""     # 8 位访问码，启动时生成
+_access_code:    str         = ""     # 访问码，启动时生成或自定义
 _cookie_secret:  str         = ""     # HMAC 签名密钥，启动时生成
 _pin_enabled:    bool        = True   # False 时跳过访问码验证（--no-pin）
+_pin_len:        int         = 8      # PIN 长度提示（0=自定义不限长度）
 
 # ── 速率限制：滑动窗口，每 IP 最多 120 次/分钟 ──
 _RATE_LIMIT  = 120
@@ -83,7 +84,7 @@ def _create_app() -> Flask:
                 if not allowed:
                     reason = f"尝试次数过多，请 {retry_after} 秒后重试"
                     return Response(
-                        render_pin_page("医考练习", error=reason),
+                        render_pin_page("医考练习", error=reason, pin_len=_pin_len),
                         mimetype="text/html", status=429,
                     )
             return None
@@ -116,7 +117,7 @@ def _create_app() -> Flask:
         # ── 2. 访问码验证（_pin_enabled=False 时跳过）────────────────
         if _pin_enabled and not is_authenticated(_cookie_secret, _access_code):
             if request.path == "/" and request.method == "GET":
-                return Response(render_pin_page("医考练习"), mimetype="text/html")
+                return Response(render_pin_page("医考练习", pin_len=_pin_len), mimetype="text/html")
             return jsonify({"error": "Unauthorized", "auth": False}), 401
 
         # ── 3. API 路由：校验 Session Token ───────────────────────────
@@ -669,7 +670,7 @@ def auth():
         from med_exam_toolkit.auth import record_failure
         record_failure(ip)
     return Response(
-        render_pin_page("医考练习", error="访问码不正确，请重新输入"),
+        render_pin_page("医考练习", error="访问码不正确，请重新输入", pin_len=_pin_len),
         mimetype="text/html",
         status=200,
     )
@@ -683,12 +684,13 @@ def start_quiz(
     password:   str | None = None,
     no_record:  bool = False,
     no_pin:     bool = False,
+    pin:        str | None = None,
 ) -> None:
     """启动医考练习 Web 应用"""
     from med_exam_toolkit.bank import load_bank
     global _questions, _bank_path, _password, _session_token, _asset_ver, \
            _server_port, _server_host, _db_path, _record_enabled, \
-           _access_code, _cookie_secret, _pin_enabled
+           _access_code, _cookie_secret, _pin_enabled, _pin_len
 
     _bank_path      = Path(bank_path).resolve()
     _password       = password
@@ -697,14 +699,22 @@ def start_quiz(
     _session_token  = secrets.token_hex(32)
     _asset_ver      = secrets.token_hex(8)
     _record_enabled = not no_record
-    _pin_enabled    = not no_pin
+    _pin_enabled    = not no_pin or bool(pin)  # --pin implies PIN enabled
 
-    # ── 生成访问码（--no-pin 时跳过）────────────────────────────────
+    # ── 生成或使用自定义访问码 ──────────────────────────────────────
     from med_exam_toolkit.auth import generate_access_code
-    if _pin_enabled:
+    if pin:
+        # Custom PIN: uppercase for consistency (server always compares uppercase)
+        _access_code = pin.strip().upper()
+        _, _cookie_secret = generate_access_code()  # only need fresh secret
+        _pin_len = 0  # no maxlength restriction
+        _pin_enabled = True
+    elif _pin_enabled:
         _access_code, _cookie_secret = generate_access_code()
+        _pin_len = 8
     else:
         _access_code = _cookie_secret = ""
+        _pin_len = 0
 
     print(f"[INFO] 加载题库: {_bank_path}")
     _questions = load_bank(_bank_path, password)
@@ -731,11 +741,17 @@ def start_quiz(
 
     # ── 访问码（醒目展示）或无 PIN 提示 ────────────────────────────
     if _pin_enabled:
-        mid = _access_code[:4] + " " + _access_code[4:]
+        if pin:
+            display = _access_code
+            label = "访问码（自定义）"
+        else:
+            display = _access_code[:4] + " " + _access_code[4:]
+            label = "访问码"
         print(f"\n{'━'*40}")
-        print(f"  🔑 访问码：  {mid}")
+        print(f"  🔑 {label}：  {display}")
         print(f"  首次打开浏览器时需要输入此码")
-        print(f"  重启服务后访问码会自动更新")
+        if not pin:
+            print(f"  重启服务后访问码会自动更新")
         print(f"{'━'*40}\n")
     else:
         print()
