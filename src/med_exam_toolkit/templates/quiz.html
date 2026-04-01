@@ -6,6 +6,10 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/manifest.json">
+<link rel="icon" type="image/png" sizes="192x192" href="{{ url_for('static', filename='icon-192.png') }}">
+<link rel="apple-touch-icon" href="{{ url_for('static', filename='icon-192.png') }}">
+<meta name="theme-color" content="#0d1117">
 {% endblock %}
 
 {% block page_css %}
@@ -511,4 +515,9 @@
 {% block page_js %}
 <script src="{{ url_for('static', filename='quiz_sync.js') }}?v={{ asset_ver }}"></script>
 <script src="{{ url_for('static', filename='quiz.js') }}?v={{ asset_ver }}"></script>
+<script>
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('/sw.js').catch(function(){});
+}
+</script>
 {% endblock %}
