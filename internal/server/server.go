@@ -126,6 +126,26 @@ func (s *Server) registerRoutes() {
 		if err == nil {
 			m.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 		}
+		// PWA: serve sw.js and manifest.json from root path
+		m.HandleFunc("GET /sw.js", func(w http.ResponseWriter, r *http.Request) {
+			data, err := fs.ReadFile(s.cfg.Assets, "assets/static/sw.js")
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/javascript")
+			w.Header().Set("Service-Worker-Allowed", "/")
+			w.Write(data)
+		})
+		m.HandleFunc("GET /manifest.json", func(w http.ResponseWriter, r *http.Request) {
+			data, err := fs.ReadFile(s.cfg.Assets, "assets/static/manifest.json")
+			if err != nil {
+				http.NotFound(w, r)
+				return
+			}
+			w.Header().Set("Content-Type", "application/manifest+json")
+			w.Write(data)
+		})
 	}
 	m.HandleFunc("GET /api/info", s.handleInfo)
 	m.HandleFunc("GET /api/questions", s.handleQuestions)

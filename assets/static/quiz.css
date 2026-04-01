@@ -1386,3 +1386,59 @@ button,a,[role=button],label{touch-action:manipulation}
   border-radius:20px;font-size:11px;font-weight:700;
   background:var(--warn-bg);color:var(--warning);margin-left:8px;
 }
+
+/* ═══════════════════════════════════════════════
+   Streak celebration overlay
+   ═══════════════════════════════════════════════ */
+#streak-overlay{
+  position:fixed;inset:0;z-index:9999;
+  pointer-events:none;
+  display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(ellipse at center,rgba(68,147,248,.10) 0%,transparent 70%);
+  animation:streakIn .4s ease-out;
+}
+#streak-overlay.streak-fade-out{
+  animation:streakOut .7s ease-in forwards;
+}
+.streak-card{
+  text-align:center;
+  animation:streakBounce .5s cubic-bezier(.34,1.56,.64,1);
+}
+.streak-emoji{
+  font-size:56px;
+  filter:drop-shadow(0 0 20px rgba(68,147,248,.5));
+  animation:streakPulse 1s ease-in-out infinite;
+}
+.streak-count{
+  font-size:28px;font-weight:800;
+  color:var(--text,#e6edf3);
+  margin:8px 0 4px;
+  text-shadow:0 0 24px rgba(68,147,248,.6);
+}
+.streak-text{
+  font-size:15px;
+  color:var(--muted,#7d8590);
+  font-weight:500;
+}
+.streak-particles{
+  position:absolute;inset:0;overflow:hidden;pointer-events:none;
+}
+.streak-p{
+  position:absolute;font-size:20px;opacity:0;
+  animation:streakParticle 1.2s ease-out var(--d) forwards;
+}
+@keyframes streakIn{from{opacity:0}to{opacity:1}}
+@keyframes streakOut{to{opacity:0}}
+@keyframes streakBounce{
+  0%{transform:scale(0) rotate(-8deg)}
+  60%{transform:scale(1.15) rotate(2deg)}
+  100%{transform:scale(1) rotate(0)}
+}
+@keyframes streakPulse{
+  0%,100%{transform:scale(1)}
+  50%{transform:scale(1.15)}
+}
+@keyframes streakParticle{
+  0%{opacity:1;transform:translate(0,0) rotate(0) scale(1)}
+  100%{opacity:0;transform:translate(var(--x),var(--y)) rotate(var(--r)) scale(0)}
+}
