@@ -27,10 +27,16 @@ func init() {
 	quizCmd.Flags().Bool("no-record", false, "禁用做题记录")
 	quizCmd.Flags().Bool("no-pin", false, "禁用访问码验证")
 	quizCmd.Flags().String("pin", "", "自定义访问码（留空则自动生成）")
+	quizCmd.Flags().StringArrayP("bank", "b", nil, "题库路径（可重复：-b a.mqb -b b.mqb）")
 }
 
 func runQuiz(cmd *cobra.Command, args []string) error {
-	bankPath, _ := cmd.Root().PersistentFlags().GetString("bank")
+	// Collect bank paths: -B flags first, then fall back to legacy -b/--bank
+	bankPaths, _ := cmd.Flags().GetStringArray("bank")
+	if len(bankPaths) == 0 {
+		return fmt.Errorf("请用 -b 指定至少一个题库路径（多题库：-b a.mqb -b b.mqb）")
+	}
+
 	password, _ := cmd.Root().PersistentFlags().GetString("password")
 	port, _ := cmd.Flags().GetInt("port")
 	host, _ := cmd.Flags().GetString("host")
@@ -38,35 +44,41 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	noPin, _ := cmd.Flags().GetBool("no-pin")
 	customPin, _ := cmd.Flags().GetString("pin")
 
-	if bankPath == "" {
-		return fmt.Errorf("请用 -b 指定题库路径")
-	}
-
-	fmt.Printf("📂 加载题库：%s\n", bankPath)
-	questions, err := bank.LoadBank(bankPath, password)
-	if err != nil {
-		return err
-	}
-	fmt.Printf("   共 %d 道题\n", len(questions))
-
-	var db *sql.DB
-	recordEnabled := !noRecord
-	if recordEnabled {
-		dbPath := progress.DBPathForBank(bankPath)
-		db, err = progress.InitDB(dbPath)
+	var banks []server.BankEntry
+	for _, bp := range bankPaths {
+		fmt.Printf("📂 加载题库：%s\n", bp)
+		questions, err := bank.LoadBank(bp, password)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "⚠ 无法初始化进度数据库：%v\n", err)
-			db = nil
-			recordEnabled = false
+			return fmt.Errorf("加载 %s 失败: %w", bp, err)
 		}
+		fmt.Printf("   共 %d 道题\n", len(questions))
+
+		var db *sql.DB
+		recordEnabled := !noRecord
+		if recordEnabled {
+			dbPath := progress.DBPathForBank(bp)
+			db, err = progress.InitDB(dbPath)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "⚠ 无法初始化进度数据库 (%s)：%v\n", bp, err)
+				db = nil
+				recordEnabled = false
+			}
+		}
+
+		banks = append(banks, server.BankEntry{
+			Path:          bp,
+			Password:      password,
+			Questions:     questions,
+			DB:            db,
+			RecordEnabled: recordEnabled,
+		})
 	}
 
 	var accessCode, cookieSecret string
 	pinLen := 0
 	if customPin != "" {
-		// User-specified PIN — uppercase for consistency
 		accessCode = strings.ToUpper(strings.TrimSpace(customPin))
-		_, cookieSecret = auth.GenerateAccessCode() // only need a fresh secret
+		_, cookieSecret = auth.GenerateAccessCode()
 		fmt.Printf("\n🔑  访问码（自定义）：%s\n", accessCode)
 	} else if !noPin {
 		accessCode, cookieSecret = auth.GenerateAccessCode()
@@ -75,20 +87,13 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	}
 
 	cfg := server.Config{
-		Questions:     questions,
-		DB:            db,
-		Host:          host,
-		Port:          port,
-		AccessCode:    accessCode,
-		CookieSecret:  cookieSecret,
-		RecordEnabled: recordEnabled,
-		BankPath:      bankPath,
-		Password:      password,
-		PinLen:        pinLen,
+		Banks:        banks,
+		Host:         host,
+		Port:         port,
+		AccessCode:   accessCode,
+		CookieSecret: cookieSecret,
+		PinLen:       pinLen,
 	}
-
-	// Try to use embedded assets from main package (injected via build tag)
-	// For now assets must be copied manually; see README.
 	cfg.Assets = Assets
 
 	fmt.Printf("\n🌐  服务地址：http://%s\n", net.JoinHostPort(host, fmt.Sprint(port)))

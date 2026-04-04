@@ -25,18 +25,38 @@ import (
 	"github.com/zyh001/med-exam-kit/internal/progress"
 )
 
-type Config struct {
+// BankEntry holds one loaded question bank and its associated state.
+type BankEntry struct {
+	Path          string
+	Password      string
 	Questions     []*models.Question
 	DB            *sql.DB
-	Assets        fs.FS
-	Host          string
-	Port          int
-	AccessCode    string
-	CookieSecret  string
 	RecordEnabled bool
-	BankPath      string // path to .mqb file for saving
-	Password      string // encryption password
-	PinLen        int    // expected PIN length (0=custom, 8=auto-generated)
+}
+
+// bankName derives a display name from the file path.
+func (b *BankEntry) bankName() string {
+	base := filepath.Base(b.Path)
+	ext := filepath.Ext(base)
+	return strings.TrimSuffix(base, ext)
+}
+
+type Config struct {
+	Banks        []BankEntry
+	Assets       fs.FS
+	Host         string
+	Port         int
+	AccessCode   string
+	CookieSecret string
+	PinLen       int
+
+	// Legacy single-bank fields kept for editor command compatibility.
+	// When Banks is set, these are ignored.
+	Questions     []*models.Question
+	DB            *sql.DB
+	RecordEnabled bool
+	BankPath      string
+	Password      string
 }
 
 type Server struct {
@@ -54,6 +74,16 @@ const (
 )
 
 func New(cfg Config) *Server {
+	// Normalise: if legacy single-bank fields are used, wrap into Banks slice.
+	if len(cfg.Banks) == 0 && len(cfg.Questions) > 0 {
+		cfg.Banks = []BankEntry{{
+			Path:          cfg.BankPath,
+			Password:      cfg.Password,
+			Questions:     cfg.Questions,
+			DB:            cfg.DB,
+			RecordEnabled: cfg.RecordEnabled,
+		}}
+	}
 	tok := make([]byte, 16)
 	rand.Read(tok)
 	ver := make([]byte, 4)
@@ -117,16 +147,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) registerRoutes() {
 	m := s.mux
-	m.HandleFunc("GET /{$}", s.handleIndex) // exact root only
+	m.HandleFunc("GET /{$}", s.handleIndex)
 	m.HandleFunc("GET /editor", s.handleEditor)
 	m.HandleFunc("POST /auth", s.handleAuth)
 	if s.cfg.Assets != nil {
-		// assets/static/quiz.css → fs.Sub to "assets/static" → sub root contains quiz.css directly
 		sub, err := fs.Sub(s.cfg.Assets, "assets/static")
 		if err == nil {
 			m.Handle("GET /static/", http.StripPrefix("/static/", http.FileServer(http.FS(sub))))
 		}
-		// PWA: serve sw.js and manifest.json from root path
 		m.HandleFunc("GET /sw.js", func(w http.ResponseWriter, r *http.Request) {
 			data, err := fs.ReadFile(s.cfg.Assets, "assets/static/sw.js")
 			if err != nil {
@@ -147,6 +175,9 @@ func (s *Server) registerRoutes() {
 			w.Write(data)
 		})
 	}
+	// Multi-bank listing endpoint
+	m.HandleFunc("GET /api/banks", s.handleBanks)
+	// Per-bank endpoints – all accept ?bank=N (default 0)
 	m.HandleFunc("GET /api/info", s.handleInfo)
 	m.HandleFunc("GET /api/questions", s.handleQuestions)
 	m.HandleFunc("GET /api/question/", s.handleQuestion)
@@ -168,6 +199,27 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/sync/status", s.handleSyncStatus)
 }
 
+// ── Bank selection ────────────────────────────────────────────────────
+
+// bankForReq returns the BankEntry for the request's ?bank=N param.
+func (s *Server) bankForReq(r *http.Request) (*BankEntry, int, bool) {
+	idxStr := r.URL.Query().Get("bank")
+	idx := 0
+	if idxStr != "" {
+		var err error
+		idx, err = strconv.Atoi(idxStr)
+		if err != nil || idx < 0 || idx >= len(s.cfg.Banks) {
+			return nil, 0, false
+		}
+	}
+	if idx >= len(s.cfg.Banks) {
+		return nil, 0, false
+	}
+	return &s.cfg.Banks[idx], idx, true
+}
+
+// ── Page handlers ─────────────────────────────────────────────────────
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if _, err := r.Cookie("med_exam_uid"); err != nil {
 		uid := make([]byte, 16)
@@ -181,7 +233,6 @@ func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Assets != nil {
 		data, err := fs.ReadFile(s.cfg.Assets, "assets/templates/quiz.html")
 		if err == nil {
-			// Inject session_token and asset_ver into HTML
 			html := strings.Replace(string(data), "{{SESSION_TOKEN}}", s.sessionToken, 1)
 			html = strings.Replace(html, "{{ASSET_VER}}", s.assetVer, 1)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -205,7 +256,6 @@ func (s *Server) handleEditor(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.Assets != nil {
 		data, err := fs.ReadFile(s.cfg.Assets, "assets/templates/editor.html")
 		if err == nil {
-			// Inject session_token and asset_ver into HTML
 			html := strings.Replace(string(data), "{{SESSION_TOKEN}}", s.sessionToken, 1)
 			html = strings.Replace(html, "{{ASSET_VER}}", s.assetVer, 1)
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -231,7 +281,44 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	io.WriteString(w, auth.RenderPINPage("医考练习", "访问码错误，请重试", s.cfg.PinLen))
 }
 
+// ── API: banks list ───────────────────────────────────────────────────
+
+// GET /api/banks  — returns metadata for all loaded banks
+func (s *Server) handleBanks(w http.ResponseWriter, r *http.Request) {
+	type bankInfo struct {
+		ID    int    `json:"id"`
+		Name  string `json:"name"`
+		Path  string `json:"path"`
+		Total int    `json:"total_sq"`
+	}
+	infos := make([]bankInfo, len(s.cfg.Banks))
+	for i, b := range s.cfg.Banks {
+		total := 0
+		for _, q := range b.Questions {
+			total += len(q.SubQuestions)
+		}
+		infos[i] = bankInfo{
+			ID:    i,
+			Name:  b.bankName(),
+			Path:  b.Path,
+			Total: total,
+		}
+	}
+	jsonOK(w, map[string]any{
+		"banks":         infos,
+		"session_token": s.sessionToken,
+		"asset_ver":     s.assetVer,
+	})
+}
+
+// ── API: per-bank info ────────────────────────────────────────────────
+
 func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	modeSet := []string{}
 	modeMap := map[string]bool{}
 	unitSet := []string{}
@@ -239,7 +326,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 	unitSq := map[string]int{}
 	unitModeSq := map[string]map[string]int{}
 	total := 0
-	for _, q := range s.cfg.Questions {
+	for _, q := range b.Questions {
 		if !modeMap[q.Mode] {
 			modeMap[q.Mode] = true
 			modeSet = append(modeSet, q.Mode)
@@ -255,15 +342,8 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		unitSq[q.Unit] += cnt
 		unitModeSq[q.Unit][q.Mode] += cnt
 	}
-	bankName := "题库"
-	if s.cfg.BankPath != "" {
-		// e.g. "口腔执业医师题库.mqb" → "口腔执业医师题库"
-		base := filepath.Base(s.cfg.BankPath)
-		ext := filepath.Ext(base)
-		bankName = strings.TrimSuffix(base, ext)
-	}
 	jsonOK(w, map[string]any{
-		"bank_name":      bankName,
+		"bank_name":      b.bankName(),
 		"total_sq":       total,
 		"units":          unitSet,
 		"modes":          modeSet,
@@ -271,22 +351,24 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"unit_mode_sq":   unitModeSq,
 		"session_token":  s.sessionToken,
 		"asset_ver":      s.assetVer,
-		"record_enabled": s.cfg.RecordEnabled,
+		"record_enabled": b.RecordEnabled,
 	})
 }
 
 func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	q := r.URL.Query()
 
-	// Editor mode: pagination with page/per_page
 	if page := q.Get("page"); page != "" {
-		s.handleEditorQuestions(w, q)
+		s.handleEditorQuestions(w, q, b)
 		return
 	}
 
-	// Quiz mode: limit-based selection
 	limit, _ := strconv.Atoi(q.Get("limit"))
-
 	var perMode map[string]int
 	var perUnit map[string]int
 	var difficulty map[string]float64
@@ -308,7 +390,7 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	rows, _ := selectQuestions(s.cfg.Questions, selectOpts{
+	rows, _ := selectQuestions(b.Questions, selectOpts{
 		modes:      q["mode"],
 		units:      q["unit"],
 		limit:      limit,
@@ -325,8 +407,7 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"total": len(rows), "items": rows})
 }
 
-// handleEditorQuestions handles the editor's paginated question list API.
-func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values) {
+func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values, b *BankEntry) {
 	page, _ := strconv.Atoi(q.Get("page"))
 	if page < 1 {
 		page = 1
@@ -342,9 +423,8 @@ func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values) {
 	hasAI := q.Get("has_ai") == "1"
 	missing := q.Get("missing") == "1"
 
-	// Build filtered list
 	var allRows []sqFlat
-	for qi, question := range s.cfg.Questions {
+	for qi, question := range b.Questions {
 		for si, sq := range question.SubQuestions {
 			row := sqFlat{
 				QI: qi, SI: si,
@@ -357,8 +437,6 @@ func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values) {
 				HasAI:       sq.AIAnswer != "" || sq.AIDiscuss != "",
 				Fingerprint: question.Fingerprint,
 			}
-
-			// Apply filters
 			if modeFilter != "" && question.Mode != modeFilter {
 				continue
 			}
@@ -380,7 +458,6 @@ func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values) {
 					continue
 				}
 			}
-
 			allRows = append(allRows, row)
 		}
 	}
@@ -390,8 +467,6 @@ func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values) {
 	if pages < 1 {
 		pages = 1
 	}
-
-	// Paginate
 	start := (page - 1) * perPage
 	end := start + perPage
 	if start > total {
@@ -400,15 +475,10 @@ func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values) {
 	if end > total {
 		end = total
 	}
-
 	items := []sqFlat{}
 	if start < end {
 		items = allRows[start:end]
 	}
-	if items == nil {
-		items = []sqFlat{}
-	}
-
 	jsonOK(w, map[string]any{
 		"page":  page,
 		"pages": pages,
@@ -417,17 +487,19 @@ func (s *Server) handleEditorQuestions(w http.ResponseWriter, q url.Values) {
 	})
 }
 
-// handleQuestion returns a single question by index for the editor.
 func (s *Server) handleQuestion(w http.ResponseWriter, r *http.Request) {
-	// Path is /api/question/{qi}
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/question/")
 	qi, err := strconv.Atoi(path)
-	if err != nil || qi < 0 || qi >= len(s.cfg.Questions) {
+	if err != nil || qi < 0 || qi >= len(b.Questions) {
 		jsonError(w, "question not found", http.StatusNotFound)
 		return
 	}
-
-	q := s.cfg.Questions[qi]
+	q := b.Questions[qi]
 	subQuestions := make([]map[string]any, len(q.SubQuestions))
 	for i, sq := range q.SubQuestions {
 		subQuestions[i] = map[string]any{
@@ -448,7 +520,6 @@ func (s *Server) handleQuestion(w http.ResponseWriter, r *http.Request) {
 			"discuss_source": sq.DiscussSource(),
 		}
 	}
-
 	jsonOK(w, map[string]any{
 		"qi":             qi,
 		"mode":           q.Mode,
@@ -460,8 +531,12 @@ func (s *Server) handleQuestion(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// POST /api/question - create a new empty question
 func (s *Server) handleCreateQuestion(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -481,49 +556,60 @@ func (s *Server) handleCreateQuestion(w http.ResponseWriter, r *http.Request) {
 			Answer:  "",
 		}},
 	}
-	qi := len(s.cfg.Questions)
-	s.cfg.Questions = append(s.cfg.Questions, newQ)
+	qi := len(b.Questions)
+	b.Questions = append(b.Questions, newQ)
 	jsonOK(w, map[string]any{"ok": true, "qi": qi})
 }
 
-// DELETE /api/question/{qi} - delete a question
 func (s *Server) handleDeleteQuestion(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/question/")
 	qi, err := strconv.Atoi(path)
-	if err != nil || qi < 0 || qi >= len(s.cfg.Questions) {
+	if err != nil || qi < 0 || qi >= len(b.Questions) {
 		jsonError(w, "question not found", http.StatusNotFound)
 		return
 	}
-	total := len(s.cfg.Questions) - 1
-	s.cfg.Questions = append(s.cfg.Questions[:qi], s.cfg.Questions[qi+1:]...)
+	total := len(b.Questions) - 1
+	b.Questions = append(b.Questions[:qi], b.Questions[qi+1:]...)
 	jsonOK(w, map[string]any{"ok": true, "total": total})
 }
 
-// POST /api/question/{qi}/subquestion - add a sub-question
 func (s *Server) handleQuestionAction(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/question/")
 	parts := strings.Split(path, "/")
 	qi, err := strconv.Atoi(parts[0])
-	if err != nil || qi < 0 || qi >= len(s.cfg.Questions) {
+	if err != nil || qi < 0 || qi >= len(b.Questions) {
 		jsonError(w, "question not found", http.StatusNotFound)
 		return
 	}
-	// Only POST /api/question/{qi}/subquestion is supported here
 	if len(parts) != 2 || parts[1] != "subquestion" {
 		jsonError(w, "not found", http.StatusNotFound)
 		return
 	}
-	si := len(s.cfg.Questions[qi].SubQuestions)
-	s.cfg.Questions[qi].SubQuestions = append(s.cfg.Questions[qi].SubQuestions, models.SubQuestion{
+	si := len(b.Questions[qi].SubQuestions)
+	b.Questions[qi].SubQuestions = append(b.Questions[qi].SubQuestions, models.SubQuestion{
 		Text:    "",
 		Options: []string{"A. ", "B. ", "C. ", "D. "},
 		Answer:  "",
 	})
-	jsonOK(w, map[string]any{"ok": true, "si": si, "sub_total": len(s.cfg.Questions[qi].SubQuestions)})
+	jsonOK(w, map[string]any{"ok": true, "si": si, "sub_total": len(b.Questions[qi].SubQuestions)})
 }
 
-// PUT /api/subquestion/{qi}/{si} - update a sub-question
 func (s *Server) handleUpdateSubQuestion(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/subquestion/")
 	parts := strings.Split(path, "/")
 	if len(parts) != 2 {
@@ -532,22 +618,20 @@ func (s *Server) handleUpdateSubQuestion(w http.ResponseWriter, r *http.Request)
 	}
 	qi, _ := strconv.Atoi(parts[0])
 	si, _ := strconv.Atoi(parts[1])
-	if qi < 0 || qi >= len(s.cfg.Questions) {
+	if qi < 0 || qi >= len(b.Questions) {
 		jsonError(w, "question not found", http.StatusNotFound)
 		return
 	}
-	q := s.cfg.Questions[qi]
+	q := b.Questions[qi]
 	if si < 0 || si >= len(q.SubQuestions) {
 		jsonError(w, "sub-question not found", http.StatusNotFound)
 		return
 	}
-
 	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
-
 	sq := &q.SubQuestions[si]
 	if v, ok := data["text"].(string); ok {
 		sq.Text = v
@@ -573,7 +657,6 @@ func (s *Server) handleUpdateSubQuestion(w http.ResponseWriter, r *http.Request)
 		}
 		sq.Options = opts
 	}
-	// Update question-level fields
 	if v, ok := data["mode"].(string); ok {
 		q.Mode = v
 	}
@@ -598,8 +681,12 @@ func (s *Server) handleUpdateSubQuestion(w http.ResponseWriter, r *http.Request)
 	jsonOK(w, map[string]any{"ok": true})
 }
 
-// DELETE /api/subquestion/{qi}/{si} - delete a sub-question
 func (s *Server) handleDeleteSubQuestion(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	path := strings.TrimPrefix(r.URL.Path, "/api/subquestion/")
 	parts := strings.Split(path, "/")
 	if len(parts) != 2 {
@@ -608,11 +695,11 @@ func (s *Server) handleDeleteSubQuestion(w http.ResponseWriter, r *http.Request)
 	}
 	qi, _ := strconv.Atoi(parts[0])
 	si, _ := strconv.Atoi(parts[1])
-	if qi < 0 || qi >= len(s.cfg.Questions) {
+	if qi < 0 || qi >= len(b.Questions) {
 		jsonError(w, "question not found", http.StatusNotFound)
 		return
 	}
-	q := s.cfg.Questions[qi]
+	q := b.Questions[qi]
 	if si < 0 || si >= len(q.SubQuestions) {
 		jsonError(w, "sub-question not found", http.StatusNotFound)
 		return
@@ -621,8 +708,12 @@ func (s *Server) handleDeleteSubQuestion(w http.ResponseWriter, r *http.Request)
 	jsonOK(w, map[string]any{"ok": true, "sub_total": len(q.SubQuestions)})
 }
 
-// POST /api/replace/preview - preview find/replace
 func (s *Server) handleReplacePreview(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -640,9 +731,8 @@ func (s *Server) handleReplacePreview(w http.ResponseWriter, r *http.Request) {
 	if limit == 0 {
 		limit = 30
 	}
-
 	var hits []map[string]any
-	for qi, q := range s.cfg.Questions {
+	for qi, q := range b.Questions {
 		if mode != "" && q.Mode != mode {
 			continue
 		}
@@ -672,10 +762,7 @@ func (s *Server) handleReplacePreview(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			if hit {
-				hits = append(hits, map[string]any{
-					"qi": qi, "si": si,
-					"preview": preview,
-				})
+				hits = append(hits, map[string]any{"qi": qi, "si": si, "preview": preview})
 				if len(hits) >= int(limit) {
 					break
 				}
@@ -688,8 +775,12 @@ func (s *Server) handleReplacePreview(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"hits": hits})
 }
 
-// POST /api/replace - execute find/replace
 func (s *Server) handleReplace(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	var data map[string]any
 	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -704,9 +795,8 @@ func (s *Server) handleReplace(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "find and fields required", http.StatusBadRequest)
 		return
 	}
-
 	replaced := 0
-	for _, q := range s.cfg.Questions {
+	for _, q := range b.Questions {
 		if mode != "" && q.Mode != mode {
 			continue
 		}
@@ -734,32 +824,41 @@ func (s *Server) handleReplace(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, map[string]any{"ok": true, "replaced": replaced})
 }
 
-// POST /api/save - save the question bank back to file
 func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.BankPath == "" {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.Path == "" {
 		jsonError(w, "未配置题库路径，无法保存", http.StatusBadRequest)
 		return
 	}
-	outPath, err := bank.SaveBank(s.cfg.Questions, s.cfg.BankPath, s.cfg.Password, true, 6)
+	outPath, err := bank.SaveBank(b.Questions, b.Path, b.Password, true, 6)
 	if err != nil {
 		jsonError(w, fmt.Sprintf("保存失败: %v", err), http.StatusInternalServerError)
 		return
 	}
-	jsonOK(w, map[string]any{"ok": true, "path": outPath, "count": len(s.cfg.Questions)})
+	jsonOK(w, map[string]any{"ok": true, "path": outPath, "count": len(b.Questions)})
 }
 
 func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.RecordEnabled {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if !b.RecordEnabled {
 		jsonOK(w, map[string]any{"ok": true, "skipped": true})
 		return
 	}
-	if s.cfg.DB == nil {
+	if b.DB == nil {
 		jsonError(w, "进度数据库未初始化", http.StatusServiceUnavailable)
 		return
 	}
 	var data map[string]any
 	json.NewDecoder(r.Body).Decode(&data)
-	if err := progress.RecordSession(s.cfg.DB, data, getUserID(r)); err != nil {
+	if err := progress.RecordSession(b.DB, data, getUserID(r)); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -767,54 +866,84 @@ func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleRecordStatus(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 	uid := getUserID(r)
 	jsonOK(w, map[string]any{
-		"enabled":   s.cfg.RecordEnabled,
-		"db_ready":  s.cfg.DB != nil,
+		"enabled":   b.RecordEnabled,
+		"db_ready":  b.DB != nil,
 		"user_id":   uid,
 		"is_legacy": uid == progress.LegacyUser,
 	})
 }
 
 func (s *Server) handleRecordClear(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DB == nil {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.DB == nil {
 		jsonOK(w, map[string]any{"ok": true, "deleted": map[string]int{}})
 		return
 	}
-	jsonOK(w, map[string]any{"ok": true, "deleted": progress.ClearUserData(s.cfg.DB, getUserID(r))})
+	jsonOK(w, map[string]any{"ok": true, "deleted": progress.ClearUserData(b.DB, getUserID(r))})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DB == nil {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.DB == nil {
 		jsonOK(w, map[string]any{"overall": map[string]any{}, "history": nil, "units": nil})
 		return
 	}
 	uid := getUserID(r)
 	jsonOK(w, map[string]any{
-		"overall": progress.GetOverallStats(s.cfg.DB, uid),
-		"history": progress.GetHistory(s.cfg.DB, uid, 30),
-		"units":   progress.GetUnitStats(s.cfg.DB, uid),
+		"overall": progress.GetOverallStats(b.DB, uid),
+		"history": progress.GetHistory(b.DB, uid, 30),
+		"units":   progress.GetUnitStats(b.DB, uid),
 	})
 }
 
 func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DB == nil {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.DB == nil {
 		jsonOK(w, map[string]any{"fingerprints": nil})
 		return
 	}
-	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprints(s.cfg.DB, getUserID(r))})
+	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprints(b.DB, getUserID(r))})
 }
 
 func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DB == nil {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.DB == nil {
 		jsonOK(w, map[string]any{"items": nil})
 		return
 	}
-	jsonOK(w, map[string]any{"items": progress.GetWrongFingerprints(s.cfg.DB, getUserID(r), 300)})
+	jsonOK(w, map[string]any{"items": progress.GetWrongFingerprints(b.DB, getUserID(r), 300)})
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DB == nil {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.DB == nil {
 		jsonOK(w, map[string]any{"ok": false, "error": "DB not initialised"})
 		return
 	}
@@ -822,16 +951,21 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		Sessions []map[string]any `json:"sessions"`
 	}
 	json.NewDecoder(r.Body).Decode(&payload)
-	done, skipped := progress.RecordSessionsBatch(s.cfg.DB, payload.Sessions, getUserID(r))
+	done, skipped := progress.RecordSessionsBatch(b.DB, payload.Sessions, getUserID(r))
 	jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped})
 }
 
 func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DB == nil {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.DB == nil {
 		jsonOK(w, map[string]any{"session_count": 0, "last_ts": nil})
 		return
 	}
-	jsonOK(w, progress.GetSyncStatus(s.cfg.DB, getUserID(r)))
+	jsonOK(w, progress.GetSyncStatus(b.DB, getUserID(r)))
 }
 
 // ── Question selection ─────────────────────────────────────────────────
@@ -1000,7 +1134,6 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 			opts.rng.shuffle(pool)
 			resultGroups = append(resultGroups, greedyFill(pool, need)...)
 		}
-		// Last-resort: with truncation in greedyFill, this rarely triggers
 		actualPM := 0
 		for _, grp := range resultGroups {
 			actualPM += len(grp)
@@ -1075,11 +1208,6 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 			opts.rng.shuffle(pool)
 			resultGroups = append(resultGroups, greedyFill(pool, need)...)
 		}
-
-		// ── Last-resort shortfall recovery ──
-		// With truncation in greedyFill, this should rarely trigger.
-		// Only activates if a mode's pool is completely exhausted and still
-		// cannot reach its quota even with truncation.
 		actual := 0
 		for _, grp := range resultGroups {
 			actual += len(grp)
@@ -1120,8 +1248,6 @@ func greedyFill(pool []group, target int) []group {
 	var picked []group
 	n := 0
 	var remaining []group
-
-	// Pass 1: sequential greedy — pick groups that fit without exceeding target
 	for _, grp := range pool {
 		c := len(grp)
 		if n+c <= target {
@@ -1134,8 +1260,6 @@ func greedyFill(pool []group, target int) []group {
 			remaining = append(remaining, grp)
 		}
 	}
-
-	// Pass 2: best-fit — find the largest remaining group that still fits in the gap
 	for n < target && len(remaining) > 0 {
 		gap := target - n
 		bestIdx, bestC := -1, 0
@@ -1153,9 +1277,6 @@ func greedyFill(pool []group, target int) []group {
 		n += bestC
 		remaining = append(remaining[:bestIdx], remaining[bestIdx+1:]...)
 	}
-
-	// Pass 3: truncate — if gap remains, take the smallest oversized group
-	// and truncate it to exactly fill the gap (preserving user's mode selection).
 	if n < target && len(remaining) > 0 {
 		gap := target - n
 		bestIdx := -1
@@ -1171,10 +1292,8 @@ func greedyFill(pool []group, target int) []group {
 			truncated := make(group, gap)
 			copy(truncated, remaining[bestIdx][:gap])
 			picked = append(picked, truncated)
-			// n += gap  (no need, we're returning)
 		}
 	}
-
 	return picked
 }
 
