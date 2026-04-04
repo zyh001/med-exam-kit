@@ -29,7 +29,44 @@ const S = {
   _groupModalCb: null,     // 题型切换确认框回调
   practiceSessionId: null, // 当前练习进度 ID
   streak: 0,              // 练习模式连续答对计数
+  bankID: 0,              // 当前选中的题库索引
+  banksInfo: [],          // 所有题库列表（从 /api/banks 获取）
 };
+
+// 返回当前题库的 query string 参数 (bank=N)
+function bankQS() { return 'bank=' + S.bankID; }
+
+// 安全渲染 HTML：允许 <img> 标签，过滤脚本等危险元素
+function renderHTML(s) {
+  if (!s) return '';
+  // 使用 DOMParser 解析，只保留安全节点
+  const div = document.createElement('div');
+  // 先 esc 普通文本，再还原允许的 img 标签
+  // 策略：直接用 innerHTML 赋值，但删除危险标签
+  const tmp = document.createElement('div');
+  tmp.innerHTML = s;
+  // 移除所有 script / iframe / object / form 节点
+  tmp.querySelectorAll('script,iframe,object,embed,form,link,meta,style').forEach(el => el.remove());
+  // 对 img 标签：只保留 src / alt / width / height 属性，移除事件属性
+  tmp.querySelectorAll('img').forEach(img => {
+    const allowed = ['src','alt','width','height','style','class','title'];
+    Array.from(img.attributes).forEach(attr => {
+      if (!allowed.includes(attr.name.toLowerCase())) img.removeAttribute(attr.name);
+    });
+    // 加上响应式样式
+    img.style.maxWidth = '100%';
+    img.style.height = 'auto';
+    img.style.borderRadius = '6px';
+    img.style.margin = '6px 0';
+  });
+  // 移除所有元素上的事件属性（on*）
+  tmp.querySelectorAll('*').forEach(el => {
+    Array.from(el.attributes).forEach(attr => {
+      if (attr.name.startsWith('on')) el.removeAttribute(attr.name);
+    });
+  });
+  return tmp.innerHTML;
+}
 
 const CFG = {
   units: new Set(['__all__']),
@@ -267,7 +304,12 @@ async function init() {
   // 先检测是否有未完成的考试（弹窗优先于主界面渲染）
   const hasSession = checkResumeSession();
   try {
-    S.bankInfo = await apiFetch('/api/info').then(r => r.json());
+    const [banksData, bankInfo] = await Promise.all([
+      apiFetch('/api/banks').then(r => r.json()),
+      apiFetch('/api/info?' + bankQS()).then(r => r.json()),
+    ]);
+    S.banksInfo = banksData.banks || [];
+    S.bankInfo = bankInfo;
     if (!hasSession) renderHome();
     else renderHome(); // 主界面也渲染，弹窗在最上层覆盖
   } catch(e) {
@@ -289,10 +331,55 @@ async function init() {
 function renderHome() {
   const info = S.bankInfo;
   document.getElementById('home-bank-name').textContent = info.bank_name || '题库';
+  renderBankSelector();
   document.getElementById('stat-sq').textContent    = info.total_sq.toLocaleString();
   document.getElementById('stat-units').textContent = info.units.length;
   document.getElementById('stat-modes').textContent = info.modes.length;
   renderHistorySection();
+}
+
+// ════════════════════════════════════════════
+// 题库选择器
+// ════════════════════════════════════════════
+function renderBankSelector() {
+  const container = document.getElementById('bank-selector-wrap');
+  if (!container) return;
+  const banks = S.banksInfo;
+  if (banks.length <= 1) {
+    container.style.display = 'none';
+    return;
+  }
+  container.style.display = '';
+  container.innerHTML = '';
+
+  const label = document.createElement('div');
+  label.className = 'section-label';
+  label.textContent = '选择题库';
+  container.appendChild(label);
+
+  const grid = document.createElement('div');
+  grid.className = 'bank-selector-grid';
+
+  banks.forEach((b, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'bank-selector-btn' + (idx === S.bankID ? ' active' : '');
+    btn.innerHTML = `<span class="bank-sel-name">${esc(b.name)}</span><span class="bank-sel-cnt">${b.total_sq.toLocaleString()} 题</span>`;
+    btn.onclick = async () => {
+      if (S.bankID === idx) return;
+      S.bankID = idx;
+      try {
+        S.bankInfo = await apiFetch('/api/info?' + bankQS()).then(r => r.json());
+        // Reset per-bank CFG state
+        CFG.units = new Set(['__all__']);
+        CFG.modes = new Set(['__all__']);
+        renderHome();
+        _refreshProgressBadges();
+        toast('已切换到：' + (S.bankInfo.bank_name || b.name));
+      } catch(e) { toast('切换题库失败', true); }
+    };
+    grid.appendChild(btn);
+  });
+  container.appendChild(grid);
 }
 
 // ════════════════════════════════════════════
@@ -1234,7 +1321,7 @@ async function startSession() {
     }
   }
 
-  const data = await apiFetch('/api/questions?' + params).then(r => r.json());
+  const data = await apiFetch('/api/questions?' + params + '&' + bankQS()).then(r => r.json());
   if (!data.items.length) { toast('没有符合条件的题目'); return; }
 
   S.questions = data.items;
@@ -1411,7 +1498,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
     stemDiv.className = 'q-stem q-stem-collapsible';
     stemDiv.innerHTML = `
       <div class="q-stem-label">${label}<span class="stem-toggle-hint">▴ 点击收起</span></div>
-      <div class="q-stem-content">${esc(q.stem)}</div>`;
+      <div class="q-stem-content">${renderHTML(q.stem)}</div>`;
     stemDiv.querySelector('.q-stem-label').addEventListener('click', () => {
       const c = stemDiv.classList.toggle('is-collapsed');
       stemDiv.querySelector('.stem-toggle-hint').textContent = c ? '▾ 点击展开' : '▴ 点击收起';
@@ -1451,7 +1538,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
   qtxt.className = 'q-text';
   const qContent = q.text || (q.options?.length ? '（请查看下方选项）' : '题目内容为空');
   // 应用诱导性关键词高亮
-  const highlightedContent = highlightInductiveWords(esc(qContent));
+  const highlightedContent = highlightInductiveWords(renderHTML(qContent));
   qtxt.innerHTML = `<span class="q-num">${S.cur + 1}</span>${highlightedContent}`;
   wrap.appendChild(qtxt);
 
@@ -1717,7 +1804,7 @@ function buildExplain(q, selected) {
   const body = document.createElement('div');
   body.className = 'explain-body';
   if (q.discuss) {
-    body.textContent = q.discuss;
+    body.innerHTML = renderHTML(q.discuss);
     if (q.point) body.innerHTML += `<div class="explain-point"><span>考点：</span>${esc(q.point)}</div>`;
   } else {
     body.innerHTML = '<span style="color:var(--muted)">暂无解析</span>';
@@ -2011,7 +2098,7 @@ function renderMemo(dir = 'forward') {
     ${q.unit ? `<span class="q-tag unit-tag">${esc(q.unit)}</span>` : ''}
     ${q.answer.length > 1 ? `<span class="multi-badge">⊞ 多选</span>` : ''}
   </div>`;
-  const stemHtml = q.stem ? `<div class="memo-stem-block">${esc(q.stem)}</div>` : '';
+  const stemHtml = q.stem ? `<div class="memo-stem-block">${renderHTML(q.stem)}</div>` : '';
   // B型题共享选项块
   const sharedOptsHtml = (q.shared_options && q.shared_options.length > 0)
       ? `<div class="memo-shared-opts">
@@ -2031,12 +2118,12 @@ function renderMemo(dir = 'forward') {
     </div>`;
   }).join('');
   const explainHtml = q.discuss
-      ? `<div class="memo-explain-text">${esc(q.discuss)}</div>
+      ? `<div class="memo-explain-text">${renderHTML(q.discuss)}</div>
        ${q.point ? `<div class="memo-explain-point">考点：${esc(q.point)}</div>` : ''}`
       : `<div class="memo-explain-text" style="color:var(--muted)">暂无解析</div>`;
 
   const questionHtml = metaTags + stemHtml + sharedOptsHtml +
-      `<div class="memo-q-text">${esc(q.text)}</div>
+      `<div class="memo-q-text">${renderHTML(q.text)}</div>
      <div class="memo-opts">${optsHtml}</div>`;
   const answerHtml = `<div class="memo-answer-inner">
      <div class="memo-answer-label">正确答案</div>
@@ -2220,7 +2307,7 @@ async function _recordMemoSession() {
   } catch(e) {
     // 降级直接 POST
     try {
-      await apiFetch('/api/record', {
+      await apiFetch('/api/record?' + bankQS(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
@@ -2601,7 +2688,7 @@ function filterReview(type, tabEl) {
           ${sharedOptsReviewHtml}
           ${isMulti ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">正确答案：<span style="color:var(--success);font-weight:700">${q.answer.split('').join(' ')}</span></div>` : ''}
           <div class="review-opts-list">${optsHtml}</div>
-          <div class="review-discuss">${q.discuss ? `<strong>解析：</strong>${esc(q.discuss)}` : '暂无解析'}
+          <div class="review-discuss">${q.discuss ? `<strong>解析：</strong>${renderHTML(q.discuss)}` : '暂无解析'}
             ${q.point ? `<br><span style="color:var(--accent);font-size:12px">考点：${esc(q.point)}</span>` : ''}
           </div>
         </div>
@@ -2688,7 +2775,7 @@ async function _recordSessionToServer(results, questions, ans) {
   }
   // 降级路径：直接 POST（兼容 SyncManager 加载失败的极端情况）
   try {
-    await apiFetch('/api/record', {
+    await apiFetch('/api/record?' + bankQS(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -2702,8 +2789,8 @@ async function _recordSessionToServer(results, questions, ans) {
 async function _refreshProgressBadges() {
   try {
     const [dueRes, wbRes] = await Promise.all([
-      apiFetch('/api/review/due').then(r => r.json()),
-      apiFetch('/api/wrongbook').then(r => r.json()),
+      apiFetch('/api/review/due?' + bankQS()).then(r => r.json()),
+      apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json()),
     ]);
     const dueBadge   = document.getElementById('due-badge');
     const wrongBadge = document.getElementById('wrong-badge');
@@ -2726,11 +2813,11 @@ async function _refreshProgressBadges() {
 /** 开始今日 SM-2 复习（练习模式，仅加载到期题目） */
 async function startReview() {
   try {
-    const res  = await apiFetch('/api/review/due').then(r => r.json());
+    const res  = await apiFetch('/api/review/due?' + bankQS()).then(r => r.json());
     const fps  = res.fingerprints || [];
     if (!fps.length) { toast('🎉 今日没有待复习题目！'); return; }
     const data = await apiFetch(
-        '/api/questions?shuffle=1&fingerprints=' + fps.join(',')
+        '/api/questions?shuffle=1&fingerprints=' + fps.join(',') + '&' + bankQS()
     ).then(r => r.json());
     if (!data.items || !data.items.length) { toast('找不到对应题目，题库可能已更新'); return; }
     S.mode      = 'practice';
@@ -2749,13 +2836,13 @@ async function startReview() {
 /** 开始错题练习（练习模式，仅加载答错过的题目） */
 async function startWrongBookReview() {
   try {
-    const res = await apiFetch('/api/wrongbook').then(r => r.json());
+    const res = await apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json());
     const fps = (res.items || []).map(it => it.fingerprint);
     if (!fps.length) { toast('暂时没有错题记录 👍'); return; }
     // 最多取 100 道最高频错题
     const topFps = fps.slice(0, 100);
     const data = await apiFetch(
-        '/api/questions?shuffle=1&fingerprints=' + topFps.join(',')
+        '/api/questions?shuffle=1&fingerprints=' + topFps.join(',') + '&' + bankQS()
     ).then(r => r.json());
     if (!data.items || !data.items.length) { toast('找不到对应题目'); return; }
     S.mode      = 'practice';
@@ -2776,9 +2863,9 @@ async function openStats() {
   showScreen('s-stats');
   try {
     const [d, wb, rs] = await Promise.all([
-      apiFetch('/api/stats').then(r => r.json()),
-      apiFetch('/api/wrongbook').then(r => r.json()),
-      apiFetch('/api/record/status').then(r => r.json()),
+      apiFetch('/api/stats?' + bankQS()).then(r => r.json()),
+      apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json()),
+      apiFetch('/api/record/status?' + bankQS()).then(r => r.json()),
     ]);
     _renderStatsOverall(d.overall || {});
     _renderTrendChart(d.history || []);
@@ -2833,7 +2920,7 @@ async function _confirmClearRecord() {
   const yes = confirm('⚠️ 确定要清空你的全部学习记录吗？\n\n这将删除所有答题历史、错题记录和 SM-2 复习进度，无法恢复。');
   if (!yes) return;
   try {
-    const res = await apiFetch('/api/record/clear', { method: 'POST' }).then(r => r.json());
+    const res = await apiFetch('/api/record/clear?' + bankQS(), { method: 'POST' }).then(r => r.json());
     if (res.ok) {
       const d = res.deleted;
       toast(`已清空：${d.attempts} 条答题记录、${d.sessions} 个会话、${d.sm2_cards} 条复习卡`);
