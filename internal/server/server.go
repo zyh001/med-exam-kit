@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
@@ -9,14 +10,18 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"log"
 	"math/big"
 	"net"
 	"net/http"
 	"net/url"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/zyh001/med-exam-kit/internal/auth"
@@ -66,6 +71,7 @@ type Server struct {
 	mux          *http.ServeMux
 	rateMu       sync.Mutex
 	rateBuckets  map[string][]time.Time
+	httpServer   *http.Server
 }
 
 const (
@@ -101,48 +107,102 @@ func New(cfg Config) *Server {
 
 func (s *Server) ListenAndServe() error {
 	addr := fmt.Sprintf("%s:%d", s.cfg.Host, s.cfg.Port)
-	return http.ListenAndServe(addr, s)
+	s.httpServer = &http.Server{
+		Addr:         addr,
+		Handler:      s,
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	// 优雅关闭：监听信号
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+
+	errCh := make(chan error, 1)
+	go func() {
+		log.Printf("Server listening on %s", addr)
+		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
+			errCh <- err
+		}
+	}()
+
+	select {
+	case err := <-errCh:
+		return err
+	case sig := <-stop:
+		log.Printf("Received signal %v, shutting down...", sig)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			log.Printf("Shutdown error: %v", err)
+		}
+		s.Close()
+		log.Println("Server stopped")
+	}
+	return nil
+}
+
+// Close closes all database connections.
+func (s *Server) Close() {
+	for _, b := range s.cfg.Banks {
+		if b.DB != nil {
+			b.DB.Close()
+		}
+	}
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	auth.ApplySecurityHeaders(w)
+	start := time.Now()
+	wrapped := &responseWriterWrapper{ResponseWriter: w, statusCode: 200}
+	defer func() {
+		logRequest(r, wrapped.statusCode, time.Since(start))
+	}()
+
+	auth.ApplySecurityHeaders(wrapped)
+
+	// 健康检查端点不需要认证
+	if r.URL.Path == "/api/health" {
+		s.mux.ServeHTTP(wrapped, r)
+		return
+	}
 
 	if r.URL.Path == "/auth" && r.Method == http.MethodPost {
 		if s.cfg.AccessCode != "" {
 			ip := remoteIP(r)
 			if ok, retry := auth.CheckBruteForce(ip); !ok {
-				http.Error(w, fmt.Sprintf("尝试次数过多，请 %d 秒后重试", retry), http.StatusTooManyRequests)
+				http.Error(wrapped, fmt.Sprintf("尝试次数过多，请 %d 秒后重试", retry), http.StatusTooManyRequests)
 				return
 			}
 		}
-		s.mux.ServeHTTP(w, r)
+		s.mux.ServeHTTP(wrapped, r)
 		return
 	}
 	if !s.validHost(r) {
-		jsonError(w, "Forbidden", http.StatusForbidden)
+		jsonError(wrapped, "Forbidden", http.StatusForbidden)
 		return
 	}
 	if s.cfg.AccessCode != "" && !auth.IsAuthenticated(r, s.cfg.CookieSecret, s.cfg.AccessCode) {
 		if (r.URL.Path == "/" || r.URL.Path == "") && r.Method == http.MethodGet {
-			w.Header().Set("Content-Type", "text/html; charset=utf-8")
-			io.WriteString(w, auth.RenderPINPage("医考练习", "", s.cfg.PinLen))
+			wrapped.Header().Set("Content-Type", "text/html; charset=utf-8")
+			io.WriteString(wrapped, auth.RenderPINPage("医考练习", "", s.cfg.PinLen))
 			return
 		}
-		jsonError(w, "Unauthorized", http.StatusUnauthorized)
+		jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
 	if strings.HasPrefix(r.URL.Path, "/api/") {
 		tok := r.Header.Get("X-Session-Token")
 		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.sessionToken)) != 1 {
-			jsonError(w, "Unauthorized", http.StatusUnauthorized)
+			jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
 		if !s.checkRate(remoteIP(r)) {
-			jsonError(w, "Too Many Requests", http.StatusTooManyRequests)
+			jsonError(wrapped, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
 	}
-	s.mux.ServeHTTP(w, r)
+	s.mux.ServeHTTP(wrapped, r)
 }
 
 func (s *Server) registerRoutes() {
@@ -150,6 +210,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /{$}", s.handleIndex)
 	m.HandleFunc("GET /editor", s.handleEditor)
 	m.HandleFunc("POST /auth", s.handleAuth)
+	m.HandleFunc("GET /api/health", s.handleHealth)
 	if s.cfg.Assets != nil {
 		sub, err := fs.Sub(s.cfg.Assets, "assets/static")
 		if err == nil {
@@ -279,6 +340,32 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	auth.RecordFailure(ip)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
 	io.WriteString(w, auth.RenderPINPage("医考练习", "访问码错误，请重试", s.cfg.PinLen))
+}
+
+// ── Health check ───────────────────────────────────────────────────────
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	status := "ok"
+	dbStatus := make(map[string]string)
+	for i, b := range s.cfg.Banks {
+		if b.DB == nil {
+			dbStatus[fmt.Sprintf("bank_%d", i)] = "not_configured"
+			continue
+		}
+		if err := b.DB.Ping(); err != nil {
+			dbStatus[fmt.Sprintf("bank_%d", i)] = "error"
+			status = "degraded"
+		} else {
+			dbStatus[fmt.Sprintf("bank_%d", i)] = "ok"
+		}
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]any{
+		"status":  status,
+		"banks":   len(s.cfg.Banks),
+		"db":      dbStatus,
+		"version": s.assetVer,
+	})
 }
 
 // ── API: banks list ───────────────────────────────────────────────────
@@ -1429,4 +1516,42 @@ func (r *lcgRNG) shuffle(groups []group) {
 		j := int(r.next() % uint64(i+1))
 		groups[i], groups[j] = groups[j], groups[i]
 	}
+}
+
+// ── Logging middleware ─────────────────────────────────────────────────
+
+type responseWriterWrapper struct {
+	http.ResponseWriter
+	statusCode int
+	written    bool
+}
+
+func (w *responseWriterWrapper) WriteHeader(code int) {
+	if !w.written {
+		w.statusCode = code
+		w.written = true
+		w.ResponseWriter.WriteHeader(code)
+	}
+}
+
+func (w *responseWriterWrapper) Write(b []byte) (int, error) {
+	if !w.written {
+		w.statusCode = 200
+		w.written = true
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func logRequest(r *http.Request, status int, duration time.Duration) {
+	ip := remoteIP(r)
+	method := r.Method
+	path := r.URL.Path
+	if path == "" {
+		path = "/"
+	}
+	// 静态资源简化显示
+	if strings.HasPrefix(path, "/static/") {
+		path = "/static/..."
+	}
+	log.Printf("%s %s %s %d %v", ip, method, path, status, duration.Round(time.Millisecond))
 }
