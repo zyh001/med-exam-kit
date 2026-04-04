@@ -41,6 +41,30 @@ input,select{font-family:inherit;outline:none}
 /* ════════════════════════════════════════════
    HOME SCREEN
 ════════════════════════════════════════════ */
+
+/* ═══ BANK SELECT ═════════════════════════════════════════════════════ */
+#s-bank-select{
+  background:var(--bg);
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:40px 20px;
+}
+.bank-select-hero{ text-align:center;margin-bottom:40px; }
+.bank-select-icon{ font-size:64px;margin-bottom:16px; }
+.bank-select-hero h2{ font-size:24px;font-weight:700;margin-bottom:8px; }
+.bank-select-hint{ color:var(--muted);font-size:14px; }
+.bank-select-list{ width:100%;max-width:400px; display:flex;flex-direction:column;gap:12px; }
+.bank-select-item{
+  display:flex;flex-direction:column;align-items:flex-start;gap:4px;
+  padding:16px 20px;border-radius:14px;
+  background:var(--card);border:2px solid var(--border);
+  color:var(--text);text-align:left;
+  transition:border-color .18s,background .18s,transform .12s;
+}
+.bank-select-item:hover{ border-color:var(--accent); background:var(--card-hover); }
+.bank-select-item:active{ transform:scale(.98); }
+.bank-select-name{ font-size:16px;font-weight:600; }
+.bank-select-cnt{ font-size:12px;color:var(--muted); }
+
 #s-home{background:var(--bg);overflow-y:auto}
 
 .home-hero{
