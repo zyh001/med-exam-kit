@@ -632,7 +632,8 @@ def edit(bank, password, port, host, no_browser, no_pin):
     start_editor(bank, port=port, host=host, no_browser=no_browser, password=password, no_pin=no_pin)
 
 @cli.command()
-@click.option("--bank", required=True, type=click.Path(exists=True), help=".mqb 题库路径")
+@click.option("--bank", "-b", "banks", multiple=True, type=click.Path(exists=True),
+              help=".mqb 题库路径（可重复传入以加载多个题库：-b a.mqb -b b.mqb）")
 @click.option("--password", default=None, help="题库密码")
 @click.option("--port", default=5174, type=int, help="本地端口（默认 5174）")
 @click.option("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
@@ -640,16 +641,19 @@ def edit(bank, password, port, host, no_browser, no_pin):
 @click.option("--no-record", is_flag=True, default=False, help="不记录做题历史（不创建 .progress.db）")
 @click.option("--no-pin", is_flag=True, default=False, help="禁用访问码验证（仅限受信任的本地网络）")
 @click.option("--pin", default=None, help="自定义访问码（留空则自动生成 8 位随机码）")
-def quiz(bank, password, port, host, no_browser, no_record, no_pin, pin):
-    """启动医考练习 Web 应用（练习/考试/背题模式）
+def quiz(banks, password, port, host, no_browser, no_record, no_pin, pin):
+    """启动医考练习 Web 应用（练习/考试/背题模式，支持多题库）
 
     \b
     启动后在浏览器访问 http://127.0.0.1:5174
     支持三种模式：练习模式、考试模式、背题模式
+    多题库示例：med-exam quiz -b 内科.mqb -b 外科.mqb
     按 Ctrl+C 退出
     """
+    if not banks:
+        raise click.UsageError("请用 -b 指定至少一个题库路径（多题库：-b a.mqb -b b.mqb）")
     from med_exam_toolkit.quiz import start_quiz
-    start_quiz(bank, port=port, host=host, no_browser=no_browser,
+    start_quiz(list(banks), port=port, host=host, no_browser=no_browser,
                password=password, no_record=no_record, no_pin=no_pin, pin=pin)
 
 
