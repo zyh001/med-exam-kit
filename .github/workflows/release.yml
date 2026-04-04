@@ -24,31 +24,48 @@ jobs:
 
   build:
     needs: test
-    runs-on: ${{ matrix.os }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - os: ubuntu-latest
-            goos: linux
+          # ── Linux ──────────────────────────────────────
+          - goos: linux
             goarch: amd64
             artifact: med-exam-linux-amd64
-          - os: macos-latest
-            goos: darwin
+          - goos: linux
+            goarch: arm64
+            artifact: med-exam-linux-arm64
+          - goos: linux
+            goarch: arm
+            goarm: 7
+            artifact: med-exam-linux-armv7
+          - goos: linux
+            goarch: "386"
+            artifact: med-exam-linux-386
+          - goos: linux
+            goarch: loong64
+            artifact: med-exam-linux-loong64
+          - goos: linux
+            goarch: mips64le
+            artifact: med-exam-linux-mips64le
+          # ── macOS ──────────────────────────────────────
+          - goos: darwin
             goarch: amd64
             artifact: med-exam-darwin-amd64
-          - os: macos-latest
-            goos: darwin
+          - goos: darwin
             goarch: arm64
             artifact: med-exam-darwin-arm64
-          - os: windows-latest
-            goos: windows
+          # ── Windows ────────────────────────────────────
+          - goos: windows
             goarch: amd64
             artifact: med-exam-windows-amd64.exe
-          - os: windows-latest
-            goos: windows
+          - goos: windows
             goarch: arm64
             artifact: med-exam-windows-arm64.exe
+          - goos: windows
+            goarch: "386"
+            artifact: med-exam-windows-386.exe
 
     steps:
       - uses: actions/checkout@v4
@@ -60,11 +77,11 @@ jobs:
 
       - name: Build
         env:
-          CGO_ENABLED: ${{ matrix.goos == 'windows' && '0' || '1' }}
+          CGO_ENABLED: '0'
           GOOS: ${{ matrix.goos }}
           GOARCH: ${{ matrix.goarch }}
-        run: |
-          go build -ldflags="-s -w" -o ${{ matrix.artifact }} .
+          GOARM: ${{ matrix.goarm || '' }}
+        run: go build -ldflags="-s -w" -o ${{ matrix.artifact }} .
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -81,13 +98,11 @@ jobs:
         with:
           path: artifacts
 
-      - name: Display structure of downloaded files
-        run: ls -R artifacts
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           draft: false
+          generate_release_notes: true
           files: artifacts/**/*
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
