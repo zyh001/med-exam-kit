@@ -2,7 +2,7 @@ from setuptools import setup, find_packages
 
 setup(
     name="med-exam-toolkit",
-    version="0.1.8-R260320",
+    version="0.1.10-R260404",
     package_dir={"": "src"},
     packages=find_packages(where="src"),
     python_requires=">=3.10",
