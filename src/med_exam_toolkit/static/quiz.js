@@ -86,15 +86,21 @@ const CFG = {
 // ════════════════════════════════════════════
 // 练习进度持久化
 // ════════════════════════════════════════════
-const PRACTICE_SESSIONS_KEY = 'quiz_practice_sessions_v1';
+// ── 每个题库独立的 localStorage key ──────────────────────────────────
+// 以 bankID 作为后缀，切换题库后历史/进度/存档完全隔离
+function _bankSuffix() { return '-b' + S.bankID; }
+function practiceSessionsKey() { return 'quiz_practice_sessions_v1' + _bankSuffix(); }
+function examSessionKey()      { return 'quiz_exam_session_v1'      + _bankSuffix(); }
+function historyKey()          { return 'quiz-history'              + _bankSuffix(); }
+
 const MAX_PRACTICE_SESSIONS = 5;
 
 function _getPracticeSessions() {
-  try { return JSON.parse(localStorage.getItem(PRACTICE_SESSIONS_KEY) || '[]'); }
+  try { return JSON.parse(localStorage.getItem(practiceSessionsKey()) || '[]'); }
   catch { return []; }
 }
 function _setPracticeSessions(arr) {
-  try { localStorage.setItem(PRACTICE_SESSIONS_KEY, JSON.stringify(arr)); } catch(e) {}
+  try { localStorage.setItem(practiceSessionsKey(), JSON.stringify(arr)); } catch(e) {}
 }
 
 /** 生成当前练习的可读标题 */
@@ -167,8 +173,6 @@ function resumePracticeSession(id) {
 // ════════════════════════════════════════════
 // 考试进度持久化
 // ════════════════════════════════════════════
-const EXAM_SESSION_KEY = 'quiz_exam_session_v1';
-
 /** 序列化 S.ans（值可能是 Set） */
 function _serializeAns(ans) {
   const out = {};
@@ -206,7 +210,7 @@ function saveExamSession() {
     caseMaxReached:  S.caseMaxReached,
   };
   try {
-    localStorage.setItem(EXAM_SESSION_KEY, JSON.stringify(session));
+    localStorage.setItem(examSessionKey(), JSON.stringify(session));
   } catch(e) {
     console.warn('[Quiz] 保存考试进度失败（可能 localStorage 已满）', e);
   }
@@ -214,13 +218,13 @@ function saveExamSession() {
 
 /** 清除已保存的考试进度 */
 function clearExamSession() {
-  localStorage.removeItem(EXAM_SESSION_KEY);
+  localStorage.removeItem(examSessionKey());
 }
 
 /** 读取已保存的考试进度，返回 session 对象或 null */
 function _loadRawSession() {
   try {
-    const raw = localStorage.getItem(EXAM_SESSION_KEY);
+    const raw = localStorage.getItem(examSessionKey());
     if (!raw) return null;
     const s = JSON.parse(raw);
     // 基本合法性校验
@@ -298,21 +302,26 @@ function restoreSession() {
 // ════════════════════════════════════════════
 // Init
 // ════════════════════════════════════════════
+const SELECTED_BANK_KEY = 'quiz-selected-bank';
+
 async function init() {
   loadTheme();
-  loadHistory();
-  const hasSession = checkResumeSession();
   try {
     const banksData = await apiFetch('/api/banks').then(r => r.json());
     S.banksInfo = banksData.banks || [];
 
     if (S.banksInfo.length <= 1) {
-      // 单题库：直接进入主页
-      S.bankID = 0;
-      await loadBankAndRenderHome(0, hasSession);
+      // 单题库：直接进入
+      await selectBankAndEnter(0);
     } else {
-      // 多题库：显示选择页
-      renderBankSelectPage();
+      // 多题库：优先恢复上次选择，无记录才展示选择页
+      const saved = parseInt(localStorage.getItem(SELECTED_BANK_KEY) ?? '', 10);
+      const validSaved = Number.isFinite(saved) && saved >= 0 && saved < S.banksInfo.length;
+      if (validSaved) {
+        await selectBankAndEnter(saved);
+      } else {
+        renderBankSelectPage();
+      }
     }
   } catch(e) {
     document.getElementById('home-bank-name').textContent = '无法连接到服务器';
@@ -330,50 +339,10 @@ async function init() {
   }
 }
 
-async function loadBankAndRenderHome(idx, hasSession) {
-  S.bankID = idx;
-  try {
-    const bankInfo = await apiFetch('/api/info?' + bankQS()).then(r => r.json());
-    S.bankInfo = bankInfo;
-    CFG.units = new Set(['__all__']);
-    CFG.modes = new Set(['__all__']);
-    renderHome();
-    if (!hasSession) showScreen('s-home');
-    _refreshProgressBadges();
-  } catch(e) {
-    document.getElementById('home-bank-name').textContent = '无法连接到服务器';
-  }
-}
-
-function renderBankSelectPage() {
-  const container = document.getElementById('bank-select-list');
-  container.innerHTML = '';
-  S.banksInfo.forEach((b, idx) => {
-    const btn = document.createElement('button');
-    btn.className = 'bank-select-item';
-    btn.innerHTML = `
-      <span class="bank-select-name">${esc(b.name)}</span>
-      <span class="bank-select-cnt">${b.total_sq.toLocaleString()} 题</span>
-    `;
-    btn.onclick = () => selectBankAndEnter(idx);
-    container.appendChild(btn);
-  });
-  showScreen('s-bank-select');
-}
-
-async function selectBankAndEnter(idx) {
-  S.bankID = idx;
-  try {
-    const bankInfo = await apiFetch('/api/info?' + bankQS()).then(r => r.json());
-    S.bankInfo = bankInfo;
-    CFG.units = new Set(['__all__']);
-    CFG.modes = new Set(['__all__']);
-    renderHome();
-    showScreen('s-home');
-    _refreshProgressBadges();
-  } catch(e) {
-    toast('加载题库失败', true);
-  }
+// 加载题库信息并渲染主页（内部使用，selectBankAndEnter 调用）
+async function loadBankAndRenderHome() {
+  S.bankInfo = await apiFetch('/api/info?' + bankQS()).then(r => r.json());
+  renderHome();
 }
 
 function renderHome() {
@@ -383,6 +352,136 @@ function renderHome() {
   document.getElementById('stat-units').textContent = info.units.length;
   document.getElementById('stat-modes').textContent = info.modes.length;
   renderHistorySection();
+}
+
+// ════════════════════════════════════════════
+// 题库选择页面（卡片版）
+// ════════════════════════════════════════════
+
+const BANK_PALETTES = [
+  { hue: '210' }, // 蓝
+  { hue: '145' }, // 绿
+  { hue: '32'  }, // 橙
+  { hue: '270' }, // 紫
+  { hue: '350' }, // 红
+  { hue: '185' }, // 青
+];
+
+// 从题库名称中提取 1-2 个汉字作为头像文字
+function _bankInitials(name) {
+  const cjk = name.match(/[\u4e00-\u9fff\u3400-\u4dbf]+/g);
+  if (cjk && cjk.length) {
+    const joined = cjk.join('');
+    return joined.length <= 2 ? joined : joined.slice(0, 1) + joined.slice(-1);
+  }
+  return name.slice(0, 2).toUpperCase();
+}
+
+function renderBankSelectPage() {
+  const container = document.getElementById('bank-select-list');
+  container.innerHTML = '';
+  S.banksInfo.forEach((b, idx) => {
+    const hue  = BANK_PALETTES[idx % BANK_PALETTES.length].hue;
+    const card = document.createElement('button');
+    card.className = 'bank-card-item';
+    card.style.setProperty('--bh', hue);
+    card.innerHTML = `
+      <div class="bci-avatar">${esc(_bankInitials(b.name))}</div>
+      <div class="bci-body">
+        <div class="bci-name">${esc(b.name)}</div>
+        <div class="bci-meta">
+          <span class="bci-tag">${b.total_sq.toLocaleString()} 题</span>
+        </div>
+      </div>
+      <div class="bci-arrow">›</div>
+    `;
+    card.onclick = () => selectBankAndEnter(idx);
+    container.appendChild(card);
+  });
+  showScreen('s-bank-select');
+}
+
+// 多题库时让左上角品牌区域变成可点击的题库切换入口
+function _updateBrandClickable() {
+  const brand = document.querySelector('.home-brand');
+  if (!brand) return;
+
+  // 清除旧的单独切换按钮（兼容旧逻辑）
+  const old = document.getElementById('switch-bank-btn');
+  if (old) old.remove();
+
+  if (S.banksInfo.length <= 1) {
+    // 单题库：不可点击，移除所有交互样式
+    brand.classList.remove('home-brand--switchable');
+    brand.onclick = null;
+    const tip = brand.querySelector('.brand-switch-tip');
+    if (tip) tip.remove();
+    return;
+  }
+
+  // 多题库：品牌区可点击
+  brand.classList.add('home-brand--switchable');
+  brand.onclick = () => renderBankSelectPage();
+
+  // 若没有指示符则插入
+  if (!brand.querySelector('.brand-switch-tip')) {
+    const tip = document.createElement('span');
+    tip.className = 'brand-switch-tip';
+    tip.title = '点击切换题库';
+    tip.innerHTML = '▾';
+    brand.appendChild(tip);
+  }
+}
+
+// 选择题库并进入主页：完全重置状态 + 重载历史 + 检查未完成考试
+async function selectBankAndEnter(idx) {
+  S.bankID = idx;
+
+  // ── 完整重置 CFG（每个题库独立配置）────────────────
+  CFG.units         = new Set(['__all__']);
+  CFG.modes         = new Set(['__all__']);
+  CFG.count         = 50;
+  CFG.shuffle       = true;
+  CFG.examTime      = 90;
+  CFG.perMode       = null;
+  CFG.perUnit       = null;
+  CFG.difficulty    = null;
+  CFG.countRatio    = null;
+  CFG.scoring       = false;
+  CFG.scorePerMode  = {};
+  CFG.multiScoreMode = 'strict';
+
+  // ── 重置题目状态 ──────────────────────────────────
+  S.questions     = [];
+  S.cur           = 0;
+  S.ans           = {};
+  S.marked        = new Set();
+  S.revealed      = new Set();
+  S.results       = null;
+  S.modeGroups    = [];
+  S.currentGroupIdx = 0;
+  S.caseMaxReached  = {};
+  S.streak        = 0;
+
+  // ── 持久化选择（刷新后自动恢复）────────────────────
+  localStorage.setItem(SELECTED_BANK_KEY, String(idx));
+
+  // ── 加载此题库的历史记录 ─────────────────────────
+  loadHistory();
+
+  try {
+    await loadBankAndRenderHome();
+    showScreen('s-home');
+    _refreshProgressBadges();
+
+    // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
+    checkResumeSession();
+
+    // 多题库时，让左上角题库名称变成可点击的切换入口
+    _updateBrandClickable();
+  } catch(e) {
+    toast('加载题库失败', true);
+  }
 }
 
 // ════════════════════════════════════════════
@@ -2444,7 +2543,7 @@ function calculateResults() {
   };
   S.history.unshift(record);
   S.history = S.history.slice(0, 10);
-  localStorage.setItem('quiz-history', JSON.stringify(S.history));
+  localStorage.setItem(historyKey(), JSON.stringify(S.history));
 
   // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
   _recordSessionToServer(S.results, S.questions, S.ans).then(() => {
@@ -2930,9 +3029,9 @@ async function _confirmClearRecord() {
 
       // 同步清空本地缓存（服务端已清空，本地也要一致）
       S.history = [];
-      localStorage.removeItem('quiz-history');
-      localStorage.removeItem(PRACTICE_SESSIONS_KEY);
-      localStorage.removeItem(EXAM_SESSION_KEY);
+      localStorage.removeItem(historyKey());
+      localStorage.removeItem(practiceSessionsKey());
+      localStorage.removeItem(examSessionKey());
 
       // 刷新主页最近记录区域 + 统计页
       renderHistorySection();
@@ -3052,7 +3151,7 @@ function _renderWrongbookPreview(items) {
 // History
 // ════════════════════════════════════════════
 function loadHistory() {
-  try { S.history = JSON.parse(localStorage.getItem('quiz-history') || '[]'); } catch { S.history = []; }
+  try { S.history = JSON.parse(localStorage.getItem(historyKey()) || '[]'); } catch { S.history = []; }
 }
 
 function renderHistorySection() {
