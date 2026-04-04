@@ -41,47 +41,160 @@ input,select{font-family:inherit;outline:none}
 /* ════════════════════════════════════════════
    BANK SELECT SCREEN
 ════════════════════════════════════════════ */
-#s-bank-select{
-  background:var(--bg);
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:40px 20px;
+#s-bank-select {
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  overflow-y: auto;
+  padding: env(safe-area-inset-top, 0) 0 env(safe-area-inset-bottom, 24px);
 }
-.bank-select-hero{
-  text-align:center;margin-bottom:40px;
+.bank-select-hero {
+  text-align: center;
+  padding: 48px 24px 32px;
+  background: linear-gradient(160deg, rgba(68,147,248,.15) 0%, transparent 60%);
 }
-.bank-select-icon{
-  font-size:64px;margin-bottom:16px;
+.bank-select-icon {
+  font-size: 56px;
+  margin-bottom: 14px;
+  filter: drop-shadow(0 4px 12px rgba(68,147,248,.4));
 }
-.bank-select-hero h2{
-  font-size:24px;font-weight:700;margin-bottom:8px;
+.bank-select-hero h2 {
+  font-size: 22px;
+  font-weight: 700;
+  margin-bottom: 6px;
+  color: var(--text);
 }
-.bank-select-hint{
-  color:var(--muted);font-size:14px;
+.bank-select-hint {
+  color: var(--muted);
+  font-size: 13px;
 }
-.bank-select-list{
-  width:100%;max-width:400px;
-  display:flex;flex-direction:column;gap:12px;
+.bank-select-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 0 16px 24px;
+  max-width: 560px;
+  width: 100%;
+  margin: 0 auto;
 }
-.bank-select-item{
-  display:flex;flex-direction:column;align-items:flex-start;gap:4px;
-  padding:16px 20px;border-radius:14px;
-  background:var(--card);border:2px solid var(--border);
-  color:var(--text);text-align:left;
-  transition:border-color .18s,background .18s,transform .12s;
+
+/* ── 单个题库卡片 ── */
+.bank-card-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border-radius: 16px;
+  background: var(--card);
+  border: 1.5px solid color-mix(in hsl, hsl(var(--bh, 210) 60% 50%) 30%, var(--border));
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  transition: transform .15s, box-shadow .15s, border-color .15s, background .15s;
+  position: relative;
+  overflow: hidden;
 }
-.bank-select-item:hover{
-  border-color:var(--accent);
-  background:var(--card-hover);
+.bank-card-item::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(ellipse at 0% 50%,
+  color-mix(in hsl, hsl(var(--bh, 210) 70% 55%) 12%, transparent) 0%,
+  transparent 70%);
+  pointer-events: none;
 }
-.bank-select-item:active{
-  transform:scale(.98);
+.bank-card-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 24px color-mix(in hsl, hsl(var(--bh, 210) 60% 50%) 20%, transparent);
+  border-color: hsl(var(--bh, 210) 70% 55%);
+  background: color-mix(in srgb, var(--card) 85%, hsl(var(--bh, 210) 70% 50%) 15%);
 }
-.bank-select-name{
-  font-size:16px;font-weight:600;
+.bank-card-item:active {
+  transform: scale(.98) translateY(0);
 }
-.bank-select-cnt{
-  font-size:12px;color:var(--muted);
+
+/* 头像圆圈 */
+.bci-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: color-mix(in hsl, hsl(var(--bh, 210) 70% 55%) 18%, var(--surface));
+  color: hsl(var(--bh, 210) 80% 65%);
+  font-size: 15px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border: 1.5px solid color-mix(in hsl, hsl(var(--bh, 210) 70% 55%) 30%, transparent);
+  letter-spacing: -.5px;
 }
+
+.bci-body {
+  flex: 1;
+  min-width: 0;
+}
+.bci-name {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.bci-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 5px;
+}
+.bci-tag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 20px;
+  background: color-mix(in hsl, hsl(var(--bh, 210) 70% 55%) 15%, var(--surface));
+  color: hsl(var(--bh, 210) 70% 65%);
+  font-weight: 500;
+}
+.bci-arrow {
+  font-size: 20px;
+  color: hsl(var(--bh, 210) 70% 60%);
+  flex-shrink: 0;
+  transition: transform .15s;
+}
+.bank-card-item:hover .bci-arrow {
+  transform: translateX(3px);
+}
+
+/* ── 多题库：左上角品牌区可点击切换 ── */
+.home-brand--switchable {
+  cursor: pointer;
+  border-radius: 10px;
+  padding: 4px 8px 4px 4px;
+  margin: -4px -8px -4px -4px;
+  transition: background .15s;
+}
+.home-brand--switchable:hover {
+  background: var(--card);
+}
+.home-brand--switchable:active {
+  background: var(--border);
+}
+.brand-switch-tip {
+  font-size: 11px;
+  color: var(--muted);
+  margin-left: 2px;
+  line-height: 1;
+  transition: color .15s, transform .15s;
+  display: inline-block;
+}
+.home-brand--switchable:hover .brand-switch-tip {
+  color: var(--accent);
+  transform: translateY(1px);
+}
+
+
 
 /* ════════════════════════════════════════════
    HOME SCREEN
