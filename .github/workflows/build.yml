@@ -17,17 +17,11 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_name: med-exam-kit
-            executable_name: med-exam-kit.exe
-            pyinstaller_args: --onefile --noconfirm
+            artifact_suffix: windows.exe
           - os: macos-latest
-            artifact_name: med-exam-kit
-            executable_name: med-exam-kit
-            pyinstaller_args: --onefile --noconfirm
+            artifact_suffix: macos
           - os: ubuntu-latest
-            artifact_name: med-exam-kit
-            executable_name: med-exam-kit
-            pyinstaller_args: --onefile --noconfirm
+            artifact_suffix: linux
 
     steps:
       - name: Checkout code
@@ -51,11 +45,44 @@ jobs:
           pip install -e .
           pip install pyinstaller
 
-      - name: Build with PyInstaller
+      - name: Determine version
+        id: version
         shell: bash
         run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build with PyInstaller (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          pyinstaller --onefile --noconfirm \
+            --name "med-exam-kit" \
+            --add-data "src/med_exam_toolkit/templates:templates" \
+            --add-data "src/med_exam_toolkit/static:static" \
+            --console \
+            --hidden-import click \
+            --hidden-import openpyxl \
+            --hidden-import docx \
+            --hidden-import reportlab \
+            --hidden-import cryptography \
+            --hidden-import sqlalchemy \
+            --hidden-import yaml \
+            --hidden-import openai \
+            --hidden-import flask \
+            --hidden-import flask_compress \
+            --hidden-import tqdm \
+            --hidden-import termcolor \
+            --hidden-import lxml \
+            src/med_exam_toolkit/cli.py
+
+      - name: Build with PyInstaller (Windows)
+        if: runner.os == 'Windows'
+        run: |
           pyinstaller --onefile --noconfirm `
-            --name "${{ matrix.artifact_name }}" `
+            --name "med-exam-kit" `
             --add-data "src/med_exam_toolkit/templates;templates" `
             --add-data "src/med_exam_toolkit/static;static" `
             --console `
@@ -74,16 +101,19 @@ jobs:
             --hidden-import lxml `
             src/med_exam_toolkit/cli.py
 
-      - name: Rename artifact with version
+      - name: Rename and stage artifact (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          OUT="dist/med-exam-kit-${{ steps.version.outputs.version }}-${{ matrix.artifact_suffix }}"
+          mv dist/med-exam-kit "$OUT"
+          chmod +x "$OUT"
+
+      - name: Rename and stage artifact (Windows)
+        if: runner.os == 'Windows'
         shell: bash
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          if [[ "${{ matrix.os }}" == "windows-latest" ]]; then
-            mv dist/${{ matrix.artifact_name }}/${{ matrix.executable_name }} "dist/med-exam-kit-${VERSION}-windows.exe"
-          else
-            mv dist/${{ matrix.artifact_name }}/${{ matrix.executable_name }} "dist/med-exam-kit-${VERSION}-${{ matrix.os == 'macos-latest' && 'macos' || 'linux' }}"
-            chmod +x "dist/med-exam-kit-${VERSION}-${{ matrix.os == 'macos-latest' && 'macos' || 'linux' }}"
-          fi
+          mv dist/med-exam-kit.exe \
+            "dist/med-exam-kit-${{ steps.version.outputs.version }}-${{ matrix.artifact_suffix }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -101,9 +131,6 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
-
-      - name: Display structure of downloaded files
-        run: ls -R artifacts
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
