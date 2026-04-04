@@ -301,17 +301,19 @@ function restoreSession() {
 async function init() {
   loadTheme();
   loadHistory();
-  // 先检测是否有未完成的考试（弹窗优先于主界面渲染）
   const hasSession = checkResumeSession();
   try {
-    const [banksData, bankInfo] = await Promise.all([
-      apiFetch('/api/banks').then(r => r.json()),
-      apiFetch('/api/info?' + bankQS()).then(r => r.json()),
-    ]);
+    const banksData = await apiFetch('/api/banks').then(r => r.json());
     S.banksInfo = banksData.banks || [];
-    S.bankInfo = bankInfo;
-    if (!hasSession) renderHome();
-    else renderHome(); // 主界面也渲染，弹窗在最上层覆盖
+
+    if (S.banksInfo.length <= 1) {
+      // 单题库：直接进入主页
+      S.bankID = 0;
+      await loadBankAndRenderHome(0, hasSession);
+    } else {
+      // 多题库：显示选择页
+      renderBankSelectPage();
+    }
   } catch(e) {
     document.getElementById('home-bank-name').textContent = '无法连接到服务器';
   }
@@ -328,58 +330,59 @@ async function init() {
   }
 }
 
+async function loadBankAndRenderHome(idx, hasSession) {
+  S.bankID = idx;
+  try {
+    const bankInfo = await apiFetch('/api/info?' + bankQS()).then(r => r.json());
+    S.bankInfo = bankInfo;
+    CFG.units = new Set(['__all__']);
+    CFG.modes = new Set(['__all__']);
+    renderHome();
+    if (!hasSession) showScreen('s-home');
+    _refreshProgressBadges();
+  } catch(e) {
+    document.getElementById('home-bank-name').textContent = '无法连接到服务器';
+  }
+}
+
+function renderBankSelectPage() {
+  const container = document.getElementById('bank-select-list');
+  container.innerHTML = '';
+  S.banksInfo.forEach((b, idx) => {
+    const btn = document.createElement('button');
+    btn.className = 'bank-select-item';
+    btn.innerHTML = `
+      <span class="bank-select-name">${esc(b.name)}</span>
+      <span class="bank-select-cnt">${b.total_sq.toLocaleString()} 题</span>
+    `;
+    btn.onclick = () => selectBankAndEnter(idx);
+    container.appendChild(btn);
+  });
+  showScreen('s-bank-select');
+}
+
+async function selectBankAndEnter(idx) {
+  S.bankID = idx;
+  try {
+    const bankInfo = await apiFetch('/api/info?' + bankQS()).then(r => r.json());
+    S.bankInfo = bankInfo;
+    CFG.units = new Set(['__all__']);
+    CFG.modes = new Set(['__all__']);
+    renderHome();
+    showScreen('s-home');
+    _refreshProgressBadges();
+  } catch(e) {
+    toast('加载题库失败', true);
+  }
+}
+
 function renderHome() {
   const info = S.bankInfo;
   document.getElementById('home-bank-name').textContent = info.bank_name || '题库';
-  renderBankSelector();
   document.getElementById('stat-sq').textContent    = info.total_sq.toLocaleString();
   document.getElementById('stat-units').textContent = info.units.length;
   document.getElementById('stat-modes').textContent = info.modes.length;
   renderHistorySection();
-}
-
-// ════════════════════════════════════════════
-// 题库选择器
-// ════════════════════════════════════════════
-function renderBankSelector() {
-  const container = document.getElementById('bank-selector-wrap');
-  if (!container) return;
-  const banks = S.banksInfo;
-  if (banks.length <= 1) {
-    container.style.display = 'none';
-    return;
-  }
-  container.style.display = '';
-  container.innerHTML = '';
-
-  const label = document.createElement('div');
-  label.className = 'section-label';
-  label.textContent = '选择题库';
-  container.appendChild(label);
-
-  const grid = document.createElement('div');
-  grid.className = 'bank-selector-grid';
-
-  banks.forEach((b, idx) => {
-    const btn = document.createElement('button');
-    btn.className = 'bank-selector-btn' + (idx === S.bankID ? ' active' : '');
-    btn.innerHTML = `<span class="bank-sel-name">${esc(b.name)}</span><span class="bank-sel-cnt">${b.total_sq.toLocaleString()} 题</span>`;
-    btn.onclick = async () => {
-      if (S.bankID === idx) return;
-      S.bankID = idx;
-      try {
-        S.bankInfo = await apiFetch('/api/info?' + bankQS()).then(r => r.json());
-        // Reset per-bank CFG state
-        CFG.units = new Set(['__all__']);
-        CFG.modes = new Set(['__all__']);
-        renderHome();
-        _refreshProgressBadges();
-        toast('已切换到：' + (S.bankInfo.bank_name || b.name));
-      } catch(e) { toast('切换题库失败', true); }
-    };
-    grid.appendChild(btn);
-  });
-  container.appendChild(grid);
 }
 
 // ════════════════════════════════════════════
