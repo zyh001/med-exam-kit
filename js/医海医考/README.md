@@ -1,4 +1,4 @@
-# 医海医考 API 逆向工程
+# 医某医考 API 逆向工程
 
 对 uni-app 医学考试 APP 的完整逆向，还原了全套 AES 加密体系，实现了纯 Python API 客户端。
 
@@ -7,14 +7,22 @@
 ```
 ├── yhyk_sdk.py                         # Python SDK (可直接使用)
 ├── demo.py                             # 使用示例
+├── health_check.py                     # 健康检查脚本
 ├── docs/
 │   ├── OpenAPI完整文档.md               # 13个API接口文档 + 请求流程
-│   └── 逆向工程详解_博客文章.md           # 完整逆向思路和过程
+│   ├── 逆向工程详解_博客文章.md           # 完整逆向思路和过程
+│   └── 版本升级应对指南.md               # APP升级后的应对策略
 └── scripts/
     ├── hook_capture.js                  # Frida Hook: 抓取配对数据
     ├── decode_obfuscation.js            # Node.js: 混淆字符串解码器
     └── analyze_capture.py               # Python: 分析抓包数据
 ```
+
+## 文档链接
+
+- [逆向工程详解](./docs/逆向工程详解_博客文章.md) — 完整逆向思路和过程
+- [OpenAPI 完整文档](./docs/OpenAPI完整文档.md) — 13个API接口文档 + 请求流程
+- [版本升级应对指南](./docs/版本升级应对指南.md) — APP升级后的应对策略
 
 ## 快速开始
 
