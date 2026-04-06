@@ -772,9 +772,10 @@ def api_push_subscribe():
         from med_exam_toolkit.push import PushSubscription
         data = request.get_json(silent=True) or {}
         sub  = PushSubscription.from_dict(data)
-        _push_store.add(sub)
+        uid  = (data.get("uid") or "").strip()
+        _push_store.add(sub, uid)
         import logging
-        logging.getLogger(__name__).info("[push] 新订阅: %s…", sub.endpoint[:40])
+        logging.getLogger(__name__).info("[push] 新订阅: uid=%s ep=%s…", uid, sub.endpoint[:40])
         return jsonify({"ok": True})
     except (KeyError, Exception) as e:
         return jsonify({"error": str(e)}), 400
@@ -794,12 +795,11 @@ def api_push_unsubscribe():
 
 @app.post("/api/push/test")
 def api_push_test():
-    """立即向所有订阅者发送测试推送（调试用）。"""
+    """立即发送测试推送（调试用）。
+    ?uid=<用户ID> → 只推给该用户；无参数 → 推给所有订阅者。
+    """
     if _push_store is None or _vapid_keys is None:
         return jsonify({"error": "push not initialised"}), 503
-    subs = _push_store.all()
-    if not subs:
-        return jsonify({"ok": True, "sent": 0, "msg": "暂无订阅者"})
 
     from med_exam_toolkit.push import send_push, SubscriptionGone
     import json as _json
@@ -808,6 +808,18 @@ def api_push_test():
         "body":  "推送功能正常 🎉 点击打开应用",
         "due":   0,
     }).encode()
+
+    uid = request.args.get("uid", "").strip()
+    if uid:
+        sub = _push_store.for_uid(uid)
+        if sub is None:
+            return jsonify({"ok": False, "msg": "该用户暂无订阅"})
+        subs = [sub]
+    else:
+        subs = _push_store.all()
+
+    if not subs:
+        return jsonify({"ok": True, "sent": 0, "msg": "暂无订阅者"})
 
     sent = failed = removed = 0
     for sub in subs:
