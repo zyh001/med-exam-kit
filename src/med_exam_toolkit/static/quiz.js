@@ -3006,8 +3006,26 @@ function _renderRecordStatus(rs) {
         <span style="color:var(--text)">记录功能已启用</span>
       </div>
       <div style="font-size:12px;color:var(--muted);background:var(--card);border-radius:8px;padding:8px 10px;line-height:1.7">
-        <div>当前用户 ID：<code style="color:var(--accent)">${shortId}</code></div>
+        <div>当前用户 ID：<code style="color:var(--accent)">${shortId}</code>
+          <span onclick="_toggleMigrateForm()"
+            title="从其他来源迁移数据"
+            style="margin-left:6px;font-size:11px;color:var(--muted);opacity:0.5;cursor:pointer;user-select:none">↹</span>
+        </div>
         <div style="margin-top:2px">${idTip}</div>
+      </div>
+      <!-- 数据迁移面板：默认隐藏，点击 ↹ 展开 -->
+      <div id="migrate-form" style="display:none;background:var(--card);border-radius:8px;padding:10px;font-size:12px">
+        <div style="color:var(--muted);margin-bottom:6px">将旧 ID 的学习记录合并到当前 ID（原数据将被删除）</div>
+        <div style="display:flex;gap:6px;align-items:center">
+          <input id="migrate-from-input" placeholder="粘贴旧用户 ID"
+            style="flex:1;padding:5px 8px;border-radius:6px;border:1px solid var(--border);
+                   background:var(--bg);color:var(--text);font-size:12px;font-family:monospace"/>
+          <button onclick="_doMigrate()"
+            style="padding:5px 10px;border-radius:6px;font-size:12px;font-weight:600;
+                   background:var(--accent-bg,#1e3a5f);color:var(--accent);border:1px solid var(--accent);cursor:pointer">
+            迁移
+          </button>
+        </div>
       </div>
       <button onclick="_confirmClearRecord()"
         style="align-self:flex-start;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;
@@ -3015,6 +3033,46 @@ function _renderRecordStatus(rs) {
         🗑 清空我的学习记录
       </button>
     </div>`;
+}
+
+/** 切换迁移面板显示 */
+function _toggleMigrateForm() {
+  const f = document.getElementById('migrate-form');
+  if (!f) return;
+  f.style.display = f.style.display === 'none' ? '' : 'none';
+  if (f.style.display !== 'none') {
+    const inp = document.getElementById('migrate-from-input');
+    if (inp) inp.focus();
+  }
+}
+
+/** 执行数据迁移 */
+async function _doMigrate() {
+  const inp = document.getElementById('migrate-from-input');
+  const fromUID = (inp && inp.value || '').trim();
+  if (!fromUID) { toast('请输入旧用户 ID', true); return; }
+  const yes = confirm(
+    '⚠️ 确认迁移？\n\n' +
+    '旧 ID：' + fromUID + '\n' +
+    '将合并到当前 ID，迁移后旧 ID 数据将被删除。\n\n此操作不可撤销。'
+  );
+  if (!yes) return;
+  try {
+    const res = await apiFetch('/api/record/migrate?' + bankQS(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from_uid: fromUID }),
+    }).then(r => r.json());
+    if (res.ok) {
+      const m = res.migrated;
+      toast(`迁移完成：${m.sessions||0} 会话、${m.attempts||0} 答题记录、${m.sm2_cards||0} 复习卡`);
+      const f = document.getElementById('migrate-form');
+      if (f) f.style.display = 'none';
+      openStats();
+    } else {
+      toast('迁移失败：' + (res.error || '未知错误'), true);
+    }
+  } catch(e) { toast('请求失败', true); }
 }
 
 /** 清空记录确认 */
