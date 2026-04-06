@@ -14,6 +14,8 @@ const STATIC_ASSETS = [
 // 可选缓存：图标由路由生成，按需缓存，失败不阻断 SW 安装
 const OPTIONAL_ASSETS = [
     '/static/icon.svg',
+    '/static/icon-192.png',
+    '/static/icon-512.png',
 ];
 
 self.addEventListener('install', event => {
