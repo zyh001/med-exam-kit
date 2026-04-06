@@ -793,11 +793,27 @@ def api_push_unsubscribe():
     return jsonify({"ok": True})
 
 
+_push_test_buckets: dict = {}
+_push_test_lock = __import__('threading').Lock()
+
 @app.post("/api/push/test")
 def api_push_test():
     """立即发送测试推送（调试用）。
     ?uid=<用户ID> → 只推给该用户；无参数 → 推给所有订阅者。
+    每个 IP 限流：5次/小时，防止滥用。
     """
+    import time as _time
+    ip = _get_real_ip()
+    with _push_test_lock:
+        now    = _time.time()
+        cutoff = now - 3600
+        fresh  = [t for t in _push_test_buckets.get(ip, []) if t > cutoff]
+        if len(fresh) >= 5:
+            _push_test_buckets[ip] = fresh
+            return jsonify({"error": "请求过于频繁，每小时最多测试 5 次"}), 429
+        fresh.append(now)
+        _push_test_buckets[ip] = fresh
+
     if _push_store is None or _vapid_keys is None:
         return jsonify({"error": "push not initialised"}), 503
 
