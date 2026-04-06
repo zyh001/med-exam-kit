@@ -1680,7 +1680,7 @@ func (s *Server) handleVapidKey(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/push/subscribe  body: PushSubscription JSON
 func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
-	_, b, ok := s.bankForReq(r)
+	b, _, ok := s.bankForReq(r)
 	if !ok {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
@@ -1703,7 +1703,7 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/push/subscribe  body: {"endpoint":"..."}
 func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
-	_, b, ok := s.bankForReq(r)
+	b, _, ok := s.bankForReq(r)
 	if !ok {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return

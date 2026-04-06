@@ -289,10 +289,10 @@ func (s *Server) sendDailyReviewPushes() {
 	sent, failed, removed := 0, 0, 0
 
 	for _, bank := range s.cfg.Banks {
-		if bank.DB == nil || s.pushStores[bank.ID] == nil {
+		if bank.DB == nil || s.pushStores[bank.Path] == nil {
 			continue
 		}
-		store := s.pushStores[bank.ID]
+		store := s.pushStores[bank.Path]
 		for _, sub := range store.all() {
 			// We push without per-user due count (subscriptions are not tied to user IDs).
 			// The notification encourages opening the app; the app shows the real count.
