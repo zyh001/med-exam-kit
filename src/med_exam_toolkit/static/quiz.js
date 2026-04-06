@@ -345,6 +345,14 @@ async function loadBankAndRenderHome() {
   renderHome();
 }
 
+// 每次显示主页时调用，刷新所有动态数据（历史记录、徽章、进度）
+async function refreshHomeData() {
+  try {
+    renderHistorySection();
+    await _refreshProgressBadges();
+  } catch (e) { /* 静默失败 */ }
+}
+
 function renderHome() {
   const info = S.bankInfo;
   document.getElementById('home-bank-name').textContent = info.bank_name || '题库';
@@ -472,7 +480,7 @@ async function selectBankAndEnter(idx) {
   try {
     await loadBankAndRenderHome();
     showScreen('s-home');
-    _refreshProgressBadges();
+    refreshHomeData();
 
     // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
     checkResumeSession();
@@ -1995,6 +2003,7 @@ function quitQuiz() {
     toast('练习进度已保存，下次可继续作答');
   }
   showScreen('s-home', 'back');
+  refreshHomeData();
 }
 
 // ── Exam timer ──────────────────────────────
@@ -2994,8 +3003,9 @@ function _renderRecordStatus(rs) {
     return;
   }
 
-  const shortId = rs.user_id === '_legacy' ? '（未识别）' : rs.user_id.slice(0, 8) + '…';
-  const idTip   = rs.user_id === '_legacy'
+  const isLegacy = rs.user_id === '_legacy';
+  const shortId = isLegacy ? '（未识别）' : rs.user_id.slice(0, 8) + '…';
+  const idTip   = isLegacy
       ? '刷新页面后将自动分配新 ID'
       : '此 ID 存储在浏览器 Cookie 中，清除 Cookie 将获得新 ID';
 
@@ -3006,7 +3016,14 @@ function _renderRecordStatus(rs) {
         <span style="color:var(--text)">记录功能已启用</span>
       </div>
       <div style="font-size:12px;color:var(--muted);background:var(--card);border-radius:8px;padding:8px 10px;line-height:1.7">
-        <div>当前用户 ID：<code style="color:var(--accent)">${shortId}</code>
+        <div>当前用户 ID：<code
+            data-uid="${rs.user_id}"
+            onclick="_copyUID(this)"
+            title="${isLegacy ? '' : '点击复制完整 ID'}"
+            style="color:var(--accent);${isLegacy ? '' : 'cursor:pointer;'}user-select:text;-webkit-user-select:text"
+          >${shortId}</code>
+          <span id="uid-copy-tip"
+            style="font-size:10px;color:var(--accent);opacity:0;margin-left:4px;transition:opacity .3s;pointer-events:none">已复制</span>
           <span onclick="_toggleMigrateForm()"
             title="从其他来源迁移数据"
             style="margin-left:6px;font-size:11px;color:var(--muted);opacity:0.5;cursor:pointer;user-select:none">↹</span>
@@ -3033,6 +3050,34 @@ function _renderRecordStatus(rs) {
         🗑 清空我的学习记录
       </button>
     </div>`;
+}
+
+/** 复制用户 ID 到剪贴板（用于切换域名/来源后迁移数据时使用） */
+function _copyUID(el) {
+  const uid = el.dataset.uid;
+  if (!uid || uid === '_legacy') return;
+  const tip = document.getElementById('uid-copy-tip');
+  const show = () => {
+    if (!tip) return;
+    tip.style.opacity = '1';
+    clearTimeout(tip._t);
+    tip._t = setTimeout(() => { tip.style.opacity = '0'; }, 2000);
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(uid).then(show).catch(() => {
+      // HTTPS 不可用或权限拒绝时降级：弹出完整 ID 供手动复制
+      prompt('完整用户 ID（Ctrl+C / ⌘C 复制）:', uid);
+    });
+  } else {
+    // 旧浏览器降级方案
+    const ta = document.createElement('textarea');
+    ta.value = uid;
+    ta.style.cssText = 'position:fixed;opacity:0;top:0;left:0';
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); show(); } catch (_) { prompt('完整用户 ID:', uid); }
+    document.body.removeChild(ta);
+  }
 }
 
 /** 切换迁移面板显示 */
@@ -3684,5 +3729,14 @@ function _showStreakCelebration(count) {
   setTimeout(() => { overlay.classList.add('streak-fade-out'); }, 1800);
   setTimeout(() => { overlay.remove(); }, 2500);
 }
+
+// ── PWA 切回前台自动刷新主页数据 ─────────────────────────────────────
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState !== 'visible') return;
+  const home = document.getElementById('s-home');
+  if (home && home.classList.contains('active')) {
+    refreshHomeData();
+  }
+});
 
 init();
