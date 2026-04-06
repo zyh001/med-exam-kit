@@ -184,8 +184,8 @@ func RecordSuccess(ip string) {
 	mu.Unlock()
 }
 
-// NeedsCaptcha returns true if the IP has enough recent failures to require a captcha.
-// 使用滑动窗口内的失败次数，成功登录或超过窗口期后自动解除。
+// NeedsCaptcha returns true if the IP has enough recent failures or is currently locked.
+// 成功登录后状态清除，自动解除验证码。
 func NeedsCaptcha(ip string) bool {
 	mu.Lock()
 	defer mu.Unlock()
@@ -194,6 +194,10 @@ func NeedsCaptcha(ip string) bool {
 		return false
 	}
 	now := time.Now()
+	// 处于封锁中也要求验证码（封锁前必有足够失败次数）
+	if now.Before(s.lockedUntil) {
+		return true
+	}
 	cutoff := now.Add(-windowDur)
 	recent := 0
 	for _, t := range s.failures {
