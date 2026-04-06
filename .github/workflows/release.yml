@@ -46,9 +46,6 @@ jobs:
           - goos: linux
             goarch: loong64
             artifact: med-exam-linux-loong64
-          - goos: linux
-            goarch: mips64le
-            artifact: med-exam-linux-mips64le
           # ── macOS ──────────────────────────────────────
           - goos: darwin
             goarch: amd64
@@ -74,6 +71,13 @@ jobs:
         uses: actions/setup-go@v5
         with:
           go-version: '1.22'
+
+      - name: Upgrade sqlite (fixes loong64 + windows/386)
+        run: |
+          go get modernc.org/sqlite@latest
+          go mod tidy
+        env:
+          GOFLAGS: '-mod=mod'
 
       - name: Build
         env:
