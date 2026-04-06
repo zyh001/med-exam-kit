@@ -90,9 +90,11 @@ def set_auth_cookie(
 # 暴力破解防护
 # ════════════════════════════════════════════════════════════════════════
 
-_WINDOW_SEC   = 600
-_MAX_FAILURES = 10
-_LOCKOUT_SEC  = 900
+_WINDOW_SEC = 600   # 滑动窗口（秒）
+_CAPTCHA_THRESHOLD = 3   # 累计失败几次后要求验证码
+
+# 递进封锁：(累计失败次数, 封锁秒数)
+_LOCK_STAGES = [(5, 300), (10, 3600), (20, 86400)]
 
 _brute: dict[str, dict] = {}
 _brute_lock = threading.Lock()
@@ -116,18 +118,98 @@ def record_failure(ip: str) -> None:
     now = time.monotonic()
     with _brute_lock:
         if ip not in _brute:
-            _brute[ip] = {"failures": [], "locked_until": 0}
+            _brute[ip] = {"failures": [], "locked_until": 0, "total": 0}
         state = _brute[ip]
         state["failures"] = [t for t in state["failures"] if now - t < _WINDOW_SEC]
         state["failures"].append(now)
-        if len(state["failures"]) >= _MAX_FAILURES:
-            state["locked_until"] = now + _LOCKOUT_SEC
-            state["failures"] = []
+        state["total"] = state.get("total", 0) + 1
+        # 递进封锁
+        for threshold, secs in reversed(_LOCK_STAGES):
+            if state["total"] >= threshold:
+                state["locked_until"] = now + secs
+                state["failures"] = []
+                break
 
 
 def record_success(ip: str) -> None:
     with _brute_lock:
         _brute.pop(ip, None)
+
+
+def needs_captcha(ip: str) -> bool:
+    """累计失败次数达到阈值后要求验证码。"""
+    with _brute_lock:
+        state = _brute.get(ip)
+        return bool(state and state.get("total", 0) >= _CAPTCHA_THRESHOLD)
+
+
+# ── 图形验证码（SVG 数学题） ──────────────────────────────────────────────
+
+import secrets as _secrets
+import html as _html
+
+_captchas: dict[str, dict] = {}   # token → {answer, expires}
+_captcha_lock = threading.Lock()
+
+
+def new_captcha() -> tuple[str, str]:
+    """生成验证码，返回 (token, svg_html)。"""
+    import random as _random
+    a = _random.randint(1, 9)
+    b = _random.randint(1, 9)
+    if a >= b:
+        question, answer = f"{a} − {b} = ?", a - b
+    else:
+        question, answer = f"{a} + {b} = ?", a + b
+
+    token = _secrets.token_hex(12)
+    expires = time.monotonic() + 300   # 5 分钟
+
+    with _captcha_lock:
+        _captchas[token] = {"answer": answer, "expires": expires}
+        # 清理过期
+        now = time.monotonic()
+        expired = [k for k, v in _captchas.items() if v["expires"] < now]
+        for k in expired:
+            del _captchas[k]
+
+    svg = _render_captcha_svg(question)
+    return token, svg
+
+
+def verify_captcha(token: str, answer: str) -> bool:
+    """校验验证码（单次有效）。"""
+    with _captcha_lock:
+        entry = _captchas.pop(token, None)
+    if not entry or time.monotonic() > entry["expires"]:
+        return False
+    try:
+        return int(answer.strip()) == entry["answer"]
+    except (ValueError, AttributeError):
+        return False
+
+
+def _render_captcha_svg(question: str) -> str:
+    import random as _r
+    w, h = 200, 60
+    lines = ""
+    for _ in range(4):
+        x1, y1 = _r.randint(0, w), _r.randint(0, h)
+        x2, y2 = _r.randint(0, w), _r.randint(0, h)
+        r, g, b = _r.randint(40, 220), _r.randint(40, 220), _r.randint(40, 220)
+        lines += (f'<line x1="{x1}" y1="{y1}" x2="{x2}" y2="{y2}" '
+                  f'stroke="rgb({r},{g},{b})" stroke-width="1.2" opacity="0.5"/>')
+    chars = ""
+    x = 18
+    for ch in question:
+        dy  = _r.randint(-4, 4)
+        rot = _r.randint(-10, 10)
+        esc = _html.escape(ch)
+        chars += (f'<text x="{x}" y="{38+dy}" transform="rotate({rot},{x},{38+dy})" '
+                  f'font-size="22" font-weight="700" fill="#4493f8" font-family="monospace">{esc}</text>')
+        x += 16
+    return (f'<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" '
+            f'style="background:#0d1117;border-radius:8px">{lines}{chars}</svg>')
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -160,7 +242,8 @@ def apply_security_headers(response) -> None:
 # PIN 页面 HTML
 # ════════════════════════════════════════════════════════════════════════
 
-def render_pin_page(app_name: str, error: str = "", pin_len: int = 0) -> str:
+def render_pin_page(app_name: str, error: str = "", pin_len: int = 0,
+                    captcha_token: str = "", captcha_svg: str = "") -> str:
     """渲染 PIN 验证页面，支持深色/亮色主题，与主页共享 quiz-theme 状态。"""
     error_html = f'<div class="error">{error}</div>' if error else ""
     max_attr = f' maxlength="{pin_len}"' if pin_len > 0 else ""
@@ -170,6 +253,18 @@ def render_pin_page(app_name: str, error: str = "", pin_len: int = 0) -> str:
         if pin_len > 0
         else "访问码在服务器启动时打印到终端<br>每次重启服务器后需重新验证"
     )
+    captcha_html = ""
+    if captcha_token:
+        captcha_html = f'''
+  <div class="captcha-block">
+    <label>请完成验证</label>
+    <div class="captcha-img">{captcha_svg}</div>
+    <input type="text" name="captcha_answer" id="captcha_answer"
+      placeholder="输入计算结果" autocomplete="off" inputmode="numeric"
+      style="margin-top:10px;letter-spacing:.1em;font-size:16px">
+    <input type="hidden" name="captcha_token" value="{captcha_token}">
+  </div>'''
+
     return f"""<!DOCTYPE html>
 <html lang="zh-CN" data-theme="dark">
 <head>
@@ -238,6 +333,10 @@ def render_pin_page(app_name: str, error: str = "", pin_len: int = 0) -> str:
     font-size:13px;margin-bottom:16px;
   }}
   .hint{{font-size:11px;color:var(--muted2);text-align:center;margin-top:16px;line-height:1.5}}
+  .captcha-block{{margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}}
+  .captcha-block label{{margin-bottom:10px;display:block}}
+  .captcha-img{{display:flex;justify-content:center;margin-bottom:4px}}
+  .captcha-img svg{{max-width:100%;border-radius:8px}}
 </style>
 </head>
 <body>
@@ -254,6 +353,7 @@ def render_pin_page(app_name: str, error: str = "", pin_len: int = 0) -> str:
       placeholder="{placeholder}"
       autofocus autocomplete="off" spellcheck="false"
     >
+    {captcha_html}
     <button class="btn" type="submit">验证并进入 →</button>
   </form>
   <p class="hint">{hint}</p>

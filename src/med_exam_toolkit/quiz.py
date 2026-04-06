@@ -118,7 +118,10 @@ def _create_app() -> Flask:
                 from med_exam_toolkit.auth import check_brute_force
                 allowed, retry_after = check_brute_force(ip)
                 if not allowed:
-                    reason = f"尝试次数过多，请 {retry_after} 秒后重试"
+                    if retry_after >= 60:
+                        reason = f"尝试次数过多，请 {(retry_after+59)//60} 分钟后重试"
+                    else:
+                        reason = f"尝试次数过多，请 {retry_after} 秒后重试"
                     return Response(
                         render_pin_page("医考练习", error=reason, pin_len=_pin_len),
                         mimetype="text/html", status=429,
@@ -157,7 +160,11 @@ def _create_app() -> Flask:
         )
         if _pin_enabled and not _pwa_public and not is_authenticated(_cookie_secret, _access_code):
             if request.path == "/" and request.method == "GET":
-                return Response(render_pin_page("医考练习", pin_len=_pin_len), mimetype="text/html")
+                from med_exam_toolkit.auth import needs_captcha, new_captcha
+                tok, svg = (new_captcha() if needs_captcha(ip := _get_real_ip()) else ("", ""))
+                return Response(render_pin_page("医考练习", pin_len=_pin_len,
+                                               captcha_token=tok, captcha_svg=svg),
+                                mimetype="text/html")
             return jsonify({"error": "Unauthorized", "auth": False}), 401
 
         if request.path.startswith("/api/"):
@@ -864,25 +871,43 @@ def pwa_sw():
 
 @app.post("/auth")
 def auth():
-    from med_exam_toolkit.auth import render_pin_page, set_auth_cookie
+    from med_exam_toolkit.auth import (
+        render_pin_page, set_auth_cookie,
+        needs_captcha, new_captcha, verify_captcha,
+        record_success, record_failure,
+    )
     from flask import Response
     ip   = _get_real_ip()
     code = request.form.get("code", "").strip().upper()
+
+    # 如需验证码，先校验
+    if _pin_enabled and needs_captcha(ip):
+        token  = request.form.get("captcha_token", "")
+        answer = request.form.get("captcha_answer", "")
+        if not verify_captcha(token, answer):
+            tok, svg = new_captcha()
+            return Response(
+                render_pin_page("医考练习", error="验证码错误，请重新计算",
+                               pin_len=_pin_len, captcha_token=tok, captcha_svg=svg),
+                mimetype="text/html", status=200,
+            )
+
     if _pin_enabled and secrets.compare_digest(code, _access_code):
-        from med_exam_toolkit.auth import record_success
         record_success(ip)
         resp = make_response("", 302)
         resp.headers["Location"] = "/"
         set_auth_cookie(resp, _cookie_secret, _access_code)
         return resp
+
     if _pin_enabled:
-        from med_exam_toolkit.auth import record_failure
         record_failure(ip)
-    return Response(
-        render_pin_page("医考练习", error="访问码不正确，请重新输入", pin_len=_pin_len),
-        mimetype="text/html",
-        status=200,
-    )
+        tok, svg = (new_captcha() if needs_captcha(ip) else ("", ""))
+        return Response(
+            render_pin_page("医考练习", error="访问码不正确，请重试",
+                           pin_len=_pin_len, captcha_token=tok, captcha_svg=svg),
+            mimetype="text/html", status=200,
+        )
+    return Response("", 302, headers={"Location": "/"})
 
 
 # ════════════════════════════════════════════
