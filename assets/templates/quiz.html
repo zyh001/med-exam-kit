@@ -57,6 +57,84 @@
         if (r.outcome === 'accepted') window._pwaPrompt = null;
       });
     };
+
+    // ── Web Push 每日复习提醒 ──────────────────────────────────────────
+    (function() {
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+
+      var bellBtn = null;
+      var _vapidKey = null;
+
+      function urlB64ToUint8Array(b64) {
+        var pad = '='.repeat((4 - b64.length % 4) % 4);
+        var raw = atob((b64 + pad).replace(/-/g, '+').replace(/_/g, '/'));
+        var arr = new Uint8Array(raw.length);
+        for (var i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+        return arr;
+      }
+
+      function updateBellUI(sub) {
+        if (!bellBtn) bellBtn = document.getElementById('push-bell-btn');
+        if (!bellBtn) return;
+        bellBtn.style.display = '';
+        bellBtn.title = sub ? '已开启每日复习提醒（点击关闭）' : '开启每日复习提醒';
+        bellBtn.textContent = sub ? '🔔' : '🔕';
+      }
+
+      async function getVapidKey() {
+        if (_vapidKey) return _vapidKey;
+        var r = await fetch('/api/push/vapid-key');
+        var d = await r.json();
+        _vapidKey = d.publicKey;
+        return _vapidKey;
+      }
+
+      async function getCurrentSub() {
+        var reg = await navigator.serviceWorker.ready;
+        return reg.pushManager.getSubscription();
+      }
+
+      window.togglePushNotify = async function() {
+        try {
+          var sub = await getCurrentSub();
+          if (sub) {
+            // 已订阅 → 取消
+            await fetch('/api/push/subscribe', {
+              method: 'DELETE',
+              headers: {'Content-Type':'application/json', 'X-Session-Token': window.SESSION_TOKEN},
+              body: JSON.stringify({endpoint: sub.endpoint})
+            });
+            await sub.unsubscribe();
+            updateBellUI(null);
+          } else {
+            // 未订阅 → 申请权限 → 订阅
+            var perm = await Notification.requestPermission();
+            if (perm !== 'granted') { alert('请在浏览器设置中允许通知权限'); return; }
+            var key = await getVapidKey();
+            var reg = await navigator.serviceWorker.ready;
+            var newSub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlB64ToUint8Array(key)
+            });
+            await fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: {'Content-Type':'application/json', 'X-Session-Token': window.SESSION_TOKEN},
+              body: JSON.stringify(newSub)
+            });
+            updateBellUI(newSub);
+          }
+        } catch(e) {
+          console.error('Push toggle error:', e);
+        }
+      };
+
+      // 页面加载时检查当前订阅状态
+      navigator.serviceWorker.ready.then(function() {
+        bellBtn = document.getElementById('push-bell-btn');
+        if (bellBtn) bellBtn.style.display = '';
+        getCurrentSub().then(updateBellUI);
+      });
+    })();
   </script>
 </head>
 <body>
@@ -87,6 +165,7 @@
           <span id="sync-badge" class="sync-badge" style="display:none"></span>
           <button id="sync-now-btn" class="sync-now-btn" onclick="syncNow()" style="display:none" title="立即同步到服务端">立即同步</button>
           <button id="pwa-install-btn" class="icon-btn" onclick="pwaTriggerInstall()" title="安装到桌面" style="display:none">📲</button>
+          <button id="push-bell-btn" class="icon-btn" onclick="togglePushNotify()" title="每日复习提醒" style="display:none">🔔</button>
           <button class="icon-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
         </div>
       </div>

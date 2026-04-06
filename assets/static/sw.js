@@ -1,9 +1,6 @@
 // Service Worker for 医考练习 PWA
-const CACHE_NAME = 'med-quiz-v2';
+const CACHE_NAME = 'med-quiz-v3';
 
-// 只缓存纯静态资源（CSS/JS），不缓存 HTML 页面。
-// HTML 内嵌动态 SESSION_TOKEN，缓存后服务器重启会导致 API 全返回 401，
-// 前端因此误报"学习记录未启用"。
 const STATIC_ASSETS = [
     '/static/common.css',
     '/static/quiz.css',
@@ -11,7 +8,6 @@ const STATIC_ASSETS = [
     '/static/quiz.js',
 ];
 
-// 可选缓存：图标由路由生成，按需缓存，失败不阻断 SW 安装
 const OPTIONAL_ASSETS = [
     '/static/icon.svg',
     '/static/icon-192.png',
@@ -39,14 +35,10 @@ self.addEventListener('activate', event => {
     self.clients.claim();
 });
 
-// Fetch 策略：
-//   /api/*    → 始终走网络（保证 Token 实时有效，防止 401 误报"记录未启用"）
-//   HTML 页面 → 网络优先（含 SESSION_TOKEN，不可缓存旧版本）
-//   静态资源  → 缓存优先，回退网络
+// ── Fetch 策略 ──────────────────────────────────────────────────────────
 self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
 
-    // API：始终走网络
     if (url.pathname.startsWith('/api/')) {
         event.respondWith(
             fetch(event.request).catch(() => new Response('{"error":"offline"}', {
@@ -56,7 +48,6 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // HTML 页面：网络优先
     const accept = event.request.headers.get('accept') || '';
     if (accept.includes('text/html') || url.pathname === '/' || url.pathname === '') {
         event.respondWith(
@@ -69,7 +60,6 @@ self.addEventListener('fetch', event => {
         return;
     }
 
-    // 静态资源：缓存优先，回退网络并缓存
     event.respondWith(
         caches.match(event.request).then(cached => {
             if (cached) return cached;
@@ -80,5 +70,42 @@ self.addEventListener('fetch', event => {
                 return response;
             });
         }).catch(() => new Response('', { status: 404 }))
+    );
+});
+
+// ── Web Push 通知 ────────────────────────────────────────────────────────
+self.addEventListener('push', event => {
+    let data = { title: '医考练习', body: '你有待复习的题目，点击开始今日复习！', due: 0 };
+    try { data = Object.assign(data, event.data.json()); } catch (_) {}
+
+    const title = data.title || '医考练习';
+    const body  = data.due > 0
+        ? `今天有 ${data.due} 道题等待复习，趁热打铁！`
+        : (data.body || '点击打开应用');
+
+    event.waitUntil(
+        self.registration.showNotification(title, {
+            body,
+            icon:  '/static/icon-192.png',
+            badge: '/static/icon-192.png',
+            tag:   'daily-review',
+            renotify: true,
+            data: { url: '/' },
+        })
+    );
+});
+
+self.addEventListener('notificationclick', event => {
+    event.notification.close();
+    const target = (event.notification.data && event.notification.data.url) || '/';
+    event.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+            for (const c of list) {
+                if (c.url.includes(self.location.origin) && 'focus' in c) {
+                    return c.focus();
+                }
+            }
+            return clients.openWindow(target);
+        })
     );
 });
