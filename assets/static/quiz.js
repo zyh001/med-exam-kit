@@ -47,17 +47,27 @@ function renderHTML(s) {
   tmp.innerHTML = s;
   // 移除所有 script / iframe / object / form 节点
   tmp.querySelectorAll('script,iframe,object,embed,form,link,meta,style').forEach(el => el.remove());
-  // 对 img 标签：只保留 src / alt / width / height 属性，移除事件属性
+  // 对 img 标签：只保留安全属性，加响应式样式和加载失败提示
   tmp.querySelectorAll('img').forEach(img => {
     const allowed = ['src','alt','width','height','style','class','title'];
     Array.from(img.attributes).forEach(attr => {
       if (!allowed.includes(attr.name.toLowerCase())) img.removeAttribute(attr.name);
     });
-    // 加上响应式样式
+    // 响应式样式
     img.style.maxWidth = '100%';
     img.style.height = 'auto';
     img.style.borderRadius = '6px';
-    img.style.margin = '6px 0';
+    img.style.margin = '8px 0';
+    img.style.display = 'block';
+    // 加载失败时显示提示，避免破碎图标
+    if (!img.hasAttribute('alt') || !img.alt) img.alt = '题目图片';
+    img.setAttribute('onerror',
+      "this.onerror=null;this.style.display='none';" +
+      "var p=document.createElement('span');" +
+      "p.className='img-load-err';" +
+      "p.textContent='⚠ 图片加载失败：' + (this.src||'').slice(0,60);" +
+      "this.parentNode.insertBefore(p,this.nextSibling);"
+    );
   });
   // 移除所有元素上的事件属性（on*）
   tmp.querySelectorAll('*').forEach(el => {
