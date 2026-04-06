@@ -1,6 +1,7 @@
 package server
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -8,6 +9,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"image"
+	"image/color"
+	"image/draw"
+	"image/png"
 	"io"
 	"io/fs"
 	"log"
@@ -72,6 +77,10 @@ type Server struct {
 	rateMu       sync.Mutex
 	rateBuckets  map[string][]time.Time
 	httpServer   *http.Server
+	// 图标 PNG 缓存（启动时按需生成一次，避免每次请求重复编码）
+	iconOnce   sync.Once
+	icon192    []byte
+	icon512    []byte
 }
 
 const (
@@ -235,8 +244,11 @@ func (s *Server) registerRoutes() {
 			w.Header().Set("Content-Type", "application/manifest+json")
 			w.Write(data)
 		})
-		// SVG 图标：由路由动态生成，无需静态文件
+		// 图标：由路由动态生成，无需预置静态文件。
+		// PWA 安装提示要求 PNG 格式（Chrome 对 SVG only 不触发 beforeinstallprompt）。
 		m.HandleFunc("GET /static/icon.svg", s.handleIconSVG)
+		m.HandleFunc("GET /static/icon-192.png", s.handleIcon192PNG)
+		m.HandleFunc("GET /static/icon-512.png", s.handleIcon512PNG)
 	}
 	// Multi-bank listing endpoint
 	m.HandleFunc("GET /api/banks", s.handleBanks)
@@ -1058,10 +1070,9 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, progress.GetSyncStatus(b.DB, getUserID(r)))
 }
 
-// ── SVG icon ──────────────────────────────────────────────────────────
+// ── Icon handlers ─────────────────────────────────────────────────────
 
-// handleIconSVG 通过路由动态返回 SVG 格式的应用图标，无需预置静态图片文件。
-// 浏览器通过 manifest.json 引用此路由，PWA 安装提示即可正常触发。
+// handleIconSVG 返回 SVG 格式图标（用于非 PWA 场景展示）。
 func (s *Server) handleIconSVG(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
@@ -1072,6 +1083,71 @@ func (s *Server) handleIconSVG(w http.ResponseWriter, r *http.Request) {
   <circle cx="96" cy="96" r="18" fill="#0d1117"/>
   <circle cx="96" cy="96" r="10" fill="#3a82f6"/>
 </svg>`)
+}
+
+// generateIconPNG 用 Go 标准库生成医疗十字 PNG，无需 CGO。
+// 结果缓存在 Server 中，进程生命周期内只生成一次。
+func (s *Server) generateIcons() {
+	s.iconOnce.Do(func() {
+		s.icon192 = renderIconPNG(192)
+		s.icon512 = renderIconPNG(512)
+	})
+}
+
+func renderIconPNG(size int) []byte {
+	img := image.NewNRGBA(image.Rect(0, 0, size, size))
+	bg := color.NRGBA{R: 0x0d, G: 0x11, B: 0x17, A: 0xff}
+	blue := color.NRGBA{R: 0x3a, G: 0x82, B: 0xf6, A: 0xff}
+
+	// 背景
+	draw.Draw(img, img.Bounds(), &image.Uniform{bg}, image.Point{}, draw.Src)
+
+	// 十字横竖两条
+	half := size / 2
+	pad := size / 6
+	thick := size / 14
+	if thick < 3 {
+		thick = 3
+	}
+	// 竖
+	for x := half - thick; x <= half+thick; x++ {
+		for y := pad; y < size-pad; y++ {
+			img.SetNRGBA(x, y, blue)
+		}
+	}
+	// 横
+	for y := half - thick; y <= half+thick; y++ {
+		for x := pad; x < size-pad; x++ {
+			img.SetNRGBA(x, y, blue)
+		}
+	}
+	// 中心圆（与 SVG 版保持一致）
+	r2 := (size / 14) * (size / 14)
+	for dy := -size / 14; dy <= size/14; dy++ {
+		for dx := -size / 14; dx <= size/14; dx++ {
+			if dx*dx+dy*dy <= r2 {
+				img.SetNRGBA(half+dx, half+dy, bg)
+			}
+		}
+	}
+
+	var buf bytes.Buffer
+	png.Encode(&buf, img) //nolint:errcheck
+	return buf.Bytes()
+}
+
+func (s *Server) handleIcon192PNG(w http.ResponseWriter, r *http.Request) {
+	s.generateIcons()
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(s.icon192) //nolint:errcheck
+}
+
+func (s *Server) handleIcon512PNG(w http.ResponseWriter, r *http.Request) {
+	s.generateIcons()
+	w.Header().Set("Content-Type", "image/png")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	w.Write(s.icon512) //nolint:errcheck
 }
 
 // ── Data migration ─────────────────────────────────────────────────────
