@@ -235,6 +235,8 @@ func (s *Server) registerRoutes() {
 			w.Header().Set("Content-Type", "application/manifest+json")
 			w.Write(data)
 		})
+		// SVG 图标：由路由动态生成，无需静态文件
+		m.HandleFunc("GET /static/icon.svg", s.handleIconSVG)
 	}
 	// Multi-bank listing endpoint
 	m.HandleFunc("GET /api/banks", s.handleBanks)
@@ -253,6 +255,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("POST /api/record", s.handleRecord)
 	m.HandleFunc("GET /api/record/status", s.handleRecordStatus)
 	m.HandleFunc("POST /api/record/clear", s.handleRecordClear)
+	m.HandleFunc("POST /api/record/migrate", s.handleRecordMigrate)
 	m.HandleFunc("GET /api/stats", s.handleStats)
 	m.HandleFunc("GET /api/review/due", s.handleReviewDue)
 	m.HandleFunc("GET /api/wrongbook", s.handleWrongbook)
@@ -1055,6 +1058,56 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, progress.GetSyncStatus(b.DB, getUserID(r)))
 }
 
+// ── SVG icon ──────────────────────────────────────────────────────────
+
+// handleIconSVG 通过路由动态返回 SVG 格式的应用图标，无需预置静态图片文件。
+// 浏览器通过 manifest.json 引用此路由，PWA 安装提示即可正常触发。
+func (s *Server) handleIconSVG(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "image/svg+xml")
+	w.Header().Set("Cache-Control", "public, max-age=86400")
+	io.WriteString(w, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
+  <rect width="192" height="192" rx="36" fill="#0d1117"/>
+  <rect x="82" y="38" width="28" height="116" rx="14" fill="#3a82f6"/>
+  <rect x="38" y="82" width="116" height="28" rx="14" fill="#3a82f6"/>
+  <circle cx="96" cy="96" r="18" fill="#0d1117"/>
+  <circle cx="96" cy="96" r="10" fill="#3a82f6"/>
+</svg>`)
+}
+
+// ── Data migration ─────────────────────────────────────────────────────
+
+// handleRecordMigrate 将旧 UID 的学习记录合并到当前 UID。
+// 入口刻意做得隐蔽（统计页用户 ID 旁的小链接），防止误操作。
+func (s *Server) handleRecordMigrate(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if !b.RecordEnabled || b.DB == nil {
+		jsonError(w, "记录功能未启用", http.StatusServiceUnavailable)
+		return
+	}
+	var body struct {
+		FromUID string `json:"from_uid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.FromUID == "" {
+		jsonError(w, "缺少 from_uid", http.StatusBadRequest)
+		return
+	}
+	toUID := getUserID(r)
+	if body.FromUID == toUID {
+		jsonError(w, "来源 ID 与当前 ID 相同", http.StatusBadRequest)
+		return
+	}
+	counts, err := progress.MigrateUserData(b.DB, body.FromUID, toUID)
+	if err != nil {
+		jsonError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	jsonOK(w, map[string]any{"ok": true, "migrated": counts})
+}
+
 // ── Question selection ─────────────────────────────────────────────────
 
 type sqFlat struct {
@@ -1473,6 +1526,14 @@ func getUserID(r *http.Request) string {
 }
 
 func remoteIP(r *http.Request) string {
+	// 优先读取反代传递的真实客户端 IP（nginx: proxy_set_header X-Real-IP $remote_addr）
+	if ip := r.Header.Get("X-Real-IP"); ip != "" {
+		return strings.TrimSpace(strings.SplitN(ip, ",", 2)[0])
+	}
+	// 兼容多级代理链（取最左侧，即原始客户端）
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		return strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
+	}
 	ip, _, err := net.SplitHostPort(r.RemoteAddr)
 	if err != nil {
 		return r.RemoteAddr

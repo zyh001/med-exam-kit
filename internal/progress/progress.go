@@ -540,3 +540,64 @@ func daysAhead(today string, days int) string {
 	}
 	return t.AddDate(0, 0, days).Format("2006-01-02")
 }
+
+// MigrateUserData copies all records from fromUID to toUID, skipping conflicts,
+// then deletes the source rows. Returns counts of migrated rows per table.
+func MigrateUserData(db *sql.DB, fromUID, toUID string) (map[string]int, error) {
+	if fromUID == "" || toUID == "" || fromUID == toUID {
+		return nil, fmt.Errorf("无效的用户 ID")
+	}
+	counts := map[string]int{}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
+	// sessions: PRIMARY KEY (user_id, id) — INSERT OR IGNORE 跳过重复
+	res, err := tx.Exec(
+		`INSERT OR IGNORE INTO sessions (id,user_id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts)
+		 SELECT id,?,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts FROM sessions WHERE user_id=?`,
+		toUID, fromUID)
+	if err != nil {
+		return nil, fmt.Errorf("migrate sessions: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	counts["sessions"] = int(n)
+
+	// attempts: autoincrement PK, no conflict possible
+	res, err = tx.Exec(
+		`INSERT INTO attempts (user_id,fingerprint,session_id,result,mode,unit,ts)
+		 SELECT ?,fingerprint,session_id,result,mode,unit,ts FROM attempts WHERE user_id=?`,
+		toUID, fromUID)
+	if err != nil {
+		return nil, fmt.Errorf("migrate attempts: %w", err)
+	}
+	n, _ = res.RowsAffected()
+	counts["attempts"] = int(n)
+
+	// sm2: PRIMARY KEY (user_id, fingerprint) — toUID 已有的保留（不覆盖）
+	res, err = tx.Exec(
+		`INSERT OR IGNORE INTO sm2 (user_id,fingerprint,ef,interval,reps,next_due,updated_at)
+		 SELECT ?,fingerprint,ef,interval,reps,next_due,updated_at FROM sm2 WHERE user_id=?`,
+		toUID, fromUID)
+	if err != nil {
+		return nil, fmt.Errorf("migrate sm2: %w", err)
+	}
+	n, _ = res.RowsAffected()
+	counts["sm2_cards"] = int(n)
+
+	// 清除源数据
+	for _, q := range []string{
+		`DELETE FROM attempts WHERE user_id=?`,
+		`DELETE FROM sessions WHERE user_id=?`,
+		`DELETE FROM sm2     WHERE user_id=?`,
+	} {
+		if _, err = tx.Exec(q, fromUID); err != nil {
+			return nil, err
+		}
+	}
+
+	return counts, tx.Commit()
+}
