@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"math/big"
 	"net/http"
 	"strings"
 	"sync"
@@ -18,10 +19,41 @@ const (
 	charset  = "ABCDEFGHJKMNPQRTUVWXY346789"
 	codeLen  = 8
 	authCook = "med_exam_auth"
+)
 
-	windowSec   = 600
-	maxFailures = 10
-	lockoutSec  = 900
+// ── 递进封锁阈值 ──────────────────────────────────────────────────────────
+// 每个阶段的（累计失败次数, 封锁时长）
+var lockStages = []struct {
+	after    int
+	duration time.Duration
+}{
+	{5, 5 * time.Minute},
+	{10, 1 * time.Hour},
+	{20, 24 * time.Hour},
+}
+
+const windowDur = 10 * time.Minute // 失败计数滑动窗口
+
+// ── 图形验证码 ────────────────────────────────────────────────────────────
+const captchaThreshold = 3 // 累计失败几次后开始要求验证码
+
+type captchaEntry struct {
+	answer  int
+	expires time.Time
+}
+
+// ── IP 状态 ───────────────────────────────────────────────────────────────
+
+type ipState struct {
+	failures    []time.Time // 滑动窗口内的失败时间
+	totalFails  int         // 累计总失败次数（不清零，用于递进惩罚）
+	lockedUntil time.Time
+}
+
+var (
+	mu      sync.Mutex
+	brute   = map[string]*ipState{}
+	captchas = map[string]*captchaEntry{} // token → entry
 )
 
 // GenerateAccessCode creates a random 8-char code and a signing secret.
@@ -89,17 +121,7 @@ func ApplySecurityHeaders(w http.ResponseWriter) {
 	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
 }
 
-// ── Brute-force protection ─────────────────────────────────────────────
-
-type ipState struct {
-	failures    []time.Time
-	lockedUntil time.Time
-}
-
-var (
-	mu    sync.Mutex
-	brute = map[string]*ipState{}
-)
+// ── 暴力破解防护 ─────────────────────────────────────────────────────────
 
 // CheckBruteForce returns (allowed, retryAfterSeconds).
 func CheckBruteForce(ip string) (bool, int) {
@@ -113,7 +135,8 @@ func CheckBruteForce(ip string) (bool, int) {
 	if now.Before(s.lockedUntil) {
 		return false, int(s.lockedUntil.Sub(now).Seconds())
 	}
-	cutoff := now.Add(-windowSec * time.Second)
+	// 清理过期失败记录
+	cutoff := now.Add(-windowDur)
 	fresh := s.failures[:0]
 	for _, t := range s.failures {
 		if t.After(cutoff) {
@@ -124,7 +147,7 @@ func CheckBruteForce(ip string) (bool, int) {
 	return true, 0
 }
 
-// RecordFailure records a failed login attempt.
+// RecordFailure records a failed login attempt and applies progressive lockout.
 func RecordFailure(ip string) {
 	mu.Lock()
 	defer mu.Unlock()
@@ -134,7 +157,7 @@ func RecordFailure(ip string) {
 		s = &ipState{}
 		brute[ip] = s
 	}
-	cutoff := now.Add(-windowSec * time.Second)
+	cutoff := now.Add(-windowDur)
 	fresh := s.failures[:0]
 	for _, t := range s.failures {
 		if t.After(cutoff) {
@@ -142,9 +165,15 @@ func RecordFailure(ip string) {
 		}
 	}
 	s.failures = append(fresh, now)
-	if len(s.failures) >= maxFailures {
-		s.lockedUntil = now.Add(lockoutSec * time.Second)
-		s.failures = nil
+	s.totalFails++
+
+	// 递进封锁：从最严阶段往前找
+	for i := len(lockStages) - 1; i >= 0; i-- {
+		if s.totalFails >= lockStages[i].after {
+			s.lockedUntil = now.Add(lockStages[i].duration)
+			s.failures = nil
+			break
+		}
 	}
 }
 
@@ -155,9 +184,113 @@ func RecordSuccess(ip string) {
 	mu.Unlock()
 }
 
+// NeedsCaptcha returns true if the IP has enough failures to require a captcha.
+func NeedsCaptcha(ip string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	s, ok := brute[ip]
+	if !ok {
+		return false
+	}
+	return s.totalFails >= captchaThreshold
+}
+
+// ── 图形验证码（SVG 数学题，纯标准库，无第三方依赖） ──────────────────────
+
+func randInt(n int) int {
+	v, _ := rand.Int(rand.Reader, big.NewInt(int64(n)))
+	return int(v.Int64())
+}
+
+// NewCaptcha generates a math captcha, stores the answer, and returns
+// (token, svgHTML). Token must be submitted with the form.
+func NewCaptcha() (token string, svgHTML string) {
+	// 生成题目：两个个位数相加或相减（结果始终为正）
+	a := randInt(9) + 1
+	b := randInt(9) + 1
+	var question string
+	var answer int
+	if a >= b {
+		question = fmt.Sprintf("%d − %d = ?", a, b)
+		answer = a - b
+	} else {
+		question = fmt.Sprintf("%d + %d = ?", a, b)
+		answer = a + b
+	}
+
+	// 随机 token
+	tokBytes := make([]byte, 12)
+	rand.Read(tokBytes)
+	token = hex.EncodeToString(tokBytes)
+
+	mu.Lock()
+	captchas[token] = &captchaEntry{
+		answer:  answer,
+		expires: time.Now().Add(5 * time.Minute),
+	}
+	// 顺手清理过期验证码
+	for k, v := range captchas {
+		if time.Now().After(v.expires) {
+			delete(captchas, k)
+		}
+	}
+	mu.Unlock()
+
+	// 生成 SVG（带随机干扰线和抖动字符）
+	svgHTML = renderCaptchaSVG(question)
+	return token, svgHTML
+}
+
+// VerifyCaptcha checks the submitted answer. Returns true if correct.
+// The token is consumed (one-time use) regardless of result.
+func VerifyCaptcha(token, answer string) bool {
+	mu.Lock()
+	defer mu.Unlock()
+	entry, ok := captchas[token]
+	delete(captchas, token) // 单次有效
+	if !ok || time.Now().After(entry.expires) {
+		return false
+	}
+	// 解析答案
+	var got int
+	_, err := fmt.Sscanf(strings.TrimSpace(answer), "%d", &got)
+	return err == nil && got == entry.answer
+}
+
+func renderCaptchaSVG(question string) string {
+	w, h := 200, 60
+	// 随机干扰线
+	lines := ""
+	for i := 0; i < 4; i++ {
+		x1, y1 := randInt(w), randInt(h)
+		x2, y2 := randInt(w), randInt(h)
+		r, g, b := randInt(180)+40, randInt(180)+40, randInt(180)+40
+		lines += fmt.Sprintf(
+			`<line x1="%d" y1="%d" x2="%d" y2="%d" stroke="rgb(%d,%d,%d)" stroke-width="1.2" opacity="0.5"/>`,
+			x1, y1, x2, y2, r, g, b)
+	}
+	// 字符逐个渲染，带随机 Y 抖动
+	chars := ""
+	xPos := 18
+	for _, ch := range question {
+		dy := randInt(8) - 4
+		rot := randInt(20) - 10
+		chars += fmt.Sprintf(
+			`<text x="%d" y="%d" transform="rotate(%d,%d,%d)" font-size="22" font-weight="700" fill="#4493f8" font-family="monospace">%s</text>`,
+			xPos, 38+dy, rot, xPos, 38+dy, string(ch))
+		xPos += 16
+	}
+	return fmt.Sprintf(
+		`<svg xmlns="http://www.w3.org/2000/svg" width="%d" height="%d" style="background:#0d1117;border-radius:8px">%s%s</svg>`,
+		w, h, lines, chars)
+}
+
+// ── 登录页渲染 ────────────────────────────────────────────────────────────
+
 // RenderPINPage returns the HTML login page.
 // pinLen hints the expected PIN length (0 = unknown/custom).
-func RenderPINPage(appName, errMsg string, pinLen int) string {
+// captchaToken/captchaSVG are empty when captcha is not required.
+func RenderPINPage(appName, errMsg string, pinLen int, captchaToken, captchaSVG string) string {
 	errHTML := ""
 	if errMsg != "" {
 		errHTML = `<div class="error">` + errMsg + `</div>`
@@ -169,6 +302,19 @@ func RenderPINPage(appName, errMsg string, pinLen int) string {
 		maxAttr = fmt.Sprintf(` maxlength="%d"`, pinLen)
 		placeholder = strings.Repeat("X", pinLen)
 		hint = fmt.Sprintf("请输入终端显示的 %d 位访问码<br>每次重启服务器后需重新验证", pinLen)
+	}
+
+	captchaHTML := ""
+	if captchaToken != "" {
+		captchaHTML = fmt.Sprintf(`
+  <div class="captcha-block">
+    <label>请完成验证</label>
+    <div class="captcha-img">%s</div>
+    <input type="text" name="captcha_answer" id="captcha_answer"
+      placeholder="输入计算结果" autocomplete="off" inputmode="numeric"
+      style="margin-top:10px;letter-spacing:.1em;font-size:16px">
+    <input type="hidden" name="captcha_token" value="%s">
+  </div>`, captchaSVG, captchaToken)
 	}
 
 	const tpl = `<!DOCTYPE html>
@@ -203,12 +349,12 @@ body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',-apple-syste
 h1{font-size:20px;font-weight:600;margin-bottom:6px;color:var(--text)}
 p{font-size:13px;color:var(--muted);margin-bottom:28px;line-height:1.6}
 label{font-size:12px;color:var(--muted);display:block;margin-bottom:8px;letter-spacing:.04em}
-input{width:100%;padding:12px 16px;border-radius:10px;background:var(--input-bg);
+input[type=text]{width:100%;padding:12px 16px;border-radius:10px;background:var(--input-bg);
   border:1.5px solid var(--border);color:var(--text);font-size:18px;
   letter-spacing:.18em;font-weight:600;text-align:center;text-transform:uppercase;
   transition:border-color .2s,background .25s;outline:none}
-input:focus{border-color:#4493f8}
-input::placeholder{color:var(--muted2);letter-spacing:.04em;font-size:14px;font-weight:400}
+input[type=text]:focus{border-color:#4493f8}
+input[type=text]::placeholder{color:var(--muted2);letter-spacing:.04em;font-size:14px;font-weight:400}
 .btn{width:100%;padding:13px;border-radius:10px;border:none;
   background:linear-gradient(135deg,#4493f8,#7c5ef8);color:#fff;
   font-size:15px;font-weight:600;cursor:pointer;margin-top:16px;transition:opacity .2s}
@@ -217,6 +363,10 @@ input::placeholder{color:var(--muted2);letter-spacing:.04em;font-size:14px;font-
 .error{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.3);
   color:#f85149;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px}
 .hint{font-size:11px;color:var(--muted2);text-align:center;margin-top:16px;line-height:1.5}
+.captcha-block{margin-top:16px;padding-top:16px;border-top:1px solid var(--border)}
+.captcha-block label{margin-bottom:10px}
+.captcha-img{display:flex;justify-content:center}
+.captcha-img svg{max-width:100%;border-radius:8px}
 </style></head><body>
 <div class="card">
   <button class="theme-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
@@ -228,6 +378,7 @@ input::placeholder{color:var(--muted2);letter-spacing:.04em;font-size:14px;font-
     <label>访问码</label>
     <input type="text" name="code" id="code"{{MAXATTR}}
       placeholder="{{PLACEHOLDER}}" autofocus autocomplete="off" spellcheck="false">
+    {{CAPTCHA}}
     <button class="btn" type="submit">验证并进入 →</button>
   </form>
   <p class="hint">{{HINT}}</p>
@@ -253,6 +404,7 @@ document.getElementById('code').addEventListener('input',function(){
 		"{{MAXATTR}}", maxAttr,
 		"{{PLACEHOLDER}}", placeholder,
 		"{{HINT}}", hint,
+		"{{CAPTCHA}}", captchaHTML,
 	)
 	return r.Replace(tpl)
 }
