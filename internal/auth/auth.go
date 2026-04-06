@@ -204,18 +204,37 @@ func randInt(n int) int {
 
 // NewCaptcha generates a math captcha, stores the answer, and returns
 // (token, svgHTML). Token must be submitted with the form.
+// 题型随机从四种运算中选取，均可被整数快速心算：
+//   加法：个位数 + 个位数
+//   减法：较大数 − 较小数（结果 ≥ 0）
+//   乘法：2-9 × 2-5（积 ≤ 45，便于心算）
+//   除法：先选商和除数，再算被除数（保证整除）
 func NewCaptcha() (token string, svgHTML string) {
-	// 生成题目：两个个位数相加或相减（结果始终为正）
-	a := randInt(9) + 1
-	b := randInt(9) + 1
 	var question string
 	var answer int
-	if a >= b {
-		question = fmt.Sprintf("%d − %d = ?", a, b)
-		answer = a - b
-	} else {
+	switch randInt(4) {
+	case 0: // 加法
+		a, b := randInt(9)+1, randInt(9)+1
 		question = fmt.Sprintf("%d + %d = ?", a, b)
 		answer = a + b
+	case 1: // 减法（结果 ≥ 0）
+		a, b := randInt(9)+1, randInt(9)+1
+		if a < b {
+			a, b = b, a
+		}
+		question = fmt.Sprintf("%d − %d = ?", a, b)
+		answer = a - b
+	case 2: // 乘法（2-9 × 2-5，积 ≤ 45）
+		a := randInt(8) + 2 // 2-9
+		b := randInt(4) + 2 // 2-5
+		question = fmt.Sprintf("%d × %d = ?", a, b)
+		answer = a * b
+	default: // 除法（先定商和除数，保证整除）
+		divisor  := randInt(4) + 2          // 除数 2-5
+		quotient := randInt(7) + 2          // 商 2-8
+		dividend := divisor * quotient
+		question = fmt.Sprintf("%d ÷ %d = ?", dividend, divisor)
+		answer = quotient
 	}
 
 	// 随机 token
