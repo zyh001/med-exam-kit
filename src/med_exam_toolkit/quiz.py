@@ -41,6 +41,8 @@ _server_host:   str  = "127.0.0.1"
 
 # ── 访问码验证 ──
 _access_code:   str  = ""
+_push_store: "object | None" = None
+_vapid_keys: "object | None" = None
 _cookie_secret: str  = ""
 _pin_enabled:   bool = True
 _pin_len:       int  = 8
@@ -151,6 +153,7 @@ def _create_app() -> Flask:
         _pwa_public = request.path in (
             "/sw.js", "/manifest.json",
             "/static/icon.svg", "/static/icon-192.png", "/static/icon-512.png",
+            "/api/push/vapid-key",
         )
         if _pin_enabled and not _pwa_public and not is_authenticated(_cookie_secret, _access_code):
             if request.path == "/" and request.method == "GET":
@@ -751,6 +754,44 @@ def pwa_manifest():
     return resp
 
 
+# ── Web Push API ──────────────────────────────────────────────────────────
+
+@app.get("/api/push/vapid-key")
+def api_push_vapid_key():
+    """返回服务端 VAPID 公钥（无需认证，PWA 初始化时调用）。"""
+    key = _vapid_keys.public_key_b64 if _vapid_keys else ""
+    return jsonify({"publicKey": key})
+
+
+@app.post("/api/push/subscribe")
+def api_push_subscribe():
+    """保存用户 push 订阅。"""
+    if _push_store is None:
+        return jsonify({"error": "push not available"}), 503
+    try:
+        from med_exam_toolkit.push import PushSubscription
+        data = request.get_json(silent=True) or {}
+        sub  = PushSubscription.from_dict(data)
+        _push_store.add(sub)
+        import logging
+        logging.getLogger(__name__).info("[push] 新订阅: %s…", sub.endpoint[:40])
+        return jsonify({"ok": True})
+    except (KeyError, Exception) as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.delete("/api/push/subscribe")
+def api_push_unsubscribe():
+    """删除用户 push 订阅。"""
+    if _push_store is None:
+        return jsonify({"ok": True})
+    data = request.get_json(silent=True) or {}
+    ep   = data.get("endpoint", "")
+    if ep:
+        _push_store.remove(ep)
+    return jsonify({"ok": True})
+
+
 @app.get("/sw.js")
 def pwa_sw():
     resp = make_response(app.send_static_file("sw.js"))
@@ -890,6 +931,17 @@ def start_quiz(
 
     if not no_browser:
         threading.Timer(0.9, lambda: webbrowser.open(local_url)).start()
+
+    # 初始化 Web Push
+    global _push_store, _vapid_keys
+    try:
+        from med_exam_toolkit.push import PushStore, generate_vapid_keys, start_daily_push_scheduler
+        _push_store = PushStore()
+        _vapid_keys = generate_vapid_keys()
+        start_daily_push_scheduler(_vapid_keys, _push_store)
+    except Exception as _e:
+        import logging
+        logging.getLogger(__name__).warning("[push] 初始化失败: %s", _e)
 
     app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
