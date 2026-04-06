@@ -73,6 +73,17 @@ def _get_lan_ip() -> str:
         return "127.0.0.1"
 
 
+def _get_real_ip() -> str:
+    """优先读取反代传递的真实客户端 IP。
+    nginx 配置示例：
+      proxy_set_header X-Real-IP       $remote_addr;
+      proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    """
+    ip = (request.headers.get("X-Real-IP")
+          or request.headers.get("X-Forwarded-For", ""))
+    return ip.split(",")[0].strip() or request.remote_addr or "unknown"
+
+
 def _get_user_id() -> str:
     return request.cookies.get("med_exam_uid", "_legacy")
 
@@ -101,7 +112,7 @@ def _create_app() -> Flask:
 
         if request.path == "/auth" and request.method == "POST":
             if _pin_enabled:
-                ip = request.remote_addr or "unknown"
+                ip = _get_real_ip()
                 from med_exam_toolkit.auth import check_brute_force
                 allowed, retry_after = check_brute_force(ip)
                 if not allowed:
@@ -145,7 +156,7 @@ def _create_app() -> Flask:
             token = request.headers.get("X-Session-Token", "")
             if not secrets.compare_digest(token, _session_token):
                 return jsonify({"error": "Unauthorized"}), 401
-            ip = request.remote_addr or "unknown"
+            ip = _get_real_ip()
             if not _check_rate_limit(ip):
                 return jsonify({"error": "Too Many Requests"}), 429
 
@@ -363,6 +374,29 @@ def api_record_clear():
         from med_exam_toolkit.progress import clear_user_data
         deleted = clear_user_data(b.db_path, user_id=_get_user_id())
         return jsonify({"ok": True, "deleted": deleted})
+    except Exception as e:
+        return jsonify({"ok": False, "error": str(e)}), 500
+
+
+@app.post("/api/record/migrate")
+def api_record_migrate():
+    """将旧 UID 的学习记录合并到当前 UID。
+    入口刻意做得隐蔽（统计页用户 ID 旁的小链接），防止误操作。
+    """
+    b, ok = _get_bank()
+    if not ok:
+        return jsonify({"error": "bank not found"}), 404
+    if not b.record_enabled or b.db_path is None:
+        return jsonify({"error": "记录功能未启用"}), 503
+    data     = request.get_json(silent=True) or {}
+    from_uid = (data.get("from_uid") or "").strip()
+    to_uid   = _get_user_id()
+    if not from_uid or from_uid == to_uid:
+        return jsonify({"error": "无效的 from_uid"}), 400
+    try:
+        from med_exam_toolkit.progress import migrate_user_data
+        counts = migrate_user_data(b.db_path, from_uid=from_uid, to_uid=to_uid)
+        return jsonify({"ok": True, "migrated": counts})
     except Exception as e:
         return jsonify({"ok": False, "error": str(e)}), 500
 
@@ -669,6 +703,26 @@ def index():
     return resp
 
 
+@app.get("/static/icon.svg")
+def icon_svg():
+    """SVG 应用图标：通过路由动态生成，无需预置静态图片文件。
+    manifest.json 引用此路由，浏览器即可识别 PWA 安装条件。
+    """
+    from flask import Response
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">'
+        '\n  <rect width="192" height="192" rx="36" fill="#0d1117"/>'
+        '\n  <rect x="82" y="38" width="28" height="116" rx="14" fill="#3a82f6"/>'
+        '\n  <rect x="38" y="82" width="116" height="28" rx="14" fill="#3a82f6"/>'
+        '\n  <circle cx="96" cy="96" r="18" fill="#0d1117"/>'
+        '\n  <circle cx="96" cy="96" r="10" fill="#3a82f6"/>'
+        '\n</svg>'
+    )
+    resp = Response(svg, mimetype="image/svg+xml")
+    resp.headers["Cache-Control"] = "public, max-age=86400"
+    return resp
+
+
 @app.get("/manifest.json")
 def pwa_manifest():
     resp = make_response(app.send_static_file("manifest.json"))
@@ -688,7 +742,7 @@ def pwa_sw():
 def auth():
     from med_exam_toolkit.auth import render_pin_page, set_auth_cookie
     from flask import Response
-    ip   = request.remote_addr or "unknown"
+    ip   = _get_real_ip()
     code = request.form.get("code", "").strip().upper()
     if _pin_enabled and secrets.compare_digest(code, _access_code):
         from med_exam_toolkit.auth import record_success
@@ -726,6 +780,10 @@ def start_quiz(
     bank_paths 可以是单个路径字符串，也可以是路径列表。
     """
     from med_exam_toolkit.bank import load_bank
+    # 让 Werkzeug 内置日志也显示真实 IP（nginx 反代场景）
+    from werkzeug.middleware.proxy_fix import ProxyFix
+    app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
     global _banks, _session_token, _asset_ver, \
            _server_port, _server_host, \
            _access_code, _cookie_secret, _pin_enabled, _pin_len
