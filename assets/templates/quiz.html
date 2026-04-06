@@ -37,6 +37,26 @@
     if ('serviceWorker' in navigator) {
       navigator.serviceWorker.register('/sw.js').catch(function(){});
     }
+    // PWA 安装提示
+    window._pwaPrompt = null;
+    window.addEventListener('beforeinstallprompt', function(e) {
+      e.preventDefault();
+      window._pwaPrompt = e;
+      var btn = document.getElementById('pwa-install-btn');
+      if (btn) btn.style.display = '';
+    });
+    window.addEventListener('appinstalled', function() {
+      window._pwaPrompt = null;
+      var btn = document.getElementById('pwa-install-btn');
+      if (btn) btn.style.display = 'none';
+    });
+    window.pwaTriggerInstall = function() {
+      if (!window._pwaPrompt) return;
+      window._pwaPrompt.prompt();
+      window._pwaPrompt.userChoice.then(function(r) {
+        if (r.outcome === 'accepted') window._pwaPrompt = null;
+      });
+    };
   </script>
 </head>
 <body>
@@ -66,6 +86,7 @@
         <div class="topbar-right">
           <span id="sync-badge" class="sync-badge" style="display:none"></span>
           <button id="sync-now-btn" class="sync-now-btn" onclick="syncNow()" style="display:none" title="立即同步到服务端">立即同步</button>
+          <button id="pwa-install-btn" class="icon-btn" onclick="pwaTriggerInstall()" title="安装到桌面" style="display:none">📲</button>
           <button class="icon-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
         </div>
       </div>
