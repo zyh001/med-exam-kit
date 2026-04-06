@@ -147,7 +147,12 @@ def _create_app() -> Flask:
             if host_port is not None and host_port != _server_port:
                 return jsonify({"error": "Forbidden"}), 403
 
-        if _pin_enabled and not is_authenticated(_cookie_secret, _access_code):
+        # PWA 必需资源不要求认证：被拦截会导致 PWA 完全失效
+        _pwa_public = request.path in (
+            "/sw.js", "/manifest.json",
+            "/static/icon.svg", "/static/icon-192.png", "/static/icon-512.png",
+        )
+        if _pin_enabled and not _pwa_public and not is_authenticated(_cookie_secret, _access_code):
             if request.path == "/" and request.method == "GET":
                 return Response(render_pin_page("医考练习", pin_len=_pin_len), mimetype="text/html")
             return jsonify({"error": "Unauthorized", "auth": False}), 401
@@ -792,6 +797,7 @@ def pwa_sw():
     resp = make_response(app.send_static_file("sw.js"))
     resp.headers["Content-Type"] = "application/javascript"
     resp.headers["Service-Worker-Allowed"] = "/"
+    resp.headers["Cache-Control"] = "no-store"
     return resp
 
 
