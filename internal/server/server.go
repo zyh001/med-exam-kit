@@ -391,7 +391,7 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	if auth.NeedsCaptcha(ip) {
 		token  := r.FormValue("captcha_token")
 		answer := r.FormValue("captcha_answer")
-		if !auth.VerifyCaptcha(token, answer) {
+		if !auth.VerifyCaptcha(token, answer, ip) {
 			// 验证码错误：重新生成并展示，不计入访问码失败次数
 			tok, svg := auth.NewCaptcha()
 			w.Header().Set("Content-Type", "text/html; charset=utf-8")

@@ -78,13 +78,14 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	pinLen := 0
 	if customPin != "" {
 		accessCode = strings.ToUpper(strings.TrimSpace(customPin))
-		_, cookieSecret = auth.GenerateAccessCode()
 		fmt.Printf("\n🔑  访问码（自定义）：%s\n", accessCode)
 	} else if !noPin {
-		accessCode, cookieSecret = auth.GenerateAccessCode()
+		accessCode, _ = auth.GenerateAccessCode()
 		pinLen = 8
 		fmt.Printf("\n🔑  访问码：%s\n", accessCode)
 	}
+	// cookie secret 从访问码确定性派生，服务重启后 cookie 仍然有效
+	cookieSecret = auth.DeriveSecret(accessCode)
 
 	cfg := server.Config{
 		Banks:        banks,

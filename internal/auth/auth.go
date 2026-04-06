@@ -69,6 +69,17 @@ func GenerateAccessCode() (code, secret string) {
 	return string(buf), hex.EncodeToString(secBytes)
 }
 
+// DeriveSecret derives a stable cookie-signing secret from the access code.
+// Using a deterministic derivation means the secret survives server restarts,
+// so users don't need to re-authenticate every time the server is restarted.
+func DeriveSecret(accessCode string) string {
+	// HMAC-SHA256(固定盐, accessCode) — 盐保证不同用途密钥互相独立
+	const salt = "med-exam-kit:cookie-secret:v1"
+	mac := hmac.New(sha256.New, []byte(salt))
+	mac.Write([]byte(accessCode))
+	return hex.EncodeToString(mac.Sum(nil))
+}
+
 func sign(secret, code string) string {
 	mac := hmac.New(sha256.New, []byte(secret))
 	mac.Write([]byte(code))
@@ -275,18 +286,30 @@ func NewCaptcha() (token string, svgHTML string) {
 
 // VerifyCaptcha checks the submitted answer. Returns true if correct.
 // The token is consumed (one-time use) regardless of result.
-func VerifyCaptcha(token, answer string) bool {
+// ip is used to record a failure when the answer is wrong, contributing
+// to progressive lockout (prevents captcha brute-forcing).
+func VerifyCaptcha(token, answer, ip string) bool {
 	mu.Lock()
-	defer mu.Unlock()
 	entry, ok := captchas[token]
 	delete(captchas, token) // 单次有效
+	mu.Unlock()
 	if !ok || time.Now().After(entry.expires) {
+		// token 无效或过期，计为一次失败
+		if ip != "" {
+			RecordFailure(ip)
+		}
 		return false
 	}
-	// 解析答案
 	var got int
 	_, err := fmt.Sscanf(strings.TrimSpace(answer), "%d", &got)
-	return err == nil && got == entry.answer
+	if err != nil || got != entry.answer {
+		// 答案错误，计为一次失败
+		if ip != "" {
+			RecordFailure(ip)
+		}
+		return false
+	}
+	return true
 }
 
 func renderCaptchaSVG(question string) string {
