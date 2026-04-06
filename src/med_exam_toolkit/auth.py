@@ -41,6 +41,15 @@ def generate_access_code() -> tuple[str, str]:
     return code, secret
 
 
+def derive_secret(access_code: str) -> str:
+    """从访问码确定性派生 cookie 签名密钥。
+    同一访问码永远得到同一 secret，服务重启后 cookie 仍然有效。
+    """
+    import hmac as _hmac, hashlib as _hashlib
+    salt = b"med-exam-kit:cookie-secret:v1"
+    return _hmac.new(salt, access_code.encode(), _hashlib.sha256).hexdigest()
+
+
 def _sign(cookie_secret: str, access_code: str) -> str:
     return hmac.new(
         cookie_secret.encode(),
@@ -190,16 +199,23 @@ def new_captcha() -> tuple[str, str]:
     return token, svg
 
 
-def verify_captcha(token: str, answer: str) -> bool:
-    """校验验证码（单次有效）。"""
+def verify_captcha(token: str, answer: str, ip: str = "") -> bool:
+    """校验验证码（单次有效）。
+    答案错误或 token 过期均调用 record_failure(ip)，防止暴力破解验证码。
+    """
     with _captcha_lock:
         entry = _captchas.pop(token, None)
     if not entry or time.monotonic() > entry["expires"]:
+        if ip:
+            record_failure(ip)
         return False
     try:
-        return int(answer.strip()) == entry["answer"]
+        ok = int(answer.strip()) == entry["answer"]
     except (ValueError, AttributeError):
-        return False
+        ok = False
+    if not ok and ip:
+        record_failure(ip)
+    return ok
 
 
 def _render_captcha_svg(question: str) -> str:

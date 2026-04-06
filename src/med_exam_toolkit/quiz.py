@@ -884,7 +884,7 @@ def auth():
     if _pin_enabled and needs_captcha(ip):
         token  = request.form.get("captcha_token", "")
         answer = request.form.get("captcha_answer", "")
-        if not verify_captcha(token, answer):
+        if not verify_captcha(token, answer, ip):
             tok, svg = new_captcha()
             return Response(
                 render_pin_page("医考练习", error="验证码错误，请重新计算",
@@ -947,18 +947,19 @@ def start_quiz(
     _asset_ver      = secrets.token_hex(8)
     _pin_enabled    = not no_pin or bool(pin)
 
-    from med_exam_toolkit.auth import generate_access_code
+    from med_exam_toolkit.auth import generate_access_code, derive_secret
     if pin:
-        _access_code   = pin.strip().upper()
-        _, _cookie_secret = generate_access_code()
+        _access_code = pin.strip().upper()
         _pin_len = 0
         _pin_enabled = True
     elif _pin_enabled:
-        _access_code, _cookie_secret = generate_access_code()
+        _access_code, _ = generate_access_code()
         _pin_len = 8
     else:
-        _access_code = _cookie_secret = ""
+        _access_code = ""
         _pin_len = 0
+    # cookie secret 从访问码确定性派生，服务重启后 cookie 仍然有效
+    _cookie_secret = derive_secret(_access_code) if _access_code else ""
 
     # ── 加载每个题库 ──────────────────────────────────────────────
     _banks = []
