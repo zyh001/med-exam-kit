@@ -1,7 +1,6 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"crypto/subtle"
@@ -9,10 +8,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"image"
-	"image/color"
-	"image/draw"
-	"image/png"
 	"io"
 	"io/fs"
 	"log"
@@ -1083,64 +1078,24 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleIconSVG(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "image/svg+xml")
 	w.Header().Set("Cache-Control", "public, max-age=86400")
-	io.WriteString(w, `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192">
-  <rect width="192" height="192" rx="36" fill="#0d1117"/>
-  <rect x="82" y="38" width="28" height="116" rx="14" fill="#3a82f6"/>
-  <rect x="38" y="82" width="116" height="28" rx="14" fill="#3a82f6"/>
-  <circle cx="96" cy="96" r="18" fill="#0d1117"/>
-  <circle cx="96" cy="96" r="10" fill="#3a82f6"/>
-</svg>`)
+	data, err := fs.ReadFile(s.cfg.Assets, "assets/static/icon.svg")
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	w.Write(data) //nolint:errcheck
 }
 
-// generateIconPNG 用 Go 标准库生成医疗十字 PNG，无需 CGO。
-// 结果缓存在 Server 中，进程生命周期内只生成一次。
+// generateIcons 从嵌入的静态资源中加载品牌图标 PNG，缓存到 Server。
 func (s *Server) generateIcons() {
 	s.iconOnce.Do(func() {
-		s.icon192 = renderIconPNG(192)
-		s.icon512 = renderIconPNG(512)
+		if data, err := fs.ReadFile(s.cfg.Assets, "assets/static/icon-192.png"); err == nil {
+			s.icon192 = data
+		}
+		if data, err := fs.ReadFile(s.cfg.Assets, "assets/static/icon-512.png"); err == nil {
+			s.icon512 = data
+		}
 	})
-}
-
-func renderIconPNG(size int) []byte {
-	img := image.NewNRGBA(image.Rect(0, 0, size, size))
-	bg := color.NRGBA{R: 0x0d, G: 0x11, B: 0x17, A: 0xff}
-	blue := color.NRGBA{R: 0x3a, G: 0x82, B: 0xf6, A: 0xff}
-
-	// 背景
-	draw.Draw(img, img.Bounds(), &image.Uniform{bg}, image.Point{}, draw.Src)
-
-	// 十字横竖两条
-	half := size / 2
-	pad := size / 6
-	thick := size / 14
-	if thick < 3 {
-		thick = 3
-	}
-	// 竖
-	for x := half - thick; x <= half+thick; x++ {
-		for y := pad; y < size-pad; y++ {
-			img.SetNRGBA(x, y, blue)
-		}
-	}
-	// 横
-	for y := half - thick; y <= half+thick; y++ {
-		for x := pad; x < size-pad; x++ {
-			img.SetNRGBA(x, y, blue)
-		}
-	}
-	// 中心圆（与 SVG 版保持一致）
-	r2 := (size / 14) * (size / 14)
-	for dy := -size / 14; dy <= size/14; dy++ {
-		for dx := -size / 14; dx <= size/14; dx++ {
-			if dx*dx+dy*dy <= r2 {
-				img.SetNRGBA(half+dx, half+dy, bg)
-			}
-		}
-	}
-
-	var buf bytes.Buffer
-	png.Encode(&buf, img) //nolint:errcheck
-	return buf.Bytes()
 }
 
 func (s *Server) handleIcon192PNG(w http.ResponseWriter, r *http.Request) {
