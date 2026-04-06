@@ -291,6 +291,7 @@ func (s *Server) registerRoutes() {
 		m.HandleFunc("GET /api/push/vapid-key", s.handleVapidKey)
 		m.HandleFunc("POST /api/push/subscribe", s.handlePushSubscribe)
 		m.HandleFunc("DELETE /api/push/subscribe", s.handlePushUnsubscribe)
+		m.HandleFunc("POST /api/push/test", s.handlePushTest)
 	m.HandleFunc("GET /api/stats", s.handleStats)
 	m.HandleFunc("GET /api/review/due", s.handleReviewDue)
 	m.HandleFunc("GET /api/wrongbook", s.handleWrongbook)
@@ -1717,3 +1718,49 @@ func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
+
+// POST /api/push/test — 立即向当前题库所有订阅者发送一条测试推送（调试用）
+func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
+	if s.vapidKeys == nil {
+		jsonError(w, "push not initialised", http.StatusServiceUnavailable)
+		return
+	}
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	store := s.pushStores[b.Path]
+	if store == nil {
+		jsonError(w, "push not available", http.StatusServiceUnavailable)
+		return
+	}
+	subs := store.all()
+	if len(subs) == 0 {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "sent": 0, "msg": "暂无订阅者"})
+		return
+	}
+	payload, _ := json.Marshal(map[string]any{
+		"title": "医考练习 · 测试通知",
+		"body":  "推送功能正常 🎉 点击打开应用",
+		"due":   0,
+	})
+	sent, failed, removed := 0, 0, 0
+	for _, sub := range subs {
+		err := sendPush(s.vapidKeys, sub, payload, "mailto:noreply@med-exam-kit")
+		if err == nil {
+			sent++
+		} else if err == errSubscriptionGone {
+			store.remove(sub.Endpoint)
+			removed++
+		} else {
+			log.Printf("[push/test] 失败: %v", err)
+			failed++
+		}
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]any{
+		"ok": true, "sent": sent, "failed": failed, "removed": removed,
+	})
+}
