@@ -153,14 +153,27 @@ _captcha_lock = threading.Lock()
 
 
 def new_captcha() -> tuple[str, str]:
-    """生成验证码，返回 (token, svg_html)。"""
-    import random as _random
-    a = _random.randint(1, 9)
-    b = _random.randint(1, 9)
-    if a >= b:
-        question, answer = f"{a} − {b} = ?", a - b
-    else:
+    """生成验证码，返回 (token, svg_html)。
+    四种题型随机出现：加法、减法、乘法（积≤45）、整除。
+    """
+    import random as _r
+    op = _r.randint(0, 3)
+    if op == 0:   # 加法
+        a, b = _r.randint(1, 9), _r.randint(1, 9)
         question, answer = f"{a} + {b} = ?", a + b
+    elif op == 1: # 减法（结果 ≥ 0）
+        a, b = _r.randint(1, 9), _r.randint(1, 9)
+        if a < b:
+            a, b = b, a
+        question, answer = f"{a} − {b} = ?", a - b
+    elif op == 2: # 乘法（2-9 × 2-5，积 ≤ 45）
+        a, b = _r.randint(2, 9), _r.randint(2, 5)
+        question, answer = f"{a} × {b} = ?", a * b
+    else:         # 除法（先定商和除数，保证整除）
+        divisor  = _r.randint(2, 5)   # 除数 2-5
+        quotient = _r.randint(2, 8)   # 商 2-8
+        dividend = divisor * quotient
+        question, answer = f"{dividend} ÷ {divisor} = ?", quotient
 
     token = _secrets.token_hex(12)
     expires = time.monotonic() + 300   # 5 分钟
