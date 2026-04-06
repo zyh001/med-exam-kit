@@ -77,8 +77,10 @@ type Server struct {
 	icon192    []byte
 	icon512    []byte
 	// Web Push
-	vapidKeys  *VAPIDKeys
-	pushStores map[string]*pushStore // bankPath → store
+	vapidKeys      *VAPIDKeys
+	pushStores     map[string]*pushStore // bankPath → store
+	pushTestMu     sync.Mutex
+	pushTestBuckets map[string][]time.Time // ip → timestamps for push/test rate limit
 }
 
 const (
@@ -109,11 +111,13 @@ func New(cfg Config) *Server {
 		rateBuckets:  map[string][]time.Time{},
 	}
 	// 初始化 Web Push
-	pushStores := map[string]*pushStore{}
+	pushStores     := map[string]*pushStore{}
+	pushTestBuckets := map[string][]time.Time{}
 	for _, b := range cfg.Banks {
 		pushStores[b.Path] = newPushStore()
 	}
-	s.pushStores = pushStores
+	s.pushStores     = pushStores
+	s.pushTestBuckets = pushTestBuckets
 	if keys, err := generateVAPIDKeys(); err == nil {
 		s.vapidKeys = keys
 	} else {
@@ -1726,7 +1730,28 @@ func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 // 支持两种模式：
 //   ?uid=<用户ID>  → 只推给该用户
 //   （无参数）     → 推给所有订阅者
+// 每个 IP 限流：5次/小时，防止滥用。
 func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
+	// 严格限流：每 IP 每小时最多 5 次
+	ip := remoteIP(r)
+	s.pushTestMu.Lock()
+	now    := time.Now()
+	cutoff := now.Add(-time.Hour)
+	fresh  := s.pushTestBuckets[ip][:0]
+	for _, t := range s.pushTestBuckets[ip] {
+		if t.After(cutoff) {
+			fresh = append(fresh, t)
+		}
+	}
+	if len(fresh) >= 5 {
+		s.pushTestBuckets[ip] = fresh
+		s.pushTestMu.Unlock()
+		jsonError(w, "请求过于频繁，每小时最多测试 5 次", http.StatusTooManyRequests)
+		return
+	}
+	s.pushTestBuckets[ip] = append(fresh, now)
+	s.pushTestMu.Unlock()
+
 	if s.vapidKeys == nil {
 		jsonError(w, "push not initialised", http.StatusServiceUnavailable)
 		return
