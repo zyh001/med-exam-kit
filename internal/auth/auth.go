@@ -172,28 +172,43 @@ func RenderPINPage(appName, errMsg string, pinLen int) string {
 	}
 
 	const tpl = `<!DOCTYPE html>
-<html lang="zh-CN"><head><meta charset="UTF-8">
+<html lang="zh-CN" data-theme="dark"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{{APP}} · 访问验证</title>
 <style>
 *{box-sizing:border-box;margin:0;padding:0}
+:root,[data-theme="dark"]{
+  --bg:#0d1117;--surface:#161b22;--border:#30363d;
+  --text:#e6edf3;--muted:#7d8590;--muted2:#484f58;
+  --input-bg:#0d1117;--shadow:0 8px 32px rgba(0,0,0,.5);
+}
+[data-theme="light"]{
+  --bg:#f0f4f8;--surface:#ffffff;--border:#d0d7de;
+  --text:#1f2328;--muted:#656d76;--muted2:#8c959f;
+  --input-bg:#f6f8fa;--shadow:0 4px 16px rgba(0,0,0,.12);
+}
 body{font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',-apple-system,sans-serif;
-  background:#0d1117;color:#e6edf3;display:flex;align-items:center;
-  justify-content:center;min-height:100vh;padding:20px}
-.card{background:#161b22;border:1px solid #30363d;border-radius:16px;
-  padding:40px 36px;width:100%;max-width:380px;box-shadow:0 8px 32px rgba(0,0,0,.5)}
+  background:var(--bg);color:var(--text);display:flex;align-items:center;
+  justify-content:center;min-height:100vh;padding:20px;transition:background .25s,color .25s}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:16px;
+  padding:40px 36px;width:100%;max-width:380px;box-shadow:var(--shadow);position:relative;
+  transition:background .25s,border-color .25s}
+.theme-btn{position:absolute;top:16px;right:16px;background:none;border:none;
+  cursor:pointer;font-size:18px;opacity:.6;padding:4px;border-radius:6px;
+  line-height:1;transition:opacity .2s}
+.theme-btn:hover{opacity:1}
 .icon{width:52px;height:52px;border-radius:14px;
   background:linear-gradient(135deg,#4493f8,#7c5ef8);
   display:flex;align-items:center;justify-content:center;font-size:24px;margin-bottom:20px}
-h1{font-size:20px;font-weight:600;margin-bottom:6px;color:#e6edf3}
-p{font-size:13px;color:#7d8590;margin-bottom:28px;line-height:1.6}
-label{font-size:12px;color:#7d8590;display:block;margin-bottom:8px;letter-spacing:.04em}
-input{width:100%;padding:12px 16px;border-radius:10px;background:#0d1117;
-  border:1.5px solid #30363d;color:#e6edf3;font-size:18px;
+h1{font-size:20px;font-weight:600;margin-bottom:6px;color:var(--text)}
+p{font-size:13px;color:var(--muted);margin-bottom:28px;line-height:1.6}
+label{font-size:12px;color:var(--muted);display:block;margin-bottom:8px;letter-spacing:.04em}
+input{width:100%;padding:12px 16px;border-radius:10px;background:var(--input-bg);
+  border:1.5px solid var(--border);color:var(--text);font-size:18px;
   letter-spacing:.18em;font-weight:600;text-align:center;text-transform:uppercase;
-  transition:border-color .2s;outline:none}
+  transition:border-color .2s,background .25s;outline:none}
 input:focus{border-color:#4493f8}
-input::placeholder{color:#484f58;letter-spacing:.04em;font-size:14px;font-weight:400}
+input::placeholder{color:var(--muted2);letter-spacing:.04em;font-size:14px;font-weight:400}
 .btn{width:100%;padding:13px;border-radius:10px;border:none;
   background:linear-gradient(135deg,#4493f8,#7c5ef8);color:#fff;
   font-size:15px;font-weight:600;cursor:pointer;margin-top:16px;transition:opacity .2s}
@@ -201,9 +216,10 @@ input::placeholder{color:#484f58;letter-spacing:.04em;font-size:14px;font-weight
 .btn:active{opacity:.75}
 .error{background:rgba(248,81,73,.12);border:1px solid rgba(248,81,73,.3);
   color:#f85149;border-radius:8px;padding:10px 14px;font-size:13px;margin-bottom:16px}
-.hint{font-size:11px;color:#484f58;text-align:center;margin-top:16px;line-height:1.5}
+.hint{font-size:11px;color:var(--muted2);text-align:center;margin-top:16px;line-height:1.5}
 </style></head><body>
 <div class="card">
+  <button class="theme-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
   <div class="icon">🔑</div>
   <h1>{{APP}}</h1>
   <p>服务已启动，请输入访问码继续。</p>
@@ -217,6 +233,15 @@ input::placeholder{color:#484f58;letter-spacing:.04em;font-size:14px;font-weight
   <p class="hint">{{HINT}}</p>
 </div>
 <script>
+function toggleTheme(){
+  var next=document.documentElement.getAttribute('data-theme')==='dark'?'light':'dark';
+  document.documentElement.setAttribute('data-theme',next);
+  localStorage.setItem('quiz-theme',next);
+}
+(function(){
+  var t=localStorage.getItem('quiz-theme')||'dark';
+  document.documentElement.setAttribute('data-theme',t);
+})();
 document.getElementById('code').addEventListener('input',function(){
   this.value=this.value.toUpperCase().replace(/[^A-Z0-9]/g,'');
 });
