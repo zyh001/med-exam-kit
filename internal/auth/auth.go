@@ -85,7 +85,7 @@ func ApplySecurityHeaders(w http.ResponseWriter) {
 	h.Set("Content-Security-Policy",
 		"default-src 'self'; script-src 'self' 'unsafe-inline'; "+
 			"style-src 'self' 'unsafe-inline'; img-src 'self' data:; "+
-			"connect-src 'self'; frame-ancestors 'none';")
+			"connect-src 'self'; worker-src 'self'; frame-ancestors 'none';")
 	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
 }
 
