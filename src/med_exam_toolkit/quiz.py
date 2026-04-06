@@ -792,6 +792,39 @@ def api_push_unsubscribe():
     return jsonify({"ok": True})
 
 
+@app.post("/api/push/test")
+def api_push_test():
+    """立即向所有订阅者发送测试推送（调试用）。"""
+    if _push_store is None or _vapid_keys is None:
+        return jsonify({"error": "push not initialised"}), 503
+    subs = _push_store.all()
+    if not subs:
+        return jsonify({"ok": True, "sent": 0, "msg": "暂无订阅者"})
+
+    from med_exam_toolkit.push import send_push, SubscriptionGone
+    import json as _json
+    payload = _json.dumps({
+        "title": "医考练习 · 测试通知",
+        "body":  "推送功能正常 🎉 点击打开应用",
+        "due":   0,
+    }).encode()
+
+    sent = failed = removed = 0
+    for sub in subs:
+        try:
+            send_push(_vapid_keys, sub, payload)
+            sent += 1
+        except SubscriptionGone:
+            _push_store.remove(sub.endpoint)
+            removed += 1
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning("[push/test] 失败: %s", e)
+            failed += 1
+
+    return jsonify({"ok": True, "sent": sent, "failed": failed, "removed": removed})
+
+
 @app.get("/sw.js")
 def pwa_sw():
     resp = make_response(app.send_static_file("sw.js"))
