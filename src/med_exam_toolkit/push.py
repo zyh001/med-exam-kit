@@ -152,9 +152,9 @@ def send_push(keys: VAPIDKeys, sub: "PushSubscription",
 
 @dataclass
 class PushSubscription:
-    endpoint:   str
+    endpoint:    str
     keys_p256dh: str
-    keys_auth:  str
+    keys_auth:   str
 
     @classmethod
     def from_dict(cls, d: dict) -> "PushSubscription":
@@ -166,24 +166,47 @@ class PushSubscription:
         )
 
 
+@dataclass
+class PushEntry:
+    sub: PushSubscription
+    uid: str = ""   # 用户 ID（med_exam_uid），可为空
+
+
 # ── In-memory subscription store ─────────────────────────────────────────
 
 class PushStore:
     def __init__(self) -> None:
-        self._lock = threading.Lock()
-        self._subs: dict[str, PushSubscription] = {}   # endpoint → sub
+        self._lock  = threading.Lock()
+        self._by_ep:  dict[str, PushEntry] = {}   # endpoint → entry
+        self._by_uid: dict[str, PushEntry] = {}   # uid → entry
 
-    def add(self, sub: PushSubscription) -> None:
+    def add(self, sub: PushSubscription, uid: str = "") -> None:
         with self._lock:
-            self._subs[sub.endpoint] = sub
+            entry = PushEntry(sub=sub, uid=uid)
+            # 同一 uid 的旧订阅先清理
+            if uid and uid in self._by_uid:
+                old_ep = self._by_uid[uid].sub.endpoint
+                if old_ep != sub.endpoint:
+                    self._by_ep.pop(old_ep, None)
+            if uid:
+                self._by_uid[uid] = entry
+            self._by_ep[sub.endpoint] = entry
 
     def remove(self, endpoint: str) -> None:
         with self._lock:
-            self._subs.pop(endpoint, None)
+            entry = self._by_ep.pop(endpoint, None)
+            if entry and entry.uid:
+                self._by_uid.pop(entry.uid, None)
 
     def all(self) -> list[PushSubscription]:
         with self._lock:
-            return list(self._subs.values())
+            return [e.sub for e in self._by_ep.values()]
+
+    def for_uid(self, uid: str) -> Optional[PushSubscription]:
+        """按用户 ID 查询订阅，找不到返回 None。"""
+        with self._lock:
+            entry = self._by_uid.get(uid)
+            return entry.sub if entry else None
 
 
 # ── Daily push scheduler ──────────────────────────────────────────────────
