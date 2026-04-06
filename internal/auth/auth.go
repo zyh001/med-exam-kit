@@ -127,7 +127,7 @@ func ApplySecurityHeaders(w http.ResponseWriter) {
 	h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
 	h.Set("Content-Security-Policy",
 		"default-src 'self'; script-src 'self' 'unsafe-inline'; "+
-			"style-src 'self' 'unsafe-inline'; img-src 'self' data:; "+
+			"style-src 'self' 'unsafe-inline'; img-src 'self' data: https: http:; "+
 			"connect-src 'self'; worker-src 'self'; frame-ancestors 'none';")
 	h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=(), payment=()")
 }

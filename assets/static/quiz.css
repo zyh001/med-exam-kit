@@ -1600,3 +1600,14 @@ button,a,[role=button],label{touch-action:manipulation}
   0%{opacity:1;transform:translate(0,0) rotate(0) scale(1)}
   100%{opacity:0;transform:translate(var(--x),var(--y)) rotate(var(--r)) scale(0)}
 }
+/* ── 题目图片 ──────────────────────────────────────────────────── */
+.q-text img,.q-stem-content img,.memo-explain-text img,
+.review-discuss img,.result-discuss img,.q-discuss img {
+  max-width:100%;height:auto;border-radius:6px;
+  margin:8px 0;display:block;border:1px solid var(--border);
+}
+.img-load-err {
+  display:inline-block;font-size:12px;color:var(--danger);
+  background:var(--danger-bg);border:1px solid var(--danger);
+  border-radius:6px;padding:4px 8px;margin:4px 0;word-break:break-all;
+}
