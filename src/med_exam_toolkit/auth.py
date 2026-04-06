@@ -147,6 +147,7 @@ def apply_security_headers(response) -> None:
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data:; "
         "connect-src 'self'; "
+        "worker-src 'self'; "
         "frame-ancestors 'none';",
     )
     h.setdefault(
