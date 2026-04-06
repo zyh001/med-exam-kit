@@ -35,7 +35,7 @@ var lockStages = []struct {
 const windowDur = 10 * time.Minute // 失败计数滑动窗口
 
 // ── 图形验证码 ────────────────────────────────────────────────────────────
-const captchaThreshold = 3 // 累计失败几次后开始要求验证码
+const captchaThreshold = 5 // 滑动窗口内失败几次后开始要求验证码
 
 type captchaEntry struct {
 	answer  int
@@ -184,7 +184,8 @@ func RecordSuccess(ip string) {
 	mu.Unlock()
 }
 
-// NeedsCaptcha returns true if the IP has enough failures to require a captcha.
+// NeedsCaptcha returns true if the IP has enough recent failures to require a captcha.
+// 使用滑动窗口内的失败次数，成功登录或超过窗口期后自动解除。
 func NeedsCaptcha(ip string) bool {
 	mu.Lock()
 	defer mu.Unlock()
@@ -192,7 +193,15 @@ func NeedsCaptcha(ip string) bool {
 	if !ok {
 		return false
 	}
-	return s.totalFails >= captchaThreshold
+	now := time.Now()
+	cutoff := now.Add(-windowDur)
+	recent := 0
+	for _, t := range s.failures {
+		if t.After(cutoff) {
+			recent++
+		}
+	}
+	return recent >= captchaThreshold
 }
 
 // ── 图形验证码（SVG 数学题，纯标准库，无第三方依赖） ──────────────────────
