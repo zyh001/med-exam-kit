@@ -293,6 +293,47 @@ def clear_user_data(db_path: Path, user_id: str) -> dict:
     return {"attempts": att, "sessions": sess, "sm2_cards": sm2}
 
 
+
+def migrate_user_data(db_path: Path, from_uid: str, to_uid: str) -> dict:
+    """将 from_uid 的全部记录合并到 to_uid，跳过冲突，完成后删除源数据。
+
+    三张表的冲突策略：
+      sessions  — PRIMARY KEY (user_id, id)，用 INSERT OR IGNORE 跳过重复
+      attempts  — autoincrement PK，无冲突，全量复制
+      sm2       — PRIMARY KEY (user_id, fingerprint)，to_uid 已有的保留，不覆盖
+    所有操作在同一个 connection（WAL 模式）内完成，_open 上下文退出时统一 commit。
+    """
+    if not from_uid or not to_uid or from_uid == to_uid:
+        raise ValueError("无效的用户 ID")
+    with _open(db_path) as c:
+        sess = c.execute(
+            """INSERT OR IGNORE INTO sessions
+                   (id, user_id, mode, total, correct, wrong, skip,
+                    time_sec, sess_date, units, ts)
+               SELECT id, ?, mode, total, correct, wrong, skip,
+                      time_sec, sess_date, units, ts
+               FROM sessions WHERE user_id=?""",
+            (to_uid, from_uid),
+        ).rowcount
+        att = c.execute(
+            """INSERT INTO attempts
+                   (user_id, fingerprint, session_id, result, mode, unit, ts)
+               SELECT ?, fingerprint, session_id, result, mode, unit, ts
+               FROM attempts WHERE user_id=?""",
+            (to_uid, from_uid),
+        ).rowcount
+        sm2 = c.execute(
+            """INSERT OR IGNORE INTO sm2
+                   (user_id, fingerprint, ef, interval, reps, next_due, updated_at)
+               SELECT ?, fingerprint, ef, interval, reps, next_due, updated_at
+               FROM sm2 WHERE user_id=?""",
+            (to_uid, from_uid),
+        ).rowcount
+        for tbl in ("attempts", "sessions", "sm2"):
+            c.execute(f"DELETE FROM {tbl} WHERE user_id=?", (from_uid,))  # noqa: S608
+    return {"sessions": sess, "attempts": att, "sm2_cards": sm2}
+
+
 # ── 读操作 ────────────────────────────────────────────────────────────
 
 def get_due_fingerprints(db_path: Path, user_id: str = LEGACY_USER) -> list[str]:
