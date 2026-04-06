@@ -728,59 +728,18 @@ def icon_svg():
     return resp
 
 
-def _render_icon_png(size: int) -> bytes:
-    """用纯 Python 标准库生成医疗十字 PNG，无需 Pillow。"""
-    import struct, zlib, io
-
-    PNG_MAGIC = b"\x89PNG\r\n\x1a\n"
-
-    def _png_chunk(tag: bytes, data: bytes) -> bytes:
-        c = struct.pack(">I", len(data)) + tag + data
-        return c + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
-
-    half, pad, thick = size // 2, size // 6, max(3, size // 14)
-    bg   = (0x0d, 0x11, 0x17)
-    blue = (0x3a, 0x82, 0xf6)
-    r2   = (size // 14) ** 2
-
-    rows = []
-    for y in range(size):
-        row = []
-        for x in range(size):
-            dx, dy = x - half, y - half
-            in_v = (half - thick <= x <= half + thick) and (pad <= y < size - pad)
-            in_h = (pad <= x < size - pad) and (half - thick <= y <= half + thick)
-            in_c = dx * dx + dy * dy <= r2
-            row.extend(bg if in_c else blue if (in_v or in_h) else bg)
-        rows.append(bytes([0] + row))
-
-    raw = zlib.compress(b"".join(rows))
-    buf = io.BytesIO()
-    buf.write(PNG_MAGIC)
-    buf.write(_png_chunk(b"IHDR", struct.pack(">IIBBBBB", size, size, 8, 2, 0, 0, 0)))
-    buf.write(_png_chunk(b"IDAT", raw))
-    buf.write(_png_chunk(b"IEND", b""))
-    return buf.getvalue()
-
-
-_icon_cache: dict[int, bytes] = {}
-
 @app.get("/static/icon-192.png")
 def icon_192_png():
-    from flask import Response
-    if 192 not in _icon_cache:
-        _icon_cache[192] = _render_icon_png(192)
-    resp = Response(_icon_cache[192], mimetype="image/png")
+    resp = make_response(app.send_static_file("icon-192.png"))
+    resp.headers["Content-Type"] = "image/png"
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
 
 @app.get("/static/icon-512.png")
 def icon_512_png():
-    from flask import Response
-    if 512 not in _icon_cache:
-        _icon_cache[512] = _render_icon_png(512)
-    resp = Response(_icon_cache[512], mimetype="image/png")
+    resp = make_response(app.send_static_file("icon-512.png"))
+    resp.headers["Content-Type"] = "image/png"
     resp.headers["Cache-Control"] = "public, max-age=86400"
     return resp
 
