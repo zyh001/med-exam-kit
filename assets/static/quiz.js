@@ -345,6 +345,14 @@ async function loadBankAndRenderHome() {
   renderHome();
 }
 
+// 每次显示主页时调用，刷新所有动态数据（历史记录、徽章、进度）
+async function refreshHomeData() {
+  try {
+    renderHistorySection();
+    await _refreshProgressBadges();
+  } catch (e) { /* 静默失败 */ }
+}
+
 function renderHome() {
   const info = S.bankInfo;
   document.getElementById('home-bank-name').textContent = info.bank_name || '题库';
@@ -472,7 +480,7 @@ async function selectBankAndEnter(idx) {
   try {
     await loadBankAndRenderHome();
     showScreen('s-home');
-    _refreshProgressBadges();
+    refreshHomeData();
 
     // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
     checkResumeSession();
@@ -1995,6 +2003,7 @@ function quitQuiz() {
     toast('练习进度已保存，下次可继续作答');
   }
   showScreen('s-home', 'back');
+  refreshHomeData();
 }
 
 // ── Exam timer ──────────────────────────────
@@ -3720,5 +3729,14 @@ function _showStreakCelebration(count) {
   setTimeout(() => { overlay.classList.add('streak-fade-out'); }, 1800);
   setTimeout(() => { overlay.remove(); }, 2500);
 }
+
+// ── PWA 切回前台自动刷新主页数据 ─────────────────────────────────────
+document.addEventListener('visibilitychange', function() {
+  if (document.visibilityState !== 'visible') return;
+  const home = document.getElementById('s-home');
+  if (home && home.classList.contains('active')) {
+    refreshHomeData();
+  }
+});
 
 init();
