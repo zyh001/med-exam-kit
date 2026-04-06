@@ -116,10 +116,13 @@
               userVisibleOnly: true,
               applicationServerKey: urlB64ToUint8Array(key)
             });
+            // 把订阅和用户 ID 一起上报，方便按 uid 定向推送
+            var subJson = newSub.toJSON();
+            subJson.uid = document.querySelector('[data-uid]')?.dataset?.uid || '';
             await fetch('/api/push/subscribe', {
               method: 'POST',
               headers: {'Content-Type':'application/json', 'X-Session-Token': window.SESSION_TOKEN},
-              body: JSON.stringify(newSub)
+              body: JSON.stringify(subJson)
             });
             updateBellUI(newSub);
           }

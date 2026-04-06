@@ -1686,8 +1686,11 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
-	var sub PushSubscription
-	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil || sub.Endpoint == "" {
+	var body struct {
+		PushSubscription
+		UID string `json:"uid"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Endpoint == "" {
 		jsonError(w, "invalid subscription", http.StatusBadRequest)
 		return
 	}
@@ -1696,8 +1699,8 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "push not available", http.StatusServiceUnavailable)
 		return
 	}
-	store.add(&sub)
-	log.Printf("[push] 新订阅: %s…", sub.Endpoint[:min(40, len(sub.Endpoint))])
+	store.add(&body.PushSubscription, body.UID)
+	log.Printf("[push] 新订阅: uid=%s ep=%s…", body.UID, body.Endpoint[:min(40, len(body.Endpoint))])
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -1719,7 +1722,10 @@ func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 }
 
 
-// POST /api/push/test — 立即向当前题库所有订阅者发送一条测试推送（调试用）
+// POST /api/push/test — 立即发送测试推送
+// 支持两种模式：
+//   ?uid=<用户ID>  → 只推给该用户
+//   （无参数）     → 推给所有订阅者
 func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 	if s.vapidKeys == nil {
 		jsonError(w, "push not initialised", http.StatusServiceUnavailable)
@@ -1735,17 +1741,35 @@ func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "push not available", http.StatusServiceUnavailable)
 		return
 	}
-	subs := store.all()
-	if len(subs) == 0 {
-		w.Header().Set("Content-Type", "application/json; charset=utf-8")
-		json.NewEncoder(w).Encode(map[string]any{"ok": true, "sent": 0, "msg": "暂无订阅者"})
-		return
-	}
+
 	payload, _ := json.Marshal(map[string]any{
 		"title": "医考练习 · 测试通知",
 		"body":  "推送功能正常 🎉 点击打开应用",
 		"due":   0,
 	})
+
+	uid := r.URL.Query().Get("uid")
+	var subs []*PushSubscription
+	if uid != "" {
+		// 指定用户
+		sub := store.forUID(uid)
+		if sub == nil {
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			json.NewEncoder(w).Encode(map[string]any{"ok": false, "msg": "该用户暂无订阅"})
+			return
+		}
+		subs = []*PushSubscription{sub}
+	} else {
+		// 所有订阅者
+		subs = store.all()
+	}
+
+	if len(subs) == 0 {
+		w.Header().Set("Content-Type", "application/json; charset=utf-8")
+		json.NewEncoder(w).Encode(map[string]any{"ok": true, "sent": 0, "msg": "暂无订阅者"})
+		return
+	}
+
 	sent, failed, removed := 0, 0, 0
 	for _, sub := range subs {
 		err := sendPush(s.vapidKeys, sub, payload, "mailto:noreply@med-exam-kit")

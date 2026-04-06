@@ -233,33 +233,67 @@ var errSubscriptionGone = fmt.Errorf("subscription gone")
 
 // ── Subscription store (in-memory, per bank) ─────────────────────────────
 
-type pushStore struct {
-	mu   sync.RWMutex
-	subs map[string]*PushSubscription // endpoint → sub
+type pushEntry struct {
+	Sub *PushSubscription
+	UID string // 用户 ID（med_exam_uid），可为空（旧版本兼容）
 }
 
-func newPushStore() *pushStore { return &pushStore{subs: map[string]*PushSubscription{}} }
+type pushStore struct {
+	mu      sync.RWMutex
+	byEP    map[string]*pushEntry // endpoint → entry
+	byUID   map[string]*pushEntry // uid → entry（每个用户保留最新一条）
+}
 
-func (ps *pushStore) add(sub *PushSubscription) {
+func newPushStore() *pushStore {
+	return &pushStore{
+		byEP:  map[string]*pushEntry{},
+		byUID: map[string]*pushEntry{},
+	}
+}
+
+func (ps *pushStore) add(sub *PushSubscription, uid string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	ps.subs[sub.Endpoint] = sub
+	e := &pushEntry{Sub: sub, UID: uid}
+	// 同一 uid 的旧订阅先清理（设备换浏览器时会产生新 endpoint）
+	if uid != "" {
+		if old, ok := ps.byUID[uid]; ok && old.Sub.Endpoint != sub.Endpoint {
+			delete(ps.byEP, old.Sub.Endpoint)
+		}
+		ps.byUID[uid] = e
+	}
+	ps.byEP[sub.Endpoint] = e
 }
 
 func (ps *pushStore) remove(endpoint string) {
 	ps.mu.Lock()
 	defer ps.mu.Unlock()
-	delete(ps.subs, endpoint)
+	if e, ok := ps.byEP[endpoint]; ok {
+		if e.UID != "" {
+			delete(ps.byUID, e.UID)
+		}
+		delete(ps.byEP, endpoint)
+	}
 }
 
 func (ps *pushStore) all() []*PushSubscription {
 	ps.mu.RLock()
 	defer ps.mu.RUnlock()
-	out := make([]*PushSubscription, 0, len(ps.subs))
-	for _, s := range ps.subs {
-		out = append(out, s)
+	out := make([]*PushSubscription, 0, len(ps.byEP))
+	for _, e := range ps.byEP {
+		out = append(out, e.Sub)
 	}
 	return out
+}
+
+// forUID 返回指定用户的订阅，找不到返回 nil。
+func (ps *pushStore) forUID(uid string) *PushSubscription {
+	ps.mu.RLock()
+	defer ps.mu.RUnlock()
+	if e, ok := ps.byUID[uid]; ok {
+		return e.Sub
+	}
+	return nil
 }
 
 // ── Daily push scheduler ─────────────────────────────────────────────────
