@@ -76,6 +76,9 @@ type Server struct {
 	iconOnce   sync.Once
 	icon192    []byte
 	icon512    []byte
+	// Web Push
+	vapidKeys  *VAPIDKeys
+	pushStores map[string]*pushStore // bankPath → store
 }
 
 const (
@@ -105,7 +108,20 @@ func New(cfg Config) *Server {
 		mux:          http.NewServeMux(),
 		rateBuckets:  map[string][]time.Time{},
 	}
+	// 初始化 Web Push
+	pushStores := map[string]*pushStore{}
+	for _, b := range cfg.Banks {
+		pushStores[b.Path] = newPushStore()
+	}
+	s.pushStores = pushStores
+	if keys, err := generateVAPIDKeys(); err == nil {
+		s.vapidKeys = keys
+	} else {
+		log.Printf("[push] VAPID 密钥生成失败: %v", err)
+	}
+
 	s.registerRoutes()
+	s.startDailyPushScheduler()
 	return s
 }
 
@@ -191,7 +207,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path == "/manifest.json" ||
 		r.URL.Path == "/static/icon.svg" ||
 		r.URL.Path == "/static/icon-192.png" ||
-		r.URL.Path == "/static/icon-512.png"
+		r.URL.Path == "/static/icon-512.png" ||
+		r.URL.Path == "/api/push/vapid-key"
 	if s.cfg.AccessCode != "" && !pwaPublic && !auth.IsAuthenticated(r, s.cfg.CookieSecret, s.cfg.AccessCode) {
 		if (r.URL.Path == "/" || r.URL.Path == "") && r.Method == http.MethodGet {
 			wrapped.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -270,6 +287,10 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/record/status", s.handleRecordStatus)
 	m.HandleFunc("POST /api/record/clear", s.handleRecordClear)
 	m.HandleFunc("POST /api/record/migrate", s.handleRecordMigrate)
+		// Web Push
+		m.HandleFunc("GET /api/push/vapid-key", s.handleVapidKey)
+		m.HandleFunc("POST /api/push/subscribe", s.handlePushSubscribe)
+		m.HandleFunc("DELETE /api/push/subscribe", s.handlePushUnsubscribe)
 	m.HandleFunc("GET /api/stats", s.handleStats)
 	m.HandleFunc("GET /api/review/due", s.handleReviewDue)
 	m.HandleFunc("GET /api/wrongbook", s.handleWrongbook)
@@ -1508,12 +1529,6 @@ func distributeByRatio(total int, weights map[string]int) map[string]int {
 	return result
 }
 
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
 
 // ── Rate limiter ───────────────────────────────────────────────────────
 
@@ -1654,3 +1669,51 @@ func logRequest(r *http.Request, status int, duration time.Duration) {
 	}
 	log.Printf("%s %s %s %d %v", ip, method, path, status, duration.Round(time.Millisecond))
 }
+
+// ── Push API handlers ────────────────────────────────────────────────────
+
+// GET /api/push/vapid-key  →  {"publicKey":"..."}
+func (s *Server) handleVapidKey(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]string{"publicKey": s.vapidPublicKey()})
+}
+
+// POST /api/push/subscribe  body: PushSubscription JSON
+func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
+	_, b, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	var sub PushSubscription
+	if err := json.NewDecoder(r.Body).Decode(&sub); err != nil || sub.Endpoint == "" {
+		jsonError(w, "invalid subscription", http.StatusBadRequest)
+		return
+	}
+	store := s.pushStores[b.Path]
+	if store == nil {
+		jsonError(w, "push not available", http.StatusServiceUnavailable)
+		return
+	}
+	store.add(&sub)
+	log.Printf("[push] 新订阅: %s…", sub.Endpoint[:min(40, len(sub.Endpoint))])
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
+// DELETE /api/push/subscribe  body: {"endpoint":"..."}
+func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
+	_, b, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	var body struct{ Endpoint string `json:"endpoint"` }
+	json.NewDecoder(r.Body).Decode(&body)
+	if store := s.pushStores[b.Path]; store != nil && body.Endpoint != "" {
+		store.remove(body.Endpoint)
+	}
+	w.Header().Set("Content-Type", "application/json; charset=utf-8")
+	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
+}
+
