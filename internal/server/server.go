@@ -195,7 +195,15 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if s.cfg.AccessCode != "" {
 			ip := remoteIP(r)
 			if ok, retry := auth.CheckBruteForce(ip); !ok {
-				http.Error(wrapped, fmt.Sprintf("尝试次数过多，请 %d 秒后重试", retry), http.StatusTooManyRequests)
+				minutes := (retry + 59) / 60
+				msg := fmt.Sprintf("尝试次数过多，请 %d 分钟后重试", minutes)
+				if retry < 60 {
+					msg = fmt.Sprintf("尝试次数过多，请 %d 秒后重试", retry)
+				}
+				w := wrapped
+				w.Header().Set("Content-Type", "text/html; charset=utf-8")
+				w.WriteHeader(http.StatusTooManyRequests)
+				io.WriteString(w, auth.RenderPINPage("医考练习", msg, s.cfg.PinLen, "", ""))
 				return
 			}
 		}
@@ -216,7 +224,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.AccessCode != "" && !pwaPublic && !auth.IsAuthenticated(r, s.cfg.CookieSecret, s.cfg.AccessCode) {
 		if (r.URL.Path == "/" || r.URL.Path == "") && r.Method == http.MethodGet {
 			wrapped.Header().Set("Content-Type", "text/html; charset=utf-8")
-			io.WriteString(wrapped, auth.RenderPINPage("医考练习", "", s.cfg.PinLen))
+			var tok, svg string
+			if auth.NeedsCaptcha(remoteIP(r)) {
+				tok, svg = auth.NewCaptcha()
+			}
+			io.WriteString(wrapped, auth.RenderPINPage("医考练习", "", s.cfg.PinLen, tok, svg))
 			return
 		}
 		jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
@@ -373,16 +385,35 @@ func (s *Server) handleEditor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	code := strings.TrimSpace(strings.ToUpper(r.FormValue("code")))
-	ip := remoteIP(r)
+	ip   := remoteIP(r)
+
+	// 如果需要验证码，先校验
+	if auth.NeedsCaptcha(ip) {
+		token  := r.FormValue("captcha_token")
+		answer := r.FormValue("captcha_answer")
+		if !auth.VerifyCaptcha(token, answer) {
+			// 验证码错误：重新生成并展示，不计入访问码失败次数
+			tok, svg := auth.NewCaptcha()
+			w.Header().Set("Content-Type", "text/html; charset=utf-8")
+			io.WriteString(w, auth.RenderPINPage("医考练习", "验证码错误，请重新计算", s.cfg.PinLen, tok, svg))
+			return
+		}
+	}
+
 	if s.cfg.AccessCode == "" || code == s.cfg.AccessCode {
 		auth.RecordSuccess(ip)
 		auth.SetAuthCookie(w, r, s.cfg.CookieSecret, s.cfg.AccessCode)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
 		return
 	}
+
 	auth.RecordFailure(ip)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	io.WriteString(w, auth.RenderPINPage("医考练习", "访问码错误，请重试", s.cfg.PinLen))
+	var tok, svg string
+	if auth.NeedsCaptcha(ip) {
+		tok, svg = auth.NewCaptcha()
+	}
+	io.WriteString(w, auth.RenderPINPage("医考练习", "访问码错误，请重试", s.cfg.PinLen, tok, svg))
 }
 
 // ── Health check ───────────────────────────────────────────────────────
