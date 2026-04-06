@@ -256,7 +256,7 @@ def apply_security_headers(response) -> None:
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data:; "
+        "img-src 'self' data: https: http:; "
         "connect-src 'self'; "
         "worker-src 'self'; "
         "frame-ancestors 'none';",
