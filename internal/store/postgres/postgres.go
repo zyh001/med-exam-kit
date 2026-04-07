@@ -205,8 +205,22 @@ func (s *Store) DeleteBank(ctx context.Context, bankID int64) error {
 // ── ProgressStore ──────────────────────────────────────────────────
 
 func (s *Store) Init(ctx context.Context) error {
-	_, err := s.pool.Exec(ctx, schemaSQL)
-	return err
+	if _, err := s.pool.Exec(ctx, schemaSQL); err != nil {
+		return err
+	}
+	// Log how many legacy rows (bank_id=0) remain after migration
+	var legacyAttempts, legacySM2, legacySessions int64
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM attempts  WHERE bank_id=0`).Scan(&legacyAttempts)
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sm2       WHERE bank_id=0`).Scan(&legacySM2)
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sessions  WHERE bank_id=0`).Scan(&legacySessions)
+	if legacyAttempts+legacySM2+legacySessions > 0 {
+		log.Printf("[pgstore] ⚠ 仍有 bank_id=0 旧数据: attempts=%d sm2=%d sessions=%d"+
+			"\n  可手动执行 SQL 迁移，或使用 med-exam-kit db repair 修复",
+			legacyAttempts, legacySM2, legacySessions)
+	} else {
+		log.Printf("[pgstore] ✅ 所有学习数据已正确关联 bank_id")
+	}
+	return nil
 }
 
 func (s *Store) DB() *sql.DB { return nil } // Postgres: no raw *sql.DB exposed

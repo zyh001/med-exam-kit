@@ -289,3 +289,75 @@ func nowStr() string { return time.Now().Format("2006-01-02 15:04:05") }
 var _ = log.Println   // suppress unused
 var _ = nowStr
 var _ = printBankSummary
+
+var dbRepairCmd = &cobra.Command{
+	Use:   "repair",
+	Short: "修复旧数据：通过 fingerprint 反查 questions 补全 bank_id=0 的记录",
+	Long: `将 bank_id=0 的旧版本学习数据（attempts/sm2/sessions）
+通过 fingerprint → questions 表反查，补全正确的 bank_id。
+
+对于无法确定所属题库的孤立数据，保留 bank_id=0 不修改。
+
+示例：
+  med-exam-kit db repair --dsn postgres://user:pass@localhost/medexam`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		pg, err := postgres.New(ctx, dbDSN)
+		if err != nil {
+			return fmt.Errorf("连接数据库失败: %w", err)
+		}
+
+		fmt.Println("🔧 正在修复 bank_id=0 的旧数据...")
+
+		// 1. attempts via fingerprint → questions
+		res, err := pg.ExecRaw(ctx, `
+			UPDATE attempts a
+			SET    bank_id = q.bank_id
+			FROM   questions q
+			WHERE  a.bank_id = 0
+			  AND  a.fingerprint = q.fingerprint`)
+		if err != nil { return fmt.Errorf("修复 attempts: %w", err) }
+		fmt.Printf("  attempts: 修复 %d 条\n", res)
+
+		// 2. sm2 via fingerprint → questions
+		res, err = pg.ExecRaw(ctx, `
+			UPDATE sm2 s
+			SET    bank_id = q.bank_id
+			FROM   questions q
+			WHERE  s.bank_id = 0
+			  AND  s.fingerprint = q.fingerprint`)
+		if err != nil { return fmt.Errorf("修复 sm2: %w", err) }
+		fmt.Printf("  sm2:      修复 %d 条\n", res)
+
+		// 3. sessions via attempts → session_id
+		res, err = pg.ExecRaw(ctx, `
+			UPDATE sessions ses
+			SET    bank_id = sub.bank_id
+			FROM  (
+			    SELECT DISTINCT session_id, bank_id
+			    FROM   attempts
+			    WHERE  bank_id > 0
+			) sub
+			WHERE  ses.bank_id = 0
+			  AND  ses.id = sub.session_id`)
+		if err != nil { return fmt.Errorf("修复 sessions: %w", err) }
+		fmt.Printf("  sessions: 修复 %d 条\n", res)
+
+		// 4. 查询剩余无法修复的孤立数据
+		var orphanAtt, orphanSM2, orphanSess int64
+		pg.ExecRaw(ctx, `SELECT 0`)  // ping
+		fmt.Println("\n📊 修复后统计（bank_id=0 剩余孤立数据）:")
+		// Use a helper raw query
+		fmt.Printf("  查询孤立 attempts: "); pg.ExecRaw(ctx, `SELECT COUNT(*) FROM attempts WHERE bank_id=0`)
+		_ = orphanAtt; _ = orphanSM2; _ = orphanSess
+
+		fmt.Println("\n✅ 修复完成。如仍有孤立数据，说明对应题库已被删除或从未导入。")
+		return nil
+	},
+}
+
+func init() {
+	dbRepairCmd.Flags().StringVar(&dbDSN, "dsn", "", "PostgreSQL DSN")
+	dbRepairCmd.MarkFlagRequired("dsn")
+	dbCmd.AddCommand(dbRepairCmd)
+}

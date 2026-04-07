@@ -48,7 +48,10 @@ CREATE TABLE IF NOT EXISTS sub_questions (
 );
 CREATE INDEX IF NOT EXISTS idx_sq_qid ON sub_questions(question_id);
 
--- ── Learning Progress (mirrors SQLite schema) ──────────────────────
+-- ── Learning Progress ───────────────────────────────────────────────
+-- bank_id = 0 表示旧数据（升级前写入，尚未关联到具体题库）
+-- 正常数据 bank_id = banks.id（通过迁移脚本或写入时注入）
+
 CREATE TABLE IF NOT EXISTS sessions (
     id        TEXT    NOT NULL,
     user_id   TEXT    NOT NULL DEFAULT '_legacy',
@@ -64,8 +67,9 @@ CREATE TABLE IF NOT EXISTS sessions (
     ts        BIGINT  NOT NULL,
     PRIMARY KEY (user_id, bank_id, id)
 );
-CREATE INDEX IF NOT EXISTS idx_sess_uid ON sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_sess_ts  ON sessions(ts);
+CREATE INDEX IF NOT EXISTS idx_sess_uid      ON sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_sess_uid_bank ON sessions(user_id, bank_id);
+CREATE INDEX IF NOT EXISTS idx_sess_ts       ON sessions(ts);
 
 CREATE TABLE IF NOT EXISTS attempts (
     id          BIGSERIAL PRIMARY KEY,
@@ -73,15 +77,20 @@ CREATE TABLE IF NOT EXISTS attempts (
     bank_id     BIGINT  NOT NULL DEFAULT 0,
     fingerprint TEXT    NOT NULL,
     session_id  TEXT,
-    result      INTEGER NOT NULL,
+    result      INTEGER NOT NULL,  -- 1=correct 0=wrong -1=skip
     mode        TEXT,
     unit        TEXT,
     ts          BIGINT  NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_att_fp     ON attempts(fingerprint);
-CREATE INDEX IF NOT EXISTS idx_att_ts     ON attempts(ts);
-CREATE INDEX IF NOT EXISTS idx_att_uid    ON attempts(user_id);
-CREATE INDEX IF NOT EXISTS idx_att_uid_fp ON attempts(user_id, fingerprint);
+-- 错题查询核心索引：(user_id, bank_id) + result 过滤 + fingerprint 聚合
+CREATE INDEX IF NOT EXISTS idx_att_uid_bank     ON attempts(user_id, bank_id);
+CREATE INDEX IF NOT EXISTS idx_att_uid_bank_fp  ON attempts(user_id, bank_id, fingerprint);
+CREATE INDEX IF NOT EXISTS idx_att_uid_bank_res ON attempts(user_id, bank_id, result);
+CREATE INDEX IF NOT EXISTS idx_att_fp           ON attempts(fingerprint);
+CREATE INDEX IF NOT EXISTS idx_att_ts           ON attempts(ts);
+-- 保留旧索引，兼容未升级的查询
+CREATE INDEX IF NOT EXISTS idx_att_uid          ON attempts(user_id);
+CREATE INDEX IF NOT EXISTS idx_att_uid_fp       ON attempts(user_id, fingerprint);
 
 CREATE TABLE IF NOT EXISTS sm2 (
     user_id     TEXT    NOT NULL DEFAULT '_legacy',
@@ -94,13 +103,38 @@ CREATE TABLE IF NOT EXISTS sm2 (
     updated_at  BIGINT  NOT NULL,
     PRIMARY KEY (user_id, bank_id, fingerprint)
 );
+CREATE INDEX IF NOT EXISTS idx_sm2_uid_bank     ON sm2(user_id, bank_id);
+CREATE INDEX IF NOT EXISTS idx_sm2_uid_bank_due ON sm2(user_id, bank_id, next_due);
 
--- ── Migration: add bank_id if upgrading from old schema ────────────
+-- ── Migration: 升级旧版本（幂等，可重复执行）──────────────────────
+
+-- 1. 加列（已有则跳过）
 ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bank_id BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE attempts ADD COLUMN IF NOT EXISTS bank_id BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE sm2      ADD COLUMN IF NOT EXISTS bank_id BIGINT NOT NULL DEFAULT 0;
 
--- Additional indexes for bank-scoped queries
-CREATE INDEX IF NOT EXISTS idx_sess_uid_bank ON sessions(user_id, bank_id);
-CREATE INDEX IF NOT EXISTS idx_att_uid_bank  ON attempts(user_id, bank_id);
-CREATE INDEX IF NOT EXISTS idx_sm2_uid_bank  ON sm2(user_id, bank_id);
+-- 2. 修复旧数据：通过 fingerprint 反查 questions 表补全 bank_id
+--    只修 bank_id=0 的旧数据，新数据（bank_id>0）不受影响
+UPDATE attempts a
+SET    bank_id = q.bank_id
+FROM   questions q
+WHERE  a.bank_id = 0
+  AND  a.fingerprint = q.fingerprint;
+
+-- sm2 同理
+UPDATE sm2 s
+SET    bank_id = q.bank_id
+FROM   questions q
+WHERE  s.bank_id = 0
+  AND  s.fingerprint = q.fingerprint;
+
+-- sessions 通过关联 attempts 反查（session 本身没有 fingerprint）
+UPDATE sessions ses
+SET    bank_id = sub.bank_id
+FROM  (
+    SELECT DISTINCT session_id, bank_id
+    FROM   attempts
+    WHERE  bank_id > 0
+) sub
+WHERE  ses.bank_id = 0
+  AND  ses.id = sub.session_id;
