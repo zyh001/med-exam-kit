@@ -32,7 +32,7 @@ function _showAuthExpiredBanner(saveMsg) {
   const bar = document.createElement('div');
   bar.id = 'auth-expired-banner';
   bar.innerHTML =
-    '<span>⚠️ 服务器已重启，会话已失效' + (saveMsg ? '。' + saveMsg : '') + '</span>' +
+    '<span>🔄 服务已更新，当前会话失效' + (saveMsg ? ' ' + saveMsg : '') + '点击立即刷新，不会丢失进度。</span>' +
     '<button onclick="location.reload()">立即刷新</button>';
   Object.assign(bar.style, {
     position:   'fixed',
