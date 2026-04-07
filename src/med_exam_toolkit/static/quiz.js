@@ -488,6 +488,9 @@ async function selectBankAndEnter(idx) {
   localStorage.setItem(SELECTED_BANK_KEY, String(idx));
 
   // ── 加载此题库的历史记录 ─────────────────────────
+  S.serverHistory    = null;
+  S.localOnlyHistory = null;
+  S.deletedIds       = new Set();
   loadHistory();
 
   try {
@@ -3354,11 +3357,13 @@ async function _fetchServerHistory() {
     const data = await res.json();
     const items = data.items || [];
     if (!items.length) return;
+    // 过滤掉本地已删除的 id（防止并发时已删项被服务端响应覆盖写回）
+    const filtered = items.filter(h => !S.deletedIds?.has(h.id));
     // 合并：服务端历史作为主数据，用 id 去重本地记录
-    const serverIds = new Set(items.map(h => h.id));
+    const serverIds = new Set(filtered.map(h => h.id));
     const localOnly = S.history.filter(h => h.id && !serverIds.has(h.id));
     // localOnly 是本地有但服务端没有的（可能是离线记录还未同步）
-    S.serverHistory = items;          // 保存服务端完整历史
+    S.serverHistory = filtered;       // 保存服务端完整历史
     S.localOnlyHistory = localOnly;   // 本地待同步历史
     renderHistorySection();
   } catch (e) { /* 离线时静默失败，保留本地数据 */ }
@@ -3710,6 +3715,11 @@ function openHistoryResult(id, idx) {
 
 /** 删除单条历史记录（由滑动确认或 PC 按钮 confirm 后调用，不再二次确认） */
 async function deleteHistoryItem(id, idx) {
+  // 0. 记录已删 id，防止飞行中的 _fetchServerHistory 把它写回
+  if (id) {
+    if (!S.deletedIds) S.deletedIds = new Set();
+    S.deletedIds.add(id);
+  }
   // 1. 从服务端删除（有 id 且非纯数字 idx 代用 id 时）
   if (id && isNaN(Number(id))) {
     try {
