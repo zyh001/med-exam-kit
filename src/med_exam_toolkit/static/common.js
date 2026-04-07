@@ -3,10 +3,18 @@
    依赖：_base.html 内联的 window.SESSION_TOKEN（Jinja2 变量）
    ================================================================ */
 
+/** 读取 med_exam_uid cookie 值（用于显式随请求发送，不依赖浏览器自动附带）*/
+function _getUIDCookie() {
+  const m = document.cookie.match(/(?:^|;\s*)med_exam_uid=([^;]+)/);
+  return m ? m[1] : "";
+}
+
 /** 统一封装的 fetch，自动添加 X-Session-Token 请求头 */
 async function apiFetch(url, opts = {}) {
+  const uid = _getUIDCookie();
   opts.headers = Object.assign({}, opts.headers, {
     "X-Session-Token": window.SESSION_TOKEN,
+    ...(uid ? { "X-User-ID": uid } : {}),
   });
   const res = await fetch(url, opts);
   if (res.status === 401 && typeof window._onAuthExpired === 'function') {
