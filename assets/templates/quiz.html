@@ -50,6 +50,16 @@
       var btn = document.getElementById('pwa-install-btn');
       if (btn) btn.style.display = 'none';
     });
+    // 若已作为 PWA 独立应用运行，立即隐藏安装按钮
+    if (window.matchMedia('(display-mode: standalone)').matches ||
+        window.navigator.standalone === true) {
+      var _installBtn = document.getElementById('pwa-install-btn');
+      if (_installBtn) _installBtn.style.display = 'none';
+    }
+    window.matchMedia('(display-mode: standalone)').addEventListener('change', function(e) {
+      var btn = document.getElementById('pwa-install-btn');
+      if (btn) btn.style.display = e.matches ? 'none' : '';
+    });
     window.pwaTriggerInstall = function() {
       if (!window._pwaPrompt) return;
       window._pwaPrompt.prompt();
