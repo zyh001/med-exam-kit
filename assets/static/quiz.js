@@ -1568,7 +1568,7 @@ function renderQ(dir = 'none') {
   // ── 更新 Header（不随卡片动画，即时更新）──
   document.getElementById('q-cur').textContent = S.cur + 1;
   document.getElementById('q-total').textContent = total;
-  document.getElementById('q-unit-tag').textContent = q.unit || '';
+  document.getElementById('q-unit-tag').textContent = (S.mode === 'exam') ? '' : (q.unit || '');
   document.getElementById('progress-fill').style.width = ((S.cur + 1) / total * 100).toFixed(1) + '%';
   document.getElementById('flag-btn').classList.toggle('active', S.marked.has(S.cur));
 
@@ -4180,7 +4180,7 @@ init();
       if (S.mode === 'practice' && S.questions.length) {
         // 练习模式：强制保存进度存档，刷新后可从「进行中」继续
         savePracticeSession();
-        saveMsg = '练习进度已自动保存，刷新后可继续。';
+        saveMsg = '练习进度已自动保存，';
       } else if (S.mode === 'exam' && S.questions.length) {
         // 考试模式：把当前状态写入 examSession key，刷新后 checkResumeSession 会弹恢复提示
         try {
@@ -4196,10 +4196,10 @@ init();
               examStart: S.examStart, examLimit: S.examLimit,
             }));
           }
-          saveMsg = '考试进度已自动保存，刷新后可从断点恢复。';
+          saveMsg = '考试进度已自动保存，';
         } catch (e) { /* 存储失败时静默 */ }
       } else if (S.mode === 'memo' && S.questions.length) {
-        saveMsg = '刷新后可重新开始记忆模式。';
+        saveMsg = '';
       }
     }
 
