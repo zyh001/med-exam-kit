@@ -72,14 +72,15 @@ jobs:
         with:
           go-version: '1.22'
 
-      - name: Upgrade sqlite (fixes loong64 + windows/386)
+      - name: Fetch dependencies (sqlite + pgx)
         run: |
           go get modernc.org/sqlite@latest
+          go get github.com/jackc/pgx/v5@latest
           go mod tidy
         env:
           GOFLAGS: '-mod=mod'
 
-      - name: Build
+      - name: Build (with PostgreSQL support)
         env:
           CGO_ENABLED: '0'
           GOOS: ${{ matrix.goos }}

@@ -3,6 +3,7 @@ module github.com/zyh001/med-exam-kit
 go 1.22
 
 require (
+	github.com/jackc/pgx/v5 v5.7.4
 	github.com/spf13/cobra v1.10.2
 	modernc.org/sqlite v1.29.0
 )

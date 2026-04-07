@@ -1,6 +1,10 @@
+//go:build !nopg
+// +build !nopg
+
 package cmd
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"net"
@@ -12,12 +16,32 @@ import (
 	"github.com/zyh001/med-exam-kit/internal/bank"
 	"github.com/zyh001/med-exam-kit/internal/progress"
 	"github.com/zyh001/med-exam-kit/internal/server"
+	pgstore "github.com/zyh001/med-exam-kit/internal/store/postgres"
 )
 
 var quizCmd = &cobra.Command{
 	Use:   "quiz",
 	Short: "启动刷题 Web 服务器",
-	RunE:  runQuiz,
+	Long: `启动刷题 Web 服务器。
+
+题库来源（二选一）：
+  1. 本地 .mqb 文件（默认）：-b bank.mqb
+  2. PostgreSQL 数据库：--db postgres://... --bank-id 1
+
+学习进度存储（二选一）：
+  1. 本地 SQLite（默认）：每个题库旁生成 .progress.db
+  2. PostgreSQL（推荐多用户）：--db postgres://...
+
+示例：
+  # 默认本地文件模式
+  med-exam-kit quiz -b exam.mqb
+
+  # 从 PostgreSQL 加载题库（先用 db import 导入）
+  med-exam-kit quiz --db postgres://user:pass@host/db --bank-id 1
+
+  # 同一 PostgreSQL 存题库和记录
+  med-exam-kit quiz --db postgres://user:pass@host/db --bank-id 1 --bank-id 2`,
+	RunE: runQuiz,
 }
 
 func init() {
@@ -27,24 +51,43 @@ func init() {
 	quizCmd.Flags().Bool("no-record", false, "禁用做题记录")
 	quizCmd.Flags().Bool("no-pin", false, "禁用访问码验证")
 	quizCmd.Flags().String("pin", "", "自定义访问码（留空则自动生成）")
-	quizCmd.Flags().StringArrayP("bank", "b", nil, "题库路径（可重复：-b a.mqb -b b.mqb）")
+	quizCmd.Flags().StringArrayP("bank", "b", nil, "题库路径（.mqb，可重复：-b a.mqb -b b.mqb）")
+	// PostgreSQL flags
+	quizCmd.Flags().String("db", "", "PostgreSQL DSN（postgres://user:pass@host/db）\n留空使用本地 SQLite（默认）")
+	quizCmd.Flags().Int64Array("bank-id", nil, "从 PostgreSQL 加载的题库 ID（配合 --db 使用）")
 }
 
 func runQuiz(cmd *cobra.Command, args []string) error {
-	// Collect bank paths: -B flags first, then fall back to legacy -b/--bank
-	bankPaths, _ := cmd.Flags().GetStringArray("bank")
-	if len(bankPaths) == 0 {
-		return fmt.Errorf("请用 -b 指定至少一个题库路径（多题库：-b a.mqb -b b.mqb）")
-	}
-
+	ctx := context.Background()
 	password, _ := cmd.Root().PersistentFlags().GetString("password")
 	port, _ := cmd.Flags().GetInt("port")
 	host, _ := cmd.Flags().GetString("host")
 	noRecord, _ := cmd.Flags().GetBool("no-record")
 	noPin, _ := cmd.Flags().GetBool("no-pin")
 	customPin, _ := cmd.Flags().GetString("pin")
+	pgDSN, _ := cmd.Flags().GetString("db")
+	bankIDs, _ := cmd.Flags().GetInt64Array("bank-id")
+	bankPaths, _ := cmd.Flags().GetStringArray("bank")
 
+	if len(bankPaths) == 0 && len(bankIDs) == 0 {
+		return fmt.Errorf("请用 -b 指定题库路径，或用 --db + --bank-id 从数据库加载")
+	}
+
+	// ── 初始化 PostgreSQL（可选）─────────────────────────────────
+	var pg *pgstore.Store
+	if pgDSN != "" {
+		var err error
+		pg, err = pgstore.New(ctx, pgDSN)
+		if err != nil {
+			return fmt.Errorf("数据库连接失败: %w", err)
+		}
+		fmt.Println("🗄  已连接 PostgreSQL，学习记录将存储到数据库")
+	}
+
+	// ── 加载题库 ────────────────────────────────────────────────
 	var banks []server.BankEntry
+
+	// 方式1：从本地 .mqb 文件加载
 	for _, bp := range bankPaths {
 		fmt.Printf("📂 加载题库：%s\n", bp)
 		questions, err := bank.LoadBank(bp, password)
@@ -56,24 +99,57 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		var db *sql.DB
 		recordEnabled := !noRecord
 		if recordEnabled {
-			dbPath := progress.DBPathForBank(bp)
-			db, err = progress.InitDB(dbPath)
-			if err != nil {
-				fmt.Fprintf(os.Stderr, "⚠ 无法初始化进度数据库 (%s)：%v\n", bp, err)
-				db = nil
-				recordEnabled = false
+			if pg != nil {
+				// 使用 PostgreSQL 存进度
+				db = nil // server 通过 pg store 访问
+			} else {
+				dbPath := progress.DBPathForBank(bp)
+				db, err = progress.InitDB(dbPath)
+				if err != nil {
+					fmt.Fprintf(os.Stderr, "⚠ 无法初始化进度数据库 (%s): %v\n", bp, err)
+					db = nil
+					recordEnabled = false
+				}
 			}
 		}
-
 		banks = append(banks, server.BankEntry{
 			Path:          bp,
 			Password:      password,
 			Questions:     questions,
 			DB:            db,
+			PgStore:       pg,
 			RecordEnabled: recordEnabled,
 		})
 	}
 
+	// 方式2：从 PostgreSQL 加载题库
+	if pg != nil {
+		for _, bid := range bankIDs {
+			fmt.Printf("🗄  从数据库加载题库 #%d ...\n", bid)
+			qs, err := pg.GetBank(ctx, bid)
+			if err != nil || len(qs) == 0 {
+				return fmt.Errorf("数据库中未找到题库 #%d（请先运行 db import）", bid)
+			}
+			meta, _ := pg.ListBanks(ctx)
+			name := fmt.Sprintf("bank_%d", bid)
+			for _, m := range meta {
+				if m.ID == bid {
+					name = m.Name
+					break
+				}
+			}
+			fmt.Printf("   %s: %d 道题\n", name, len(qs))
+			banks = append(banks, server.BankEntry{
+				Path:          fmt.Sprintf("pg:bank:%d", bid),
+				Questions:     qs,
+				DB:            nil,
+				PgStore:       pg,
+				RecordEnabled: !noRecord,
+			})
+		}
+	}
+
+	// ── 访问码 ───────────────────────────────────────────────────
 	var accessCode, cookieSecret string
 	pinLen := 0
 	if customPin != "" {
@@ -84,7 +160,6 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		pinLen = 8
 		fmt.Printf("\n🔑  访问码：%s\n", accessCode)
 	}
-	// cookie secret 从访问码确定性派生，服务重启后 cookie 仍然有效
 	cookieSecret = auth.DeriveSecret(accessCode)
 
 	cfg := server.Config{
@@ -98,6 +173,9 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	cfg.Assets = Assets
 
 	fmt.Printf("\n🌐  服务地址：http://%s\n", net.JoinHostPort(host, fmt.Sprint(port)))
+	if pg != nil {
+		fmt.Printf("🗄  数据库模式：题库和记录均存储在 PostgreSQL\n")
+	}
 	if host != "127.0.0.1" {
 		auth.PrintPublicWarning(port)
 	}

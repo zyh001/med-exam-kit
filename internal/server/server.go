@@ -35,8 +35,15 @@ type BankEntry struct {
 	Path          string
 	Password      string
 	Questions     []*models.Question
-	DB            *sql.DB
+	DB            *sql.DB             // SQLite progress DB (nil when using PgStore)
+	PgStore       pgStorer            // PostgreSQL store (nil when using SQLite)
 	RecordEnabled bool
+}
+
+// pgStorer is a minimal interface for the PostgreSQL progress store,
+// allowing server.go to stay decoupled from the concrete pgstore type.
+type pgStorer interface {
+	DeleteSession(ctx context.Context, sessionID, userID string) bool
 }
 
 // bankName derives a display name from the file path.
@@ -1920,6 +1927,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := getUserID(r)
-	ok2 := progress.DeleteSession(b.DB, sessionID, uid)
+	var ok2 bool
+	if b.PgStore != nil {
+		ok2 = b.PgStore.DeleteSession(r.Context(), sessionID, uid)
+	} else {
+		ok2 = progress.DeleteSession(b.DB, sessionID, uid)
+	}
 	jsonOK(w, map[string]any{"ok": ok2})
 }
