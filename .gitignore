@@ -22,3 +22,5 @@ Thumbs.db
 vendor//med-exam-kit
 /med-exam-kit
 med-exam-kit
+# 编译产物（永远不提交二进制）
+/med-exam-kit-*
