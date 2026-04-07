@@ -178,7 +178,13 @@ const SyncManager = (() => {
         return;
       }
 
-      const { processed = [], failed = [] } = await res.json();
+      const json = await res.json();
+      // 若服务端明确返回 ok:false（如 DB 未初始化），不清除队列，下次重试
+      if (json.ok === false) {
+        console.warn('[Sync] Server declined sync:', json.error || 'unknown');
+        return;
+      }
+      const { processed = [], failed = [] } = json;
       const failedIds = new Set(failed.map(f => f.session_id));
 
       // 已成功处理的 → 从队列删除

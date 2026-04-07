@@ -1022,13 +1022,26 @@ func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"ok": true, "skipped": true})
 		return
 	}
+	var data map[string]any
+	json.NewDecoder(r.Body).Decode(&data)
+	uid := getUserID(r)
+	// PostgreSQL 模式
+	if b.PgStore != nil {
+		sessions := []map[string]any{data}
+		done, _ := b.PgStore.RecordSessionsBatch(r.Context(), sessions, uid)
+		if len(done) == 0 {
+			jsonError(w, "记录写入失败", http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]any{"ok": true})
+		return
+	}
+	// SQLite 模式
 	if b.DB == nil {
 		jsonError(w, "进度数据库未初始化", http.StatusServiceUnavailable)
 		return
 	}
-	var data map[string]any
-	json.NewDecoder(r.Body).Decode(&data)
-	if err := progress.RecordSession(b.DB, data, getUserID(r)); err != nil {
+	if err := progress.RecordSession(b.DB, data, uid); err != nil {
 		jsonError(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -1146,15 +1159,24 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
-	if b.DB == nil {
-		jsonOK(w, map[string]any{"ok": false, "error": "DB not initialised"})
-		return
-	}
 	var payload struct {
 		Sessions []map[string]any `json:"sessions"`
 	}
 	json.NewDecoder(r.Body).Decode(&payload)
-	done, skipped := progress.RecordSessionsBatch(b.DB, payload.Sessions, getUserID(r))
+	uid := getUserID(r)
+
+	// PostgreSQL 模式
+	if b.PgStore != nil {
+		done, skipped := b.PgStore.RecordSessionsBatch(r.Context(), payload.Sessions, uid)
+		jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped})
+		return
+	}
+	// SQLite 模式
+	if b.DB == nil {
+		jsonOK(w, map[string]any{"ok": false, "error": "DB not initialised"})
+		return
+	}
+	done, skipped := progress.RecordSessionsBatch(b.DB, payload.Sessions, uid)
 	jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped})
 }
 
