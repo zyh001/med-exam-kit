@@ -44,6 +44,7 @@ type BankEntry struct {
 // allowing server.go to stay decoupled from the concrete pgstore type.
 type pgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
+	RecordSessionsBatch(ctx context.Context, sessions []map[string]any, userID string) (processed, skipped []string)
 }
 
 // bankName derives a display name from the file path.
