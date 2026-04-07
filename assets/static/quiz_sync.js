@@ -167,46 +167,49 @@ const SyncManager = (() => {
         .sort((a, b) => a.queued_at - b.queued_at)
         .slice(0, 50);
 
-      const res = await apiFetch('/api/sync', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ sessions: batch.map(b => b.payload) }),
-      });
+      // 按题库分组，各自上传到正确的 ?bank=N
+      const byBank = {};
+      batch.forEach(entry => { (byBank[entry.bank||0] = byBank[entry.bank||0]||[]).push(entry); });
+      for (const [bankIdx, bankItems] of Object.entries(byBank)) {
+        const res = await apiFetch('/api/sync?bank=' + bankIdx, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({ sessions: bankItems.map(e => e.payload) }),
+        });
 
-      if (!res.ok) {
-        console.warn('[Sync] Server returned', res.status);
-        return;
-      }
+        if (!res.ok) {
+          console.warn('[Sync] Server returned', res.status, 'for bank', bankIdx);
+          continue;
+        }
 
-      const json = await res.json();
-      // 若服务端明确返回 ok:false（如 DB 未初始化），不清除队列，下次重试
-      if (json.ok === false) {
-        console.warn('[Sync] Server declined sync:', json.error || 'unknown');
-        return;
-      }
-      const { processed = [], failed = [] } = json;
-      const failedIds = new Set(failed.map(f => f.session_id));
+        const json = await res.json();
+        // 若服务端明确返回 ok:false（如 DB 未初始化），不清除队列，下次重试
+        if (json.ok === false) {
+          console.warn('[Sync] Server declined sync:', json.error || 'unknown');
+          continue;
+        }
+        const { failed = [] } = json;
+        const failedIds = new Set(failed.map(f => f.session_id));
 
-      // 已成功处理的 → 从队列删除
-      await Promise.all(
-        batch
-          .filter(b => !failedIds.has(b.session_id))
-          .map(b => _dequeue(b.id))
-      );
-
-      // 失败次数太多的 → 也清除（避免永久卡住）
-      await Promise.all(
-        batch
-          .filter(b => failedIds.has(b.session_id))
-          .map(b => {
-            if (b.retries >= MAX_RETRIES) {
-              console.warn('[Sync] Dropping after max retries:', b.session_id);
-              return _dequeue(b.id);
-            }
-            return _bumpRetry(b.id, b.retries);
-          })
-      );
-
+        // 已成功处理的 → 从队列删除
+        await Promise.all(
+          bankItems
+            .filter(e => !failedIds.has(e.session_id))
+            .map(e => _dequeue(e.id))
+        );
+        // 失败次数太多的 → 也清除（避免永久卡住）
+        await Promise.all(
+          bankItems
+            .filter(e => failedIds.has(e.session_id))
+            .map(e => {
+              if (e.retries >= MAX_RETRIES) {
+                console.warn('[Sync] Dropping after max retries:', e.session_id);
+                return _dequeue(e.id);
+              }
+              return _bumpRetry(e.id, e.retries);
+            })
+        );
+      } // end for bankIdx
       state.lastSync = Date.now();
     } catch (e) {
       // 网络错误：静默，下次自动重试
