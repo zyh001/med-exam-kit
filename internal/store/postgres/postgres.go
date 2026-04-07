@@ -352,14 +352,22 @@ func (s *Store) GetHistory(ctx context.Context, userID string, limit int) []stor
 	for rows.Next() {
 		var e store.HistoryEntry
 		var unitsJSON []byte
-		var ts int64
-		rows.Scan(&e.ID, &e.Mode, &e.Total, &e.Correct, &e.Wrong,
-			&e.Skip, &e.TimeSec, &e.Date, &unitsJSON, &ts)
+		var ts, total, correct, wrong, skip, timeSec int64
+		if err := rows.Scan(&e.ID, &e.Mode, &total, &correct, &wrong,
+			&skip, &timeSec, &e.Date, &unitsJSON, &ts); err != nil {
+			log.Printf("[pgstore] GetHistory scan error: %v", err)
+			continue
+		}
+		e.Total, e.Correct, e.Wrong, e.Skip, e.TimeSec =
+			int(total), int(correct), int(wrong), int(skip), int(timeSec)
 		json.Unmarshal(unitsJSON, &e.Units)
 		if e.Total > 0 {
 			e.Pct = int(math.Round(float64(e.Correct) / float64(e.Total) * 100))
 		}
 		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[pgstore] GetHistory rows error: %v", err)
 	}
 	return out
 }
@@ -369,17 +377,24 @@ func (s *Store) GetOverallStats(ctx context.Context, userID string) store.Overal
 		userID = "_legacy"
 	}
 	var st store.OverallStats
-	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sessions WHERE user_id=$1`, userID).Scan(&st.Sessions)
+	var sessions int64
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sessions WHERE user_id=$1`, userID).Scan(&sessions)
+	st.Sessions = int(sessions)
+	var attempts, correct, wrong, skip int64
 	s.pool.QueryRow(ctx, `
 		SELECT COUNT(*),
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END),
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END),
 		       SUM(CASE WHEN result=-1 THEN 1 ELSE 0 END)
 		FROM attempts WHERE user_id=$1`, userID).Scan(
-		&st.Attempts, &st.Correct, &st.Wrong, &st.Skip)
+		&attempts, &correct, &wrong, &skip)
+	st.Attempts, st.Correct, st.Wrong, st.Skip =
+		int(attempts), int(correct), int(wrong), int(skip)
 	today := time.Now().Format("2006-01-02")
+	var due int64
 	s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM sm2 WHERE user_id=$1 AND next_due<=$2`, userID, today).Scan(&st.DueToday)
+		`SELECT COUNT(*) FROM sm2 WHERE user_id=$1 AND next_due<=$2`, userID, today).Scan(&due)
+	st.DueToday = int(due)
 	return st
 }
 
@@ -400,12 +415,22 @@ func (s *Store) GetUnitStats(ctx context.Context, userID string) []store.UnitSta
 	defer rows.Close()
 	var out []store.UnitStat
 	for rows.Next() {
-		var u store.UnitStat
-		rows.Scan(&u.Unit, &u.Total, &u.Correct, &u.Wrong)
+		var unit string
+		var total, correct, wrong int64
+		if err := rows.Scan(&unit, &total, &correct, &wrong); err != nil {
+			log.Printf("[pgstore] GetUnitStats scan error: %v", err)
+			continue
+		}
+		u := store.UnitStat{
+			Unit: unit, Total: int(total), Correct: int(correct), Wrong: int(wrong),
+		}
 		if u.Total > 0 {
 			u.Accuracy = int(math.Round(float64(u.Correct) / float64(u.Total) * 100))
 		}
 		out = append(out, u)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[pgstore] GetUnitStats rows error: %v", err)
 	}
 	return out
 }
@@ -431,12 +456,25 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, limit i
 	defer rows.Close()
 	var out []store.WrongEntry
 	for rows.Next() {
-		var e store.WrongEntry
-		rows.Scan(&e.Fingerprint, &e.Total, &e.Correct, &e.Wrong)
+		var fp string
+		var total, correct, wrong int64
+		if err := rows.Scan(&fp, &total, &correct, &wrong); err != nil {
+			log.Printf("[pgstore] GetWrongFingerprints scan error: %v", err)
+			continue
+		}
+		e := store.WrongEntry{
+			Fingerprint: fp,
+			Total:       int(total),
+			Correct:     int(correct),
+			Wrong:       int(wrong),
+		}
 		if e.Total > 0 {
 			e.Accuracy = int(math.Round(float64(e.Correct) / float64(e.Total) * 100))
 		}
 		out = append(out, e)
+	}
+	if err := rows.Err(); err != nil {
+		log.Printf("[pgstore] GetWrongFingerprints rows error: %v", err)
 	}
 	return out
 }
