@@ -646,75 +646,96 @@ func intV(v any) int {
 
 // DiagAttempts returns raw diagnostics about the attempts table for a user.
 func (s *Store) DiagAttempts(ctx context.Context, userID string, bankID int) map[string]any {
-	out := map[string]any{}
+	out := map[string]any{
+		"user_id":  userID,
+		"bank_id":  bankID,
+	}
 
-	// 1. Raw counts by result value
+	// 1. All distinct (user_id, bank_id) combos in attempts — ignores our filter
 	rows, err := s.pool.Query(ctx,
-		`SELECT result, COUNT(*) FROM attempts WHERE user_id=$1 AND bank_id=$2 GROUP BY result ORDER BY result`,
-		userID, bankID)
+		`SELECT user_id, bank_id, COUNT(*), SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) as wrong
+		 FROM attempts GROUP BY user_id, bank_id ORDER BY bank_id`)
 	if err != nil {
-		out["result_counts_error"] = err.Error()
+		out["all_groups_error"] = err.Error()
 	} else {
 		defer rows.Close()
-		counts := map[string]int64{}
+		type row struct {
+			UID   string `json:"uid"`
+			BID   int64  `json:"bank_id"`
+			Cnt   int64  `json:"total"`
+			Wrong int64  `json:"wrong"`
+		}
+		var groups []row
 		for rows.Next() {
-			var r int64
-			var cnt int64
-			rows.Scan(&r, &cnt)
-			counts[fmt.Sprintf("result_%d", r)] = cnt
+			var r row
+			rows.Scan(&r.UID, &r.BID, &r.Cnt, &r.Wrong)
+			groups = append(groups, r)
 		}
-		if err := rows.Err(); err != nil {
-			out["result_counts_rows_error"] = err.Error()
-		}
-		out["result_counts"] = counts
+		out["all_groups"] = groups
 	}
 
-	// 2. Sample fingerprints with result=0
-	rows2, err2 := s.pool.Query(ctx,
-		`SELECT fingerprint, result FROM attempts WHERE user_id=$1 AND bank_id=$2 LIMIT 5`, userID, bankID)
+	// 2. Exact query used by GetWrongFingerprints with current bankID
+	var wbSQL string
+	var wbArgs []any
+	if bankID == 0 {
+		wbSQL = `SELECT fingerprint, COUNT(*), SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) as wrong
+			FROM attempts WHERE user_id=$1 AND result!=-1
+			GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0 LIMIT 5`
+		wbArgs = []any{userID}
+	} else {
+		wbSQL = `SELECT fingerprint, COUNT(*), SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) as wrong
+			FROM attempts WHERE user_id=$1 AND bank_id=$2 AND result!=-1
+			GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0 LIMIT 5`
+		wbArgs = []any{userID, int64(bankID)}
+	}
+	out["wrongbook_sql"] = wbSQL
+	rows2, err2 := s.pool.Query(ctx, wbSQL, wbArgs...)
 	if err2 != nil {
-		out["sample_error"] = err2.Error()
+		out["wrongbook_error"] = err2.Error()
 	} else {
 		defer rows2.Close()
-		var samples []map[string]any
-		for rows2.Next() {
-			var fp string
-			var r int64
-			rows2.Scan(&fp, &r)
-			samples = append(samples, map[string]any{"fp": fp, "result": r})
+		type wb struct {
+			FP    string `json:"fp"`
+			Total int64  `json:"total"`
+			Wrong int64  `json:"wrong"`
 		}
-		out["sample_attempts"] = samples
+		var wbRows []wb
+		for rows2.Next() {
+			var r wb
+			rows2.Scan(&r.FP, &r.Total, &r.Wrong)
+			wbRows = append(wbRows, r)
+		}
+		out["wrongbook_rows"] = wbRows
+		out["wrongbook_count"] = len(wbRows)
 	}
 
-	// 3. Try the exact GetWrongFingerprints query and capture error
-	rows3, err3 := s.pool.Query(ctx, `
-		SELECT fingerprint, COUNT(*) AS total,
-		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
-		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
-		FROM attempts WHERE user_id=$1 AND result!= -1
-		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
-		LIMIT 5`, userID)
+	// 3. Check if bank_id column exists
+	var colExists int
+	s.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM information_schema.columns
+		 WHERE table_name='attempts' AND column_name='bank_id'`).Scan(&colExists)
+	out["bank_id_column_exists"] = colExists > 0
+
+	// 4. Sample raw rows
+	rows3, err3 := s.pool.Query(ctx,
+		`SELECT user_id, bank_id, fingerprint, result FROM attempts WHERE user_id=$1 LIMIT 5`, userID)
 	if err3 != nil {
-		out["wrongbook_query_error"] = err3.Error()
+		out["sample_error"] = err3.Error()
 	} else {
 		defer rows3.Close()
-		var wbRows []map[string]any
+		type sample struct {
+			UID    string `json:"uid"`
+			BID    int64  `json:"bank_id"`
+			FP     string `json:"fp"`
+			Result int    `json:"result"`
+		}
+		var samples []sample
 		for rows3.Next() {
-			var fp string
-			var total, correct, wrong int64
-			if scanErr := rows3.Scan(&fp, &total, &correct, &wrong); scanErr != nil {
-				out["wrongbook_scan_error"] = scanErr.Error()
-				break
-			}
-			wbRows = append(wbRows, map[string]any{
-				"fp": fp, "total": total, "correct": correct, "wrong": wrong,
-			})
+			var r sample
+			rows3.Scan(&r.UID, &r.BID, &r.FP, &r.Result)
+			samples = append(samples, r)
 		}
-		if err := rows3.Err(); err != nil {
-			out["wrongbook_rows_error"] = err.Error()
-		}
-		out["wrongbook_query_rows"] = wbRows
-		out["wrongbook_query_count"] = len(wbRows)
+		out["sample_rows"] = samples
 	}
 
 	return out
