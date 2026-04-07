@@ -501,6 +501,38 @@ def api_delete_session(session_id: str):
     return jsonify({"ok": deleted})
 
 
+@app.get("/api/history")
+def api_history():
+    """返回服务端保存的历史记录（sessions 表）。"""
+    b, ok = _get_bank()
+    if not ok:
+        return jsonify({"error": "bank not found"}), 404
+    if b.db_path is None or not b.db_path.exists():
+        return jsonify({"items": []})
+    try:
+        limit = min(200, int(request.args.get("limit", 50)))
+    except (ValueError, TypeError):
+        limit = 50
+    from med_exam_toolkit.progress import get_history
+    uid = _get_user_id()
+    items = get_history(b.db_path, user_id=uid, limit=limit)
+    return jsonify({"items": items})
+
+
+@app.delete("/api/session/<session_id>")
+def api_delete_session(session_id):
+    """删除指定会话记录（只能删除自己的）。"""
+    b, ok = _get_bank()
+    if not ok:
+        return jsonify({"error": "bank not found"}), 404
+    if b.db_path is None or not b.db_path.exists():
+        return jsonify({"error": "record not enabled"}), 503
+    from med_exam_toolkit.progress import delete_session
+    uid = _get_user_id()
+    ok2 = delete_session(b.db_path, session_id=session_id, user_id=uid)
+    return jsonify({"ok": ok2})
+
+
 @app.post("/api/sync")
 def api_sync():
     b, ok = _get_bank()
