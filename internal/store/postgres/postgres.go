@@ -555,6 +555,82 @@ func intV(v any) int {
 	return 0
 }
 
+// DiagAttempts returns raw diagnostics about the attempts table for a user.
+func (s *Store) DiagAttempts(ctx context.Context, userID string) map[string]any {
+	out := map[string]any{}
+
+	// 1. Raw counts by result value
+	rows, err := s.pool.Query(ctx,
+		`SELECT result, COUNT(*) FROM attempts WHERE user_id=$1 GROUP BY result ORDER BY result`,
+		userID)
+	if err != nil {
+		out["result_counts_error"] = err.Error()
+	} else {
+		defer rows.Close()
+		counts := map[string]int64{}
+		for rows.Next() {
+			var r int64
+			var cnt int64
+			rows.Scan(&r, &cnt)
+			counts[fmt.Sprintf("result_%d", r)] = cnt
+		}
+		if err := rows.Err(); err != nil {
+			out["result_counts_rows_error"] = err.Error()
+		}
+		out["result_counts"] = counts
+	}
+
+	// 2. Sample fingerprints with result=0
+	rows2, err2 := s.pool.Query(ctx,
+		`SELECT fingerprint, result FROM attempts WHERE user_id=$1 LIMIT 5`, userID)
+	if err2 != nil {
+		out["sample_error"] = err2.Error()
+	} else {
+		defer rows2.Close()
+		var samples []map[string]any
+		for rows2.Next() {
+			var fp string
+			var r int64
+			rows2.Scan(&fp, &r)
+			samples = append(samples, map[string]any{"fp": fp, "result": r})
+		}
+		out["sample_attempts"] = samples
+	}
+
+	// 3. Try the exact GetWrongFingerprints query and capture error
+	rows3, err3 := s.pool.Query(ctx, `
+		SELECT fingerprint, COUNT(*) AS total,
+		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
+		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
+		FROM attempts WHERE user_id=$1 AND result!=-1
+		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
+		LIMIT 5`, userID)
+	if err3 != nil {
+		out["wrongbook_query_error"] = err3.Error()
+	} else {
+		defer rows3.Close()
+		var wbRows []map[string]any
+		for rows3.Next() {
+			var fp string
+			var total, correct, wrong int64
+			if scanErr := rows3.Scan(&fp, &total, &correct, &wrong); scanErr != nil {
+				out["wrongbook_scan_error"] = scanErr.Error()
+				break
+			}
+			wbRows = append(wbRows, map[string]any{
+				"fp": fp, "total": total, "correct": correct, "wrong": wrong,
+			})
+		}
+		if err := rows3.Err(); err != nil {
+			out["wrongbook_rows_error"] = err.Error()
+		}
+		out["wrongbook_query_rows"] = wbRows
+		out["wrongbook_query_count"] = len(wbRows)
+	}
+
+	return out
+}
+
 // ExecRaw executes an arbitrary SQL statement (used by migration tool).
 func (s *Store) ExecRaw(ctx context.Context, sql string, args ...any) (int64, error) {
 	res, err := s.pool.Exec(ctx, sql, args...)
