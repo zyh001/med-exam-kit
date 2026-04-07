@@ -102,6 +102,7 @@ function _bankSuffix() { return '-b' + S.bankID; }
 function practiceSessionsKey() { return 'quiz_practice_sessions_v1' + _bankSuffix(); }
 function examSessionKey()      { return 'quiz_exam_session_v1'      + _bankSuffix(); }
 function historyKey()          { return 'quiz-history'              + _bankSuffix(); }
+function _reviewCacheKey()     { return 'quiz-review-cache'         + _bankSuffix(); }
 
 const MAX_PRACTICE_SESSIONS = 5;
 
@@ -2579,6 +2580,14 @@ function calculateResults() {
   S.history = S.history.slice(0, 10);
   localStorage.setItem(historyKey(), JSON.stringify(S.history));
 
+  // 复盘缓存：保存题目列表和答案，供历史记录"查看解析"使用
+  try {
+    const cacheKey = _reviewCacheKey();
+    const cache = JSON.parse(localStorage.getItem(cacheKey) || '[]');
+    cache.unshift({ id: sessionId, qs: S.questions, ans: _serializeAns(S.ans) });
+    localStorage.setItem(cacheKey, JSON.stringify(cache.slice(0, 10)));
+  } catch (e) { /* localStorage 满时静默忽略 */ }
+
   // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
   _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(() => {
     // 记录完成后刷新主页徽章
@@ -2590,6 +2599,12 @@ function calculateResults() {
 
 function renderResults() {
   const R = S.results;
+  // 来自实时做题时 qs 始终有值，重置按钮状态
+  const reviewBtn = document.getElementById('res-review-detail-btn');
+  if (reviewBtn && R && R.qs) {
+    reviewBtn.disabled = false;
+    reviewBtn.title = '';
+  }
   const pct = Math.round(R.correct / R.total * 100);
   const pass = pct >= 60;
 
@@ -3711,19 +3726,43 @@ function openHistoryResult(id, idx) {
   const allH = (S.serverHistory && S.serverHistory.length)
     ? [...(S.localOnlyHistory||[]), ...S.serverHistory]
     : S.history;
-  const h = id && id !== String(idx)
+  const h = id && !id.startsWith('idx:')
     ? allH.find(x => x.id === String(id)) || allH[idx]
     : allH[idx] || S.history[idx];
   if (!h) return;
+
+  // 尝试从复盘缓存恢复题目和答案
+  let cachedQs = null, cachedAns = null;
+  try {
+    const cache = JSON.parse(localStorage.getItem(_reviewCacheKey()) || '[]');
+    const entry = cache.find(e => e.id === String(id));
+    if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; }
+  } catch (e) { /* 缓存读取失败静默忽略 */ }
+
   S.results = {
-    mode: h.mode,
-    total: h.total,
+    mode:    h.mode,
+    total:   h.total,
     correct: h.correct,
-    wrong: h.wrong ?? (h.total - h.correct - (h.skip || 0)),
-    skip: h.skip || 0,
+    wrong:   h.wrong ?? (h.total - h.correct - (h.skip || 0)),
+    skip:    h.skip || 0,
     timeSec: h.time_sec || h.timeSec || 0,
-    byUnit: null, qs: null, ans: null,
+    byUnit:  null,
+    qs:      cachedQs,
+    ans:     cachedAns,
   };
+
+  // 查看解析按钮：有缓存才可用，否则置灰提示
+  const reviewBtn = document.getElementById('res-review-detail-btn');
+  if (reviewBtn) {
+    if (cachedQs) {
+      reviewBtn.disabled = false;
+      reviewBtn.title = '';
+    } else {
+      reviewBtn.disabled = true;
+      reviewBtn.title = '当前记录不包含题目详情（仅最近10次有效）';
+    }
+  }
+
   renderResults();
   showScreen('s-results');
 }

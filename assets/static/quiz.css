@@ -1547,6 +1547,7 @@ button,a,[role=button],label{touch-action:manipulation}
 /* 成绩页：错题/SM2 行动按钮 */
 .res-btn.wrongbook{background:var(--danger-bg);color:var(--danger);border:1.5px solid var(--danger)}
 .res-btn.review{background:var(--warn-bg);color:var(--warning);border:1.5px solid var(--warning)}
+.res-btn:disabled{opacity:.38;cursor:not-allowed;pointer-events:none}
 
 /* SM-2 复习标签 */
 .review-mode-badge{
