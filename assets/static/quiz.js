@@ -4162,3 +4162,48 @@ document.addEventListener('visibilitychange', function() {
 });
 
 init();
+// ════════════════════════════════════════════
+// 服务端重启 / Session 失效处理
+// ════════════════════════════════════════════
+(function () {
+  let _handled = false;
+
+  window._onAuthExpired = function () {
+    if (_handled) return;
+    _handled = true;
+
+    // 1. 立即保存当前做题状态到 localStorage
+    let saveMsg = '';
+    const screen = document.querySelector('.screen.active')?.id;
+
+    if (screen === 's-quiz' || screen === 's-results') {
+      if (S.mode === 'practice' && S.questions.length) {
+        // 练习模式：强制保存进度存档，刷新后可从「进行中」继续
+        savePracticeSession();
+        saveMsg = '练习进度已自动保存，刷新后可继续。';
+      } else if (S.mode === 'exam' && S.questions.length) {
+        // 考试模式：把当前状态写入 examSession key，刷新后 checkResumeSession 会弹恢复提示
+        try {
+          const key = examSessionKey();
+          const existing = JSON.parse(localStorage.getItem(key) || 'null');
+          if (!existing) {
+            // 仅在尚未有存档时写入，避免覆盖更完整的存档
+            localStorage.setItem(key, JSON.stringify({
+              v: 1, savedAt: Date.now(),
+              cur: S.cur, questions: S.questions,
+              ans: _serializeAns(S.ans),
+              revealed: [...S.revealed], marked: [...S.marked],
+              examStart: S.examStart, examLimit: S.examLimit,
+            }));
+          }
+          saveMsg = '考试进度已自动保存，刷新后可从断点恢复。';
+        } catch (e) { /* 存储失败时静默 */ }
+      } else if (S.mode === 'memo' && S.questions.length) {
+        saveMsg = '刷新后可重新开始记忆模式。';
+      }
+    }
+
+    // 2. 显示持久横幅
+    _showAuthExpiredBanner(saveMsg);
+  };
+})();
