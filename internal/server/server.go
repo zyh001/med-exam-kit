@@ -1129,10 +1129,12 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"overall": map[string]any{}, "history": nil, "units": nil})
 		return
 	}
+	bankFPs := make([]string, 0, len(b.Questions))
+	for i := range b.Questions { bankFPs = append(bankFPs, b.Questions[i].Fingerprint) }
 	jsonOK(w, map[string]any{
-		"overall": progress.GetOverallStats(b.DB, uid),
-		"history": progress.GetHistory(b.DB, uid, 30),
-		"units":   progress.GetUnitStats(b.DB, uid),
+		"overall": progress.GetOverallStatsByFP(b.DB, uid, bankFPs),
+		"history": progress.GetHistoryByFP(b.DB, uid, bankFPs, 30),
+		"units":   progress.GetUnitStatsByFP(b.DB, uid, bankFPs),
 	})
 }
 
@@ -1151,13 +1153,9 @@ func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"fingerprints": nil})
 		return
 	}
-	// Filter to fingerprints that exist in the current bank
-	allDue := progress.GetDueFingerprints(b.DB, uid)
-	fpSet := make(map[string]bool, len(b.Questions))
-	for i := range b.Questions { fpSet[b.Questions[i].Fingerprint] = true }
-	filtered := allDue[:0]
-	for _, fp := range allDue { if fpSet[fp] { filtered = append(filtered, fp) } }
-	jsonOK(w, map[string]any{"fingerprints": filtered})
+	bankFPs2 := make([]string, 0, len(b.Questions))
+	for i := range b.Questions { bankFPs2 = append(bankFPs2, b.Questions[i].Fingerprint) }
+	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprintsByFP(b.DB, uid, bankFPs2)})
 }
 
 func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
@@ -1179,7 +1177,9 @@ func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"items": nil})
 		return
 	} else {
-		entries = progress.GetWrongFingerprints(b.DB, uid, 300)
+		wbFPs := make([]string, 0, len(b.Questions))
+		for i := range b.Questions { wbFPs = append(wbFPs, b.Questions[i].Fingerprint) }
+		entries = progress.GetWrongFingerprintsByFP(b.DB, uid, wbFPs, 300)
 	}
 
 	// 构建 fingerprint → question 索引，为每条错题附上题目文字
@@ -2025,7 +2025,12 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]any{
-		"items": progress.GetHistory(b.DB, uid, limit),
+		// SQLite: filter history to sessions from this bank's fingerprints
+		"items": progress.GetHistoryByFP(b.DB, uid, func() []string {
+			fs := make([]string, 0, len(b.Questions))
+			for i := range b.Questions { fs = append(fs, b.Questions[i].Fingerprint) }
+			return fs
+		}(), limit),
 	})
 }
 

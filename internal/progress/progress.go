@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"math"
+	"strings"
 	"path/filepath"
 	"time"
 
@@ -614,4 +615,230 @@ func MigrateUserData(db *sql.DB, fromUID, toUID string) (map[string]int, error) 
 	}
 
 	return counts, tx.Commit()
+}
+
+// ── Bank-scoped SQLite queries (filter by fingerprint set) ─────────────
+
+// GetOverallStatsByFP returns stats filtered to a specific set of fingerprints.
+// Used in SQLite mode to isolate stats per bank (SQLite has no bank_id column).
+func GetOverallStatsByFP(db *sql.DB, userID string, fps []string) OverallStats {
+	if userID == "" {
+		userID = LegacyUser
+	}
+	var s OverallStats
+	if len(fps) == 0 {
+		return s
+	}
+	today := time.Now().Format("2006-01-02")
+	placeholders := make([]string, len(fps))
+	args := make([]any, 0, len(fps)*2+2)
+	args = append(args, userID)
+	for i, fp := range fps {
+		placeholders[i] = "?"
+		args = append(args, fp)
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	var total, correct, wrong sql.NullInt64
+	db.QueryRow(`SELECT COUNT(*),
+		SUM(CASE WHEN result=1 THEN 1 ELSE 0 END),
+		SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)
+		FROM attempts WHERE user_id=? AND result!=-1
+		AND fingerprint IN (`+inClause+`)`, args...).
+		Scan(&total, &correct, &wrong)
+
+	s.TotalAttempts = int(total.Int64)
+	s.Correct = int(correct.Int64)
+	s.WrongAttempts = int(wrong.Int64)
+	if s.TotalAttempts > 0 {
+		s.Accuracy = int(math.Round(float64(s.Correct) / float64(s.TotalAttempts) * 100))
+	}
+
+	args2 := append([]any{userID}, args[1:]...)
+	db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id=?`, userID).Scan(&s.Sessions)
+	db.QueryRow(`SELECT COUNT(*) FROM sm2 WHERE user_id=? AND next_due<=?
+		AND fingerprint IN (`+inClause+`)`,
+		append([]any{userID, today}, args[1:]...)...).Scan(&s.DueToday)
+	_ = args2
+	db.QueryRow(`SELECT COUNT(DISTINCT fingerprint) FROM attempts WHERE user_id=? AND result=0
+		AND fingerprint IN (`+inClause+`)`, args...).Scan(&s.WrongTopics)
+	return s
+}
+
+// GetUnitStatsByFP returns unit stats filtered to a fingerprint set.
+func GetUnitStatsByFP(db *sql.DB, userID string, fps []string) []UnitStat {
+	if userID == "" {
+		userID = LegacyUser
+	}
+	if len(fps) == 0 {
+		return nil
+	}
+	placeholders := make([]string, len(fps))
+	args := make([]any, 0, len(fps)+1)
+	args = append(args, userID)
+	for i, fp := range fps {
+		placeholders[i] = "?"
+		args = append(args, fp)
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	rows, err := db.Query(`
+		SELECT unit, COUNT(*) AS total,
+		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct
+		FROM attempts
+		WHERE user_id=? AND result!=-1 AND unit IS NOT NULL AND unit!=''
+		AND fingerprint IN (`+inClause+`)
+		GROUP BY unit ORDER BY total DESC`, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []UnitStat
+	for rows.Next() {
+		var s UnitStat
+		rows.Scan(&s.Unit, &s.Total, &s.Correct)
+		s.Wrong = s.Total - s.Correct
+		if s.Total > 0 {
+			s.Accuracy = int(math.Round(float64(s.Correct) / float64(s.Total) * 100))
+		}
+		out = append(out, s)
+	}
+	return out
+}
+
+// GetHistoryByFP returns sessions filtered to those containing at least one
+// attempt on the given fingerprints.
+func GetHistoryByFP(db *sql.DB, userID string, fps []string, limit int) []HistoryEntry {
+	if userID == "" {
+		userID = LegacyUser
+	}
+	if len(fps) == 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 30
+	}
+	placeholders := make([]string, len(fps))
+	args := make([]any, 0, len(fps)+2)
+	args = append(args, userID)
+	for i, fp := range fps {
+		placeholders[i] = "?"
+		args = append(args, fp)
+	}
+	args = append(args, limit)
+	inClause := strings.Join(placeholders, ",")
+
+	rows, err := db.Query(`
+		SELECT s.id,s.mode,s.total,s.correct,s.wrong,s.skip,s.time_sec,s.sess_date,s.units,s.ts
+		FROM sessions s
+		WHERE s.user_id=?
+		  AND EXISTS (
+		      SELECT 1 FROM attempts a
+		      WHERE a.session_id=s.id AND a.user_id=s.user_id
+		        AND a.fingerprint IN (`+inClause+`)
+		  )
+		ORDER BY s.ts DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []HistoryEntry
+	for rows.Next() {
+		var e HistoryEntry
+		var unitsJSON string
+		var ts int64
+		rows.Scan(&e.ID, &e.Mode, &e.Total, &e.Correct, &e.Wrong,
+			&e.Skip, &e.TimeSec, &e.Date, &unitsJSON, &ts)
+		json.Unmarshal([]byte(unitsJSON), &e.Units)
+		if e.Total > 0 {
+			e.Pct = int(math.Round(float64(e.Correct) / float64(e.Total) * 100))
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// GetWrongFingerprintsByFP returns wrong entries filtered to a fingerprint set.
+func GetWrongFingerprintsByFP(db *sql.DB, userID string, fps []string, limit int) []WrongEntry {
+	if userID == "" {
+		userID = LegacyUser
+	}
+	if len(fps) == 0 {
+		return nil
+	}
+	if limit <= 0 {
+		limit = 300
+	}
+	placeholders := make([]string, len(fps))
+	args := make([]any, 0, len(fps)+2)
+	args = append(args, userID)
+	for i, fp := range fps {
+		placeholders[i] = "?"
+		args = append(args, fp)
+	}
+	args = append(args, limit)
+	inClause := strings.Join(placeholders, ",")
+
+	rows, err := db.Query(`
+		SELECT fingerprint,
+		       COUNT(*) AS total,
+		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
+		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong,
+		       MAX(ts) AS last_ts
+		FROM attempts
+		WHERE user_id=? AND result!=-1
+		AND fingerprint IN (`+inClause+`)
+		GROUP BY fingerprint HAVING wrong>0
+		ORDER BY wrong DESC, last_ts DESC LIMIT ?`, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []WrongEntry
+	for rows.Next() {
+		var e WrongEntry
+		var lastTS int64
+		rows.Scan(&e.Fingerprint, &e.Total, &e.Correct, &e.Wrong, &lastTS)
+		if e.Total > 0 {
+			e.Accuracy = int(math.Round(float64(e.Correct) / float64(e.Total) * 100))
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
+// GetDueFingerprintsByFP returns SM-2 due fingerprints filtered to a set.
+func GetDueFingerprintsByFP(db *sql.DB, userID string, fps []string) []string {
+	if userID == "" {
+		userID = LegacyUser
+	}
+	if len(fps) == 0 {
+		return nil
+	}
+	today := time.Now().Format("2006-01-02")
+	placeholders := make([]string, len(fps))
+	args := make([]any, 0, len(fps)+2)
+	args = append(args, userID, today)
+	for i, fp := range fps {
+		placeholders[i] = "?"
+		args = append(args, fp)
+	}
+	inClause := strings.Join(placeholders, ",")
+
+	rows, err := db.Query(`
+		SELECT fingerprint FROM sm2
+		WHERE user_id=? AND next_due<=?
+		AND fingerprint IN (`+inClause+`)
+		ORDER BY next_due ASC`, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var fp string
+		rows.Scan(&fp)
+		out = append(out, fp)
+	}
+	return out
 }
