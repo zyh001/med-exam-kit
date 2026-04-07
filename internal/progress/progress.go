@@ -390,6 +390,20 @@ type HistoryEntry struct {
 	Pct     int      `json:"pct"`
 }
 
+// DeleteSession removes a session by id (only if owned by userID).
+func DeleteSession(db *sql.DB, sessionID, userID string) bool {
+	if userID == "" {
+		userID = LegacyUser
+	}
+	res, err := db.Exec(
+		`DELETE FROM sessions WHERE id=? AND user_id=?`, sessionID, userID)
+	if err != nil {
+		return false
+	}
+	n, _ := res.RowsAffected()
+	return n > 0
+}
+
 // GetHistory returns the most recent sessions for a user.
 func GetHistory(db *sql.DB, userID string, limit int) []HistoryEntry {
 	if userID == "" {
