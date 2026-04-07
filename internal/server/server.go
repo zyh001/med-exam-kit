@@ -2029,30 +2029,48 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/debug — 返回当前题库和数据库配置状态（仅供调试）
 func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
+	uid := getUserID(r)
+	ctx := r.Context()
 	type bankInfo struct {
 		Index         int    `json:"index"`
 		Path          string `json:"path"`
+		Name          string `json:"name"`
 		RecordEnabled bool   `json:"record_enabled"`
 		DBNil         bool   `json:"db_nil"`
 		PgStoreNil    bool   `json:"pgstore_nil"`
 		QuestionCount int    `json:"question_count"`
+		Sessions      int    `json:"sessions"`
+		Attempts      int    `json:"attempts"`
+		WrongAttempts int    `json:"wrong_attempts"`
+		WrongTopics   int    `json:"wrong_topics"`
 	}
 	banks := make([]bankInfo, len(s.cfg.Banks))
 	for i, b := range s.cfg.Banks {
-		var sessCnt int
-		if b.DB != nil {
-			b.DB.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&sessCnt)
-		}
-		banks[i] = bankInfo{
+		info := bankInfo{
 			Index:         i,
 			Path:          b.Path,
+			Name:          b.bankName(),
 			RecordEnabled: b.RecordEnabled,
 			DBNil:         b.DB == nil,
 			PgStoreNil:    b.PgStore == nil,
 			QuestionCount: len(b.Questions),
 		}
+		if b.PgStore != nil {
+			ov := b.PgStore.GetOverallStats(ctx, uid)
+			info.Sessions      = ov.Sessions
+			info.Attempts      = ov.Attempts
+			info.WrongAttempts = ov.Wrong
+			info.WrongTopics   = len(b.PgStore.GetWrongFingerprints(ctx, uid, 10000))
+		} else if b.DB != nil {
+			b.DB.QueryRow("SELECT COUNT(*) FROM sessions WHERE user_id=?", uid).Scan(&info.Sessions)
+			b.DB.QueryRow("SELECT COUNT(*) FROM attempts WHERE user_id=?", uid).Scan(&info.Attempts)
+			b.DB.QueryRow("SELECT COUNT(*) FROM attempts WHERE user_id=? AND result=0", uid).Scan(&info.WrongAttempts)
+			var wt int
+			b.DB.QueryRow("SELECT COUNT(DISTINCT fingerprint) FROM attempts WHERE user_id=? AND result=0", uid).Scan(&wt)
+			info.WrongTopics = wt
+		}
+		banks[i] = info
 	}
-	uid := getUserID(r)
 	jsonOK(w, map[string]any{
 		"uid":           uid,
 		"uid_is_legacy": uid == "_legacy" || uid == "",
