@@ -3297,7 +3297,7 @@ function _renderWrongbookPreview(items) {
   }
   if (btn) btn.style.display = '';
   el.innerHTML = '';
-  items.slice(0, 8).forEach((it, idx) => {
+  items.slice(0, 20).forEach((it, idx) => {
     const hasText = it.text && it.text.trim();
     // 去除 HTML 标签后的纯文字
     const plainText = hasText
@@ -3318,13 +3318,19 @@ function _renderWrongbookPreview(items) {
         ${(() => {
           const opts = it.options || it.shared_options || [];
           if (!opts.length) return '';
+          // 答案可能是单字母(A)或多字母(AB)
+          const answerSet = new Set(
+            it.answer ? it.answer.toUpperCase().split('').filter(ch => /[A-Z]/.test(ch)) : []
+          );
+          const letters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ';
           return '<div class="wb-options">' +
-            opts.slice(0, 5).map((opt, i) => {
-              const letter = 'ABCDE'[i];
-              const isCor  = it.answer && (it.answer === letter || it.answer === opt ||
-                             (it.answer.length === 1 && it.answer.toUpperCase() === letter));
+            opts.map((opt, i) => {
+              const letter = letters[i] || String(i + 1);
+              // 剥离选项文本里可能自带的字母前缀（"A." "A、" "A）" 等）
+              const cleanOpt = opt.replace(/^[A-Za-z]\s*[.．、·）)·\s]\s*/u, '').trim();
+              const isCor = answerSet.has(letter);
               return `<div class="wb-option${isCor ? ' wb-option-correct' : ''}">` +
-                `<span class="wb-option-key">${letter}</span>${esc(opt)}</div>`;
+                `<span class="wb-option-key">${letter}</span>${esc(cleanOpt)}</div>`;
             }).join('') + '</div>';
         })()}
         ${it.answer ? `
