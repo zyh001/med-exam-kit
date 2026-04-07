@@ -294,8 +294,8 @@ func (s *Store) GetDueFingerprints(ctx context.Context, userID string, bankID in
 	}
 	today := time.Now().Format("2006-01-02")
 	rows, err := s.pool.Query(ctx,
-		`SELECT fingerprint FROM sm2 WHERE user_id=$1 AND bank_id=$2 AND next_due<=$3 ORDER BY next_due ASC`,
-		userID, bankID, today)
+		`SELECT fingerprint FROM sm2 WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND next_due<=$3 ORDER BY next_due ASC`,
+		userID, int64(bankID), today)
 	if err != nil {
 		return nil
 	}
@@ -356,9 +356,17 @@ func (s *Store) GetHistory(ctx context.Context, userID string, bankID int, limit
 	if limit <= 0 {
 		limit = 30
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts
-		FROM sessions WHERE user_id=$1 AND bank_id=$2 ORDER BY ts DESC LIMIT $3`, userID, bankID, limit)
+	var histSQL string; var histArgs []any
+	if bankID == 0 {
+		histSQL = `SELECT id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts
+			FROM sessions WHERE user_id=$1 ORDER BY ts DESC LIMIT $2`
+		histArgs = []any{userID, limit}
+	} else {
+		histSQL = `SELECT id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts
+			FROM sessions WHERE user_id=$1 AND bank_id=$2 ORDER BY ts DESC LIMIT $3`
+		histArgs = []any{userID, bankID, limit}
+	}
+	rows, err := s.pool.Query(ctx, histSQL, histArgs...)
 	if err != nil {
 		return nil
 	}
@@ -393,7 +401,7 @@ func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int) 
 	}
 	var st store.OverallStats
 	var sessions int64
-	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sessions WHERE user_id=$1 AND bank_id=$2`, userID, bankID).Scan(&sessions)
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sessions WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2)`, userID, int64(bankID)).Scan(&sessions)
 	st.Sessions = int(sessions)
 	var attempts, correct, wrong, skip int64
 	s.pool.QueryRow(ctx, `
@@ -401,14 +409,14 @@ func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int) 
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END),
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END),
 		       SUM(CASE WHEN result=-1 THEN 1 ELSE 0 END)
-		FROM attempts WHERE user_id=$1 AND bank_id=$2`, userID, bankID).Scan(
+		FROM attempts WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2)`, userID, int64(bankID)).Scan(
 		&attempts, &correct, &wrong, &skip)
 	st.Attempts, st.Correct, st.Wrong, st.Skip =
 		int(attempts), int(correct), int(wrong), int(skip)
 	today := time.Now().Format("2006-01-02")
 	var due int64
 	s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM sm2 WHERE user_id=$1 AND bank_id=$2 AND next_due<=$3`, userID, bankID, today).Scan(&due)
+		`SELECT COUNT(*) FROM sm2 WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND next_due<=$3`, userID, int64(bankID), today).Scan(&due)
 	st.DueToday = int(due)
 	return st
 }
@@ -422,8 +430,10 @@ func (s *Store) GetUnitStats(ctx context.Context, userID string, bankID int) []s
 		       COUNT(*) AS total,
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
-		FROM attempts WHERE user_id=$1 AND bank_id=$2 AND result!=-1 AND unit IS NOT NULL AND unit!=''
-		GROUP BY unit ORDER BY total DESC LIMIT 30`, userID, bankID)
+		FROM attempts WHERE user_id=$1
+				AND ($2::bigint = 0 OR bank_id=$2) AND result!=-1
+				AND unit IS NOT NULL AND unit!=''
+				GROUP BY unit ORDER BY total DESC LIMIT 30`, userID, int64(bankID))
 	if err != nil {
 		return nil
 	}
@@ -457,14 +467,29 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, bankID 
 	if limit <= 0 {
 		limit = 300
 	}
-	rows, err := s.pool.Query(ctx, `
-		SELECT fingerprint,
+	// bankID=0: legacy/unscoped (mqb+PG混合模式) — 不过滤 bank_id，向后兼容
+	var sql string
+	var args []any
+	if bankID == 0 {
+		sql = `SELECT fingerprint,
+		       COUNT(*) AS total,
+		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
+		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
+		FROM attempts WHERE user_id=$1 AND result!=-1
+		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
+		ORDER BY wrong DESC, MAX(ts) DESC LIMIT $2`
+		args = []any{userID, limit}
+	} else {
+		sql = `SELECT fingerprint,
 		       COUNT(*) AS total,
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
 		FROM attempts WHERE user_id=$1 AND bank_id=$2 AND result!=-1
 		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
-		ORDER BY wrong DESC, MAX(ts) DESC LIMIT $3`, userID, bankID, limit)
+		ORDER BY wrong DESC, MAX(ts) DESC LIMIT $3`
+		args = []any{userID, bankID, limit}
+	}
+	rows, err := s.pool.Query(ctx, sql, args...)
 	if err != nil {
 		return nil
 	}
@@ -501,7 +526,7 @@ func (s *Store) GetSyncStatus(ctx context.Context, userID string, bankID int) ma
 	var cnt int
 	var lastTS *int64
 	s.pool.QueryRow(ctx,
-		`SELECT COUNT(*), MAX(ts) FROM sessions WHERE user_id=$1 AND bank_id=$2`, userID, bankID).Scan(&cnt, &lastTS)
+		`SELECT COUNT(*), MAX(ts) FROM sessions WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2)`, userID, int64(bankID)).Scan(&cnt, &lastTS)
 	return map[string]any{"session_count": cnt, "last_ts": lastTS}
 }
 
