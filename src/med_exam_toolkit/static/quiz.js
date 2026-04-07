@@ -3353,73 +3353,229 @@ async function _fetchServerHistory() {
   } catch (e) { /* 离线时静默失败，保留本地数据 */ }
 }
 
+// ── 置顶记录持久化 ──────────────────────────────────
+function _pinnedKey() { return 'quiz-pinned' + _bankSuffix(); }
+function _getPinned() {
+  try { return new Set(JSON.parse(localStorage.getItem(_pinnedKey()) || '[]')); }
+  catch { return new Set(); }
+}
+function _savePinned(set) {
+  localStorage.setItem(_pinnedKey(), JSON.stringify([...set]));
+}
+
 function renderHistorySection() {
   const sec  = document.getElementById('recent-section');
   const list = document.getElementById('recent-list');
 
   const practiceSessions = _getPracticeSessions();
-  const history          = S.history;
+  const serverH    = S.serverHistory   || [];
+  const localOnlyH = S.localOnlyHistory || [];
+  const baseHistory = serverH.length
+    ? [...localOnlyH, ...serverH]
+    : (S.history || []);
 
-  if (!practiceSessions.length && !history.length) {
+  if (!practiceSessions.length && !baseHistory.length) {
     sec.style.display = 'none';
     return;
   }
   sec.style.display = '';
+  list.innerHTML = '';
 
-  const modeIcon = { practice:'✏️', exam:'⏱', memo:'🧠' };
-  const items = [];
-
-  // ── 进行中的练习（优先显示）──────────────────────
-  practiceSessions.forEach(s => {
-    const pct = s.total > 0 ? Math.round(s.answered / s.total * 100) : 0;
-    const ago = _fmtAgo(s.savedAt);
-    items.push(`
-      <div class="recent-item" onclick="resumePracticeSession('${s.id}')">
-        <div class="recent-info" style="min-width:0;flex:1">
-          <div class="recent-name">
-            ✏️ ${esc(s.title)}
-            <span class="recent-badge ongoing">进行中</span>
-          </div>
-          <div class="recent-meta">已答 ${s.answered}/${s.total} 题 · ${ago}</div>
-        </div>
-        <button class="recent-resume-btn">继续 →</button>
-      </div>`);
-  });
-
-  // ── 已完成的历史记录（优先服务端，降级本地）──────────
-  // 合并：服务端历史 + 本地独有（离线未同步）
-  const serverH  = S.serverHistory || [];
-  const localOnlyH = S.localOnlyHistory || [];
-  // 若服务端有数据，主显服务端；否则用本地
-  const allHistory = serverH.length
-    ? [...localOnlyH, ...serverH]          // 未同步的本地记录排前面
-    : history;
+  const modeIcon  = { practice:'✏️', exam:'⏱', memo:'🧠' };
+  const pinned    = _getPinned();
   const unitsText = h => {
     const u = Array.isArray(h.units) ? h.units.join('、') : (h.units || '');
     return u || '全部章节';
   };
-  allHistory.slice(0, 20).forEach((h, idx) => {
-    const isLocal = !h.id || localOnlyH.some(l => l.id === h.id);
-    const syncBadge = isLocal && serverH.length
-      ? '<span class="recent-badge pending">待同步</span>' : '';
-    items.push(`
-      <div class="recent-item" onclick="openHistoryResult('${h.id || idx}', ${idx})">
-        <div class="recent-info">
-          <div class="recent-name">
-            ${modeIcon[h.mode]||''} ${esc(h.date)} · ${esc(unitsText(h))}
-            <span class="recent-badge done">已完成</span>${syncBadge}
-          </div>
-          <div class="recent-meta">${h.total} 题 · 用时 ${formatTime(h.time_sec || h.timeSec || 0)}</div>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px">
-          <div class="recent-score">${h.pct}%</div>
-          <button class="recent-del-btn" title="删除此记录"
-            onclick="event.stopPropagation();deleteHistoryItem('${h.id || ''}', ${idx}, this)">✕</button>
-        </div>
-      </div>`);
+
+  // 置顶排前、其余按时间倒序
+  const sorted = [...baseHistory].sort((a, b) => {
+    const pa = pinned.has(a.id) ? 1 : 0;
+    const pb = pinned.has(b.id) ? 1 : 0;
+    return pb - pa;
   });
 
-  list.innerHTML = items.join('');
+  // ── 进行中的练习 ────────────────────────────────
+  practiceSessions.forEach(s => {
+    const ago  = _fmtAgo(s.savedAt);
+    const el   = _mkRecentItem();
+    el.innerHTML = `
+      <div class="rh-content" onclick="resumePracticeSession('${s.id}')">
+        <div class="recent-info">
+          <div class="recent-name">✏️ ${esc(s.title)}<span class="recent-badge ongoing">进行中</span></div>
+          <div class="recent-meta">已答 ${s.answered}/${s.total} 题 · ${ago}</div>
+        </div>
+        <button class="recent-resume-btn">继续 →</button>
+      </div>`;
+    list.appendChild(el);
+  });
+
+  // ── 已完成历史 ───────────────────────────────────
+  sorted.slice(0, 20).forEach((h, idx) => {
+    const id      = h.id || String(idx);
+    const isLocal = !h.id || localOnlyH.some(l => l.id === h.id);
+    const isPinned = pinned.has(h.id);
+    const syncBadge = isLocal && serverH.length
+      ? '<span class="recent-badge pending">待同步</span>' : '';
+    const pinBadge  = isPinned
+      ? '<span class="recent-badge pinned">📌 置顶</span>' : '';
+
+    const el = _mkRecentItem(id);
+
+    // 左滑遮罩（删除）
+    const delMask = document.createElement('div');
+    delMask.className = 'rh-del-mask';
+    delMask.innerHTML = '🗑 删除';
+
+    // 右滑遮罩（置顶/取消置顶）
+    const pinMask = document.createElement('div');
+    pinMask.className = 'rh-pin-mask';
+    pinMask.innerHTML = isPinned ? '📌 取消置顶' : '📌 置顶';
+
+    // 内容层
+    const content = document.createElement('div');
+    content.className = 'rh-content';
+    content.innerHTML = `
+      <div class="recent-info" onclick="openHistoryResult('${id}',${idx})">
+        <div class="recent-name">
+          ${modeIcon[h.mode]||''} ${esc(h.date)} · ${esc(unitsText(h))}
+          <span class="recent-badge done">已完成</span>${syncBadge}${pinBadge}
+        </div>
+        <div class="recent-meta">${h.total} 题 · 用时 ${formatTime(h.time_sec || h.timeSec || 0)}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <div class="recent-score">${h.pct}%</div>
+        <button class="recent-del-btn pc-only" title="删除"
+          onclick="event.stopPropagation();_confirmDelete('${id}',${idx})">✕</button>
+      </div>`;
+
+    el.appendChild(delMask);
+    el.appendChild(pinMask);
+    el.appendChild(content);
+    list.appendChild(el);
+
+    _bindSwipe(el, id, idx, isPinned);
+  });
+}
+
+function _mkRecentItem(id) {
+  const el = document.createElement('div');
+  el.className = 'recent-item rh-swipe-wrap';
+  if (id) el.dataset.hid = id;
+  return el;
+}
+
+// ── 手势绑定 ───────────────────────────────────────
+function _bindSwipe(wrap, id, idx, isPinned) {
+  const content  = wrap.querySelector('.rh-content');
+  const delMask  = wrap.querySelector('.rh-del-mask');
+  const pinMask  = wrap.querySelector('.rh-pin-mask');
+  const THRESHOLD = 72;   // 触发动作的最小滑动距离
+  const MAX_DRAG  = 110;
+
+  let startX = 0, startY = 0, dx = 0, dragging = false, axis = null;
+
+  function onStart(x, y) {
+    startX = x; startY = y; dx = 0; axis = null; dragging = true;
+    content.style.transition = 'none';
+  }
+  function onMove(x, y) {
+    if (!dragging) return;
+    const rawDx = x - startX;
+    const rawDy = y - startY;
+    if (!axis) {
+      if (Math.abs(rawDx) < 6 && Math.abs(rawDy) < 6) return;
+      axis = Math.abs(rawDx) > Math.abs(rawDy) ? 'x' : 'y';
+    }
+    if (axis === 'y') return;  // 纵向滚动不拦截
+    dx = Math.max(-MAX_DRAG, Math.min(MAX_DRAG, rawDx));
+    content.style.transform = `translateX(${dx}px)`;
+    // 遮罩随拖动显示
+    delMask.style.opacity  = dx < 0 ? Math.min(1, -dx / THRESHOLD) : 0;
+    pinMask.style.opacity  = dx > 0 ? Math.min(1, dx / THRESHOLD) : 0;
+  }
+  function onEnd() {
+    if (!dragging || axis !== 'x') { dragging = false; return; }
+    dragging = false;
+    content.style.transition = 'transform .25s ease';
+
+    if (dx < -THRESHOLD) {
+      // 左滑超阈值 → 滑出后显示撤销
+      content.style.transform = `translateX(-100%)`;
+      delMask.style.opacity = 1;
+      _showDeleteWithUndo(wrap, id, idx);
+    } else if (dx > THRESHOLD) {
+      // 右滑超阈值 → 置顶/取消置顶
+      content.style.transform = 'translateX(0)';
+      pinMask.style.opacity = 0;
+      _togglePin(id, isPinned);
+    } else {
+      // 未超阈值 → 弹回
+      content.style.transform = 'translateX(0)';
+      delMask.style.opacity = 0;
+      pinMask.style.opacity = 0;
+    }
+  }
+
+  // Touch
+  wrap.addEventListener('touchstart', e => {
+    onStart(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: true });
+  wrap.addEventListener('touchmove', e => {
+    if (axis === 'x') e.preventDefault();
+    onMove(e.touches[0].clientX, e.touches[0].clientY);
+  }, { passive: false });
+  wrap.addEventListener('touchend', onEnd, { passive: true });
+
+  // Mouse (PC 鼠标拖拽也支持，但 PC 主要靠按钮)
+  wrap.addEventListener('mousedown', e => {
+    if (e.button !== 0) return;
+    onStart(e.clientX, e.clientY);
+    const up  = () => { onEnd(); cleanup(); };
+    const mv  = e2 => onMove(e2.clientX, e2.clientY);
+    const cleanup = () => { window.removeEventListener('mousemove', mv); window.removeEventListener('mouseup', up); };
+    window.addEventListener('mousemove', mv);
+    window.addEventListener('mouseup', up);
+  });
+}
+
+// ── 置顶逻辑 ──────────────────────────────────────
+function _togglePin(id, wasPinned) {
+  if (!id) return;
+  const pinned = _getPinned();
+  if (wasPinned) pinned.delete(id);
+  else           pinned.add(id);
+  _savePinned(pinned);
+  renderHistorySection();
+  toast(wasPinned ? '已取消置顶' : '已置顶');
+}
+
+// ── 滑动删除 + 撤销 ──────────────────────────────
+function _showDeleteWithUndo(wrap, id, idx) {
+  // 替换整个 wrap 为"已删除·撤销"条
+  const undo = document.createElement('div');
+  undo.className = 'rh-undo-bar';
+  undo.innerHTML = `<span>已删除</span><button onclick="_undoDelete(this,'${id}',${idx})">撤销</button>`;
+  wrap.replaceWith(undo);
+
+  // 3 秒后真正删除
+  const timer = setTimeout(() => {
+    undo.remove();
+    deleteHistoryItem(id, idx);
+  }, 3000);
+  undo._timer = timer;
+}
+
+function _undoDelete(btn, id, idx) {
+  clearTimeout(btn.parentElement._timer);
+  btn.parentElement.remove();
+  renderHistorySection();  // 重新渲染，记录恢复
+}
+
+// ── PC 按钮删除（confirm） ──────────────────────────
+function _confirmDelete(id, idx) {
+  if (!confirm('确定删除这条练习记录？')) return;
+  deleteHistoryItem(id, idx);
 }
 
 function _fmtAgo(ts) {
@@ -3452,30 +3608,30 @@ function openHistoryResult(id, idx) {
   showScreen('s-results');
 }
 
-/** 删除单条历史记录 */
-async function deleteHistoryItem(id, idx, btn) {
-  if (!confirm('确定删除这条练习记录？')) return;
-  btn.disabled = true;
-
-  // 1. 从服务端删除（有 id 时）
-  if (id) {
+/** 删除单条历史记录（由滑动确认或 PC 按钮 confirm 后调用，不再二次确认） */
+async function deleteHistoryItem(id, idx) {
+  // 1. 从服务端删除（有 id 且非纯数字 idx 代用 id 时）
+  if (id && isNaN(Number(id))) {
     try {
       await apiFetch('/api/session/' + encodeURIComponent(id) + '?' + bankQS(), {
         method: 'DELETE',
       });
-      // 从服务端历史缓存中移除
       if (S.serverHistory) {
         S.serverHistory = S.serverHistory.filter(h => h.id !== id);
       }
-    } catch (e) { /* 离线时仍然删本地 */ }
+    } catch (e) { /* 离线时仍删本地 */ }
   }
 
   // 2. 从本地历史删除
-  S.history = S.history.filter((_, i) => i !== idx);
+  S.history = S.history.filter(h => h.id !== id && S.history.indexOf(h) !== idx);
   localStorage.setItem(historyKey(), JSON.stringify(S.history));
   if (S.localOnlyHistory) {
-    S.localOnlyHistory = S.localOnlyHistory.filter((_, i) => i !== idx);
+    S.localOnlyHistory = S.localOnlyHistory.filter(h => h.id !== id);
   }
+  // 同时从置顶移除
+  const pinned = _getPinned();
+  pinned.delete(id);
+  _savePinned(pinned);
 
   renderHistorySection();
 }

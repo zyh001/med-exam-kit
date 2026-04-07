@@ -308,8 +308,15 @@ input,select{font-family:inherit;outline:none}
   display:flex;align-items:center;justify-content:space-between;
   background:var(--card);border:1px solid var(--border);border-radius:10px;
   padding:12px 16px;cursor:pointer;transition:border-color .15s;
+  margin-bottom:8px;
 }
 .recent-item:hover{border-color:var(--accent)}
+/* 滑动包裹器：重置 padding，让 rh-content 自己带 padding */
+.recent-item.rh-swipe-wrap{
+  padding:0;display:block;cursor:default;border:1px solid var(--border);
+}
+.recent-item.rh-swipe-wrap:hover{border-color:var(--border)}
+.rh-content:hover{background:color-mix(in srgb,var(--card),var(--accent) 4%)}
 .recent-info{display:flex;flex-direction:column;gap:2px}
 .recent-name{font-size:13px;font-weight:500}
 .recent-meta{font-size:11px;color:var(--muted)}
@@ -1689,3 +1696,61 @@ button,a,[role=button],label{touch-action:manipulation}
   background: rgba(210,153,34,.15);
   color: var(--warning);
 }
+
+/* ── 历史记录滑动手势 ───────────────────────────────────────── */
+.rh-swipe-wrap{
+  position:relative;overflow:hidden;border-radius:12px;
+  background:var(--card);margin-bottom:8px;
+  /* 让内部绝对定位遮罩正确裁剪 */
+}
+/* 删除遮罩（左滑出现，红色）*/
+.rh-del-mask{
+  position:absolute;inset:0;display:flex;align-items:center;
+  justify-content:flex-end;padding-right:20px;
+  background:var(--danger);color:#fff;font-size:14px;font-weight:600;
+  opacity:0;pointer-events:none;border-radius:12px;letter-spacing:.04em;
+}
+/* 置顶遮罩（右滑出现，蓝色）*/
+.rh-pin-mask{
+  position:absolute;inset:0;display:flex;align-items:center;
+  padding-left:20px;
+  background:var(--accent);color:#fff;font-size:14px;font-weight:600;
+  opacity:0;pointer-events:none;border-radius:12px;letter-spacing:.04em;
+}
+/* 内容层（可横向平移）*/
+.rh-content{
+  position:relative;z-index:1;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 14px;background:var(--card);
+  border-radius:12px;
+  /* 点击事件不被 .rh-swipe-wrap 的 mousedown 拦截，需要子元素处理 */
+}
+/* PC 删除按钮：移动端隐藏 */
+.pc-only{ display:flex }
+@media (hover:none) and (pointer:coarse){
+  .pc-only{ display:none !important }
+}
+/* 置顶 badge */
+.recent-badge.pinned{
+  background:var(--accent-bg);color:var(--accent);
+  border:1px solid var(--accent);
+}
+/* 待同步 badge */
+.recent-badge.pending{
+  background:var(--warn-bg);color:var(--warning);
+  border:1px solid var(--warning);
+}
+/* 撤销条 */
+.rh-undo-bar{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:12px 14px;border-radius:12px;margin-bottom:8px;
+  background:var(--danger-bg);border:1px solid var(--danger);
+  font-size:13px;color:var(--danger);
+  animation:fadeIn .2s ease;
+}
+.rh-undo-bar button{
+  background:var(--danger);color:#fff;border:none;
+  border-radius:6px;padding:4px 12px;font-size:12px;
+  font-weight:600;cursor:pointer;
+}
+.rh-undo-bar button:hover{opacity:.85}
