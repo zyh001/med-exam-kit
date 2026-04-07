@@ -90,7 +90,7 @@ def set_auth_cookie(
         _sign(cookie_secret, access_code),
         max_age=365 * 24 * 3600,
         httponly=True,
-        samesite="Strict",
+        samesite="Lax",  # Strict 会导致 PWA standalone 导航时 cookie 不携带
         secure=secure,
     )
 

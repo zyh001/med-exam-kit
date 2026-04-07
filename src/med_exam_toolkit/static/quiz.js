@@ -2656,22 +2656,19 @@ function esc(s) {
 }
 
 function highlightInductiveWords(text) {
-  // 诱导性关键词列表（按长度降序排列，优先匹配长词）
+  // 关键词按长度降序，确保长词优先匹配（如"不可能"先于"不可"）
   const keywords = [
     '不恰当', '不合适', '不正确', '不包括', '不属于', '不常见',
-    '除外', '除了', '不是', '无需', '不必', '禁止', '不得',
-    '不可能', '排除', '不对的', '相反', '例外', '无关', '不得不',
-    '不应', '不可', '不宜', '欠妥', '不妥', '不当', '错误的',
-    '不适用', '不含', '无效'
-  ];
+    '不得不', '不适用', '不对的', '错误的',
+    '不可能', '排除', '除外', '除了', '不是', '无需', '不必',
+    '禁止', '不得', '不应', '不可', '不宜', '欠妥', '不妥',
+    '不当', '相反', '例外', '无关', '不含', '无效'
+  ].sort((a, b) => b.length - a.length); // 运行时再按长度排序，防止手动排序错误
 
-  let result = text;
-  keywords.forEach(word => {
-    // 使用不区分大小写的正则，全局匹配
-    const regex = new RegExp(word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi');
-    result = result.replace(regex, `<span class="inductive-word">${word}</span>`);
-  });
-  return result;
+  // 一次性构建单个 alternation 正则，避免多次替换导致已包裹 span 被二次匹配
+  const escaped = keywords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(escaped.join('|'), 'g');
+  return text.replace(regex, m => `<span class="inductive-word">${m}</span>`);
 }
 
 function showReview() {
@@ -3260,7 +3257,7 @@ function _renderWrongbookPreview(items) {
 
     // 题目摘要行（始终可见）
     const preview = it.text
-      ? it.text.replace(/<[^>]+>/g, '').slice(0, 60) + (it.text.length > 60 ? '…' : '')
+      ? it.text.replace(/<[^>]+>/g, '').slice(0, 28) + (it.text.replace(/<[^>]+>/g,'').length > 28 ? '…' : '')
       : it.fingerprint.slice(0, 16) + '…';
 
     card.innerHTML = `
