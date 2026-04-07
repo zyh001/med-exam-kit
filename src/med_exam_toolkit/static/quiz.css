@@ -1746,8 +1746,10 @@ button,a,[role=button],label{touch-action:manipulation}
   padding:12px 14px;border-radius:12px;margin-bottom:8px;
   background:var(--danger-bg);border:1px solid var(--danger);
   font-size:13px;color:var(--danger);
-  animation:fadeIn .2s ease;
+  opacity:0;transition:opacity .25s ease;
 }
+.rh-undo-bar.rh-undo-in{ opacity:1 }
+.rh-undo-bar.rh-undo-out{ opacity:0 }
 .rh-undo-bar button{
   background:var(--danger);color:#fff;border:none;
   border-radius:6px;padding:4px 12px;font-size:12px;
