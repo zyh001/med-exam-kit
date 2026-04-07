@@ -382,6 +382,16 @@ def get_history(db_path: Path, user_id: str = LEGACY_USER, limit: int = 30) -> l
             for r in rows]
 
 
+def delete_session(db_path: Path, session_id: str, user_id: str = LEGACY_USER) -> bool:
+    """按 id 删除指定用户的会话记录，返回是否真正删除了一行。"""
+    with _open(db_path) as c:
+        c.execute(
+            "DELETE FROM sessions WHERE id=? AND user_id=?",
+            (session_id, user_id),
+        )
+        return c.rowcount > 0
+
+
 def get_unit_stats(db_path: Path, user_id: str = LEGACY_USER) -> list[dict]:
     with _open(db_path) as c:
         rows = c.execute(

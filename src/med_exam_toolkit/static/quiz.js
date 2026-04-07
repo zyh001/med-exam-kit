@@ -358,8 +358,10 @@ async function loadBankAndRenderHome() {
 // 每次显示主页时调用，刷新所有动态数据（历史记录、徽章、进度）
 async function refreshHomeData() {
   try {
-    renderHistorySection();
-    await _refreshProgressBadges();
+    await Promise.all([
+      _fetchServerHistory(),       // 从服务端拉最新历史并重渲染
+      _refreshProgressBadges(),    // 刷新徽章
+    ]);
   } catch (e) { /* 静默失败 */ }
 }
 
@@ -2551,12 +2553,17 @@ function calculateResults() {
     S.results.scoreByMode = scoreByMode;
   }
 
+  // 预生成 sessionId，同时用于本地历史和服务端记录，确保可以按 id 删除
+  const sessionId = String(Date.now());
+
   // Save to history
   const record = {
+    id:      sessionId,
     mode: S.mode, total: qs.length, correct,
     pct: Math.round(correct / qs.length * 100),
     skip,
     timeSec: S.results.timeSec,
+    time_sec: S.results.timeSec,
     date: new Date().toLocaleDateString('zh-CN'),
     units: [...new Set(qs.map(q => q.unit).filter(Boolean))].slice(0,2).join('、'),
   };
@@ -2565,7 +2572,7 @@ function calculateResults() {
   localStorage.setItem(historyKey(), JSON.stringify(S.history));
 
   // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
-  _recordSessionToServer(S.results, S.questions, S.ans).then(() => {
+  _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(() => {
     // 记录完成后刷新主页徽章
     _refreshProgressBadges();
   });
@@ -2859,7 +2866,7 @@ function filterReview(type, tabEl) {
 // ════════════════════════════════════════════
 
 /** 把本次答题结果交给 SyncManager（离线优先：先写 IndexedDB，再异步上传服务端） */
-async function _recordSessionToServer(results, questions, ans) {
+async function _recordSessionToServer(results, questions, ans, sessionId) {
   if (!results || !questions) return;
   const items = [];
   questions.forEach((q, i) => {
@@ -2885,7 +2892,7 @@ async function _recordSessionToServer(results, questions, ans) {
   const today = new Date().toLocaleDateString('zh-CN');
   const units  = [...new Set(questions.map(q => q.unit).filter(Boolean))];
   const payload = {
-    id:       String(Date.now()),
+    id:       sessionId || String(Date.now()),
     mode:     results.mode,
     total:    results.total,
     correct:  results.correct,
@@ -3325,6 +3332,25 @@ function _toggleWbCard(header) {
 // ════════════════════════════════════════════
 function loadHistory() {
   try { S.history = JSON.parse(localStorage.getItem(historyKey()) || '[]'); } catch { S.history = []; }
+  // 同时从服务端拉取完整历史，成功后合并刷新（不阻塞本地渲染）
+  _fetchServerHistory();
+}
+
+async function _fetchServerHistory() {
+  try {
+    const res = await apiFetch('/api/history?' + bankQS() + '&limit=50');
+    if (!res.ok) return;
+    const data = await res.json();
+    const items = data.items || [];
+    if (!items.length) return;
+    // 合并：服务端历史作为主数据，用 id 去重本地记录
+    const serverIds = new Set(items.map(h => h.id));
+    const localOnly = S.history.filter(h => h.id && !serverIds.has(h.id));
+    // localOnly 是本地有但服务端没有的（可能是离线记录还未同步）
+    S.serverHistory = items;          // 保存服务端完整历史
+    S.localOnlyHistory = localOnly;   // 本地待同步历史
+    renderHistorySection();
+  } catch (e) { /* 离线时静默失败，保留本地数据 */ }
 }
 
 function renderHistorySection() {
@@ -3360,18 +3386,36 @@ function renderHistorySection() {
       </div>`);
   });
 
-  // ── 已完成的历史记录 ──────────────────────────────
-  history.slice(0, 5).forEach((h, idx) => {
+  // ── 已完成的历史记录（优先服务端，降级本地）──────────
+  // 合并：服务端历史 + 本地独有（离线未同步）
+  const serverH  = S.serverHistory || [];
+  const localOnlyH = S.localOnlyHistory || [];
+  // 若服务端有数据，主显服务端；否则用本地
+  const allHistory = serverH.length
+    ? [...localOnlyH, ...serverH]          // 未同步的本地记录排前面
+    : history;
+  const unitsText = h => {
+    const u = Array.isArray(h.units) ? h.units.join('、') : (h.units || '');
+    return u || '全部章节';
+  };
+  allHistory.slice(0, 20).forEach((h, idx) => {
+    const isLocal = !h.id || localOnlyH.some(l => l.id === h.id);
+    const syncBadge = isLocal && serverH.length
+      ? '<span class="recent-badge pending">待同步</span>' : '';
     items.push(`
-      <div class="recent-item" onclick="openHistoryResult(${idx})">
+      <div class="recent-item" onclick="openHistoryResult('${h.id || idx}', ${idx})">
         <div class="recent-info">
           <div class="recent-name">
-            ${modeIcon[h.mode]||''} ${esc(h.date)} · ${esc(h.units || '全部章节')}
-            <span class="recent-badge done">已完成</span>
+            ${modeIcon[h.mode]||''} ${esc(h.date)} · ${esc(unitsText(h))}
+            <span class="recent-badge done">已完成</span>${syncBadge}
           </div>
-          <div class="recent-meta">${h.total} 题 · 用时 ${formatTime(h.timeSec)}</div>
+          <div class="recent-meta">${h.total} 题 · 用时 ${formatTime(h.time_sec || h.timeSec || 0)}</div>
         </div>
-        <div class="recent-score">${h.pct}%</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="recent-score">${h.pct}%</div>
+          <button class="recent-del-btn" title="删除此记录"
+            onclick="event.stopPropagation();deleteHistoryItem('${h.id || ''}', ${idx}, this)">✕</button>
+        </div>
       </div>`);
   });
 
@@ -3386,29 +3430,54 @@ function _fmtAgo(ts) {
   return Math.floor(sec/86400) + ' 天前';
 }
 
-/** 点击已完成记录 → 查看结果页（若结果数据还在 S.results 则直接跳，否则只显示摘要） */
-function openHistoryResult(idx) {
-  const h = S.history[idx];
+/** 点击已完成记录 → 查看结果摘要页 */
+function openHistoryResult(id, idx) {
+  const allH = (S.serverHistory && S.serverHistory.length)
+    ? [...(S.localOnlyHistory||[]), ...S.serverHistory]
+    : S.history;
+  const h = id && id !== String(idx)
+    ? allH.find(x => x.id === String(id)) || allH[idx]
+    : allH[idx] || S.history[idx];
   if (!h) return;
-  // 若 S.results 刚好是这条记录（mode+date 匹配），直接跳结果页
-  if (S.results && S.results.mode === h.mode) {
-    showScreen('s-results');
-    return;
-  }
-  // 否则用摘要构建一个精简结果页
   S.results = {
     mode: h.mode,
     total: h.total,
     correct: h.correct,
-    wrong: h.total - h.correct - (h.skip || 0),
+    wrong: h.wrong ?? (h.total - h.correct - (h.skip || 0)),
     skip: h.skip || 0,
-    timeSec: h.timeSec,
-    byUnit: null,
-    qs: null,
-    ans: null,
+    timeSec: h.time_sec || h.timeSec || 0,
+    byUnit: null, qs: null, ans: null,
   };
   renderResults();
   showScreen('s-results');
+}
+
+/** 删除单条历史记录 */
+async function deleteHistoryItem(id, idx, btn) {
+  if (!confirm('确定删除这条练习记录？')) return;
+  btn.disabled = true;
+
+  // 1. 从服务端删除（有 id 时）
+  if (id) {
+    try {
+      await apiFetch('/api/session/' + encodeURIComponent(id) + '?' + bankQS(), {
+        method: 'DELETE',
+      });
+      // 从服务端历史缓存中移除
+      if (S.serverHistory) {
+        S.serverHistory = S.serverHistory.filter(h => h.id !== id);
+      }
+    } catch (e) { /* 离线时仍然删本地 */ }
+  }
+
+  // 2. 从本地历史删除
+  S.history = S.history.filter((_, i) => i !== idx);
+  localStorage.setItem(historyKey(), JSON.stringify(S.history));
+  if (S.localOnlyHistory) {
+    S.localOnlyHistory = S.localOnlyHistory.filter((_, i) => i !== idx);
+  }
+
+  renderHistorySection();
 }
 
 // ════════════════════════════════════════════
