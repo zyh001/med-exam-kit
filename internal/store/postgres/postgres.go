@@ -358,7 +358,7 @@ func (s *Store) GetHistory(ctx context.Context, userID string, bankID int, limit
 	}
 	rows, err := s.pool.Query(ctx, `
 		SELECT id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts
-		FROM sessions WHERE user_id=$1 ORDER BY ts DESC LIMIT $2`, userID, limit)
+		FROM sessions WHERE user_id=$1 AND bank_id=$2 ORDER BY ts DESC LIMIT $3`, userID, bankID, limit)
 	if err != nil {
 		return nil
 	}
@@ -422,8 +422,8 @@ func (s *Store) GetUnitStats(ctx context.Context, userID string, bankID int) []s
 		       COUNT(*) AS total,
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
-		FROM attempts WHERE user_id=$1 AND result!= -1 AND unit IS NOT NULL AND unit!=''
-		GROUP BY unit ORDER BY total DESC LIMIT 30`, userID)
+		FROM attempts WHERE user_id=$1 AND bank_id=$2 AND result!=-1 AND unit IS NOT NULL AND unit!=''
+		GROUP BY unit ORDER BY total DESC LIMIT 30`, userID, bankID)
 	if err != nil {
 		return nil
 	}
@@ -462,9 +462,9 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, bankID 
 		       COUNT(*) AS total,
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
-		FROM attempts WHERE user_id=$1 AND result!= -1
+		FROM attempts WHERE user_id=$1 AND bank_id=$2 AND result!=-1
 		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
-		ORDER BY wrong DESC, MAX(ts) DESC LIMIT $2`, userID, limit)
+		ORDER BY wrong DESC, MAX(ts) DESC LIMIT $3`, userID, bankID, limit)
 	if err != nil {
 		return nil
 	}
