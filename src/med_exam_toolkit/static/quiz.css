@@ -1611,3 +1611,58 @@ button,a,[role=button],label{touch-action:manipulation}
   background:var(--danger-bg);border:1px solid var(--danger);
   border-radius:6px;padding:4px 8px;margin:4px 0;word-break:break-all;
 }
+
+/* ── 错题预览卡片 ──────────────────────────────────────────────── */
+.wb-card{
+  border:1px solid var(--border);border-radius:10px;
+  margin-bottom:8px;overflow:hidden;
+  transition:border-color .15s;
+}
+.wb-card-open{border-color:var(--accent)}
+.wb-card-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 12px;cursor:pointer;gap:8px;
+  background:var(--card);user-select:none;
+}
+.wb-card-header:active{opacity:.8}
+.wb-card-left{display:flex;align-items:center;gap:8px;min-width:0;flex:1}
+.wb-card-right{display:flex;align-items:center;gap:6px;flex-shrink:0}
+.wb-wrong-badge{
+  font-size:11px;font-weight:700;color:#fff;
+  background:var(--danger);border-radius:5px;
+  padding:1px 5px;flex-shrink:0;
+}
+.wb-preview{
+  font-size:13px;color:var(--text);
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+}
+.wb-acc{font-size:12px;font-weight:600}
+.wb-chevron{font-size:11px;color:var(--muted);transition:transform .15s}
+.wb-card-body{
+  padding:12px;border-top:1px solid var(--border);
+  background:var(--surface);
+}
+.wb-stem{
+  font-size:13px;color:var(--muted);
+  border-left:3px solid var(--border);
+  padding:6px 10px;margin-bottom:10px;border-radius:0 4px 4px 0;
+}
+.wb-text{font-size:14px;line-height:1.7;margin-bottom:10px}
+.wb-answer{
+  font-size:13px;padding:6px 10px;
+  background:var(--success-bg);border-radius:6px;
+  border-left:3px solid var(--success);margin-bottom:8px;
+}
+.wb-label{font-size:11px;font-weight:600;color:var(--muted);
+  display:block;margin-bottom:4px;letter-spacing:.03em}
+.wb-discuss{margin-top:8px}
+.wb-discuss-body{font-size:13px;line-height:1.7;color:var(--muted)}
+.wb-meta{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  margin-top:10px;padding-top:8px;border-top:1px solid var(--border);
+}
+.wb-unit{
+  font-size:11px;background:var(--accent-bg);color:var(--accent);
+  border-radius:4px;padding:2px 6px;
+}
+.wb-stat{font-size:11px;color:var(--muted)}

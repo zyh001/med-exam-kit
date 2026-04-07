@@ -452,7 +452,22 @@ def api_wrongbook():
     if b.db_path is None or not b.db_path.exists():
         return jsonify({"items": [], "count": 0})
     from med_exam_toolkit.progress import get_wrong_fingerprints
-    items = get_wrong_fingerprints(b.db_path, user_id=_get_user_id())
+    entries = get_wrong_fingerprints(b.db_path, user_id=_get_user_id())
+
+    # 构建 fingerprint → question 索引，附上题目文字
+    fp_idx = {q.fingerprint: q for q in (b.questions or [])}
+    items = []
+    for e in entries:
+        item = dict(e)
+        q = fp_idx.get(e.get("fingerprint", ""))
+        if q and q.sub_questions:
+            sq = q.sub_questions[0]
+            item["text"]    = getattr(sq, "text", "") or ""
+            item["stem"]    = getattr(q,  "stem", "") or ""
+            item["answer"]  = sq.eff_answer() if hasattr(sq, "eff_answer") else (getattr(sq, "answer", "") or "")
+            item["discuss"] = sq.eff_discuss() if hasattr(sq, "eff_discuss") else (getattr(sq, "discuss", "") or "")
+            item["unit"]    = getattr(q, "unit", "") or ""
+        items.append(item)
     return jsonify({"items": items, "count": len(items)})
 
 

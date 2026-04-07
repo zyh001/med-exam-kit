@@ -88,7 +88,7 @@ def set_auth_cookie(
     response.set_cookie(
         _AUTH_COOKIE,
         _sign(cookie_secret, access_code),
-        max_age=7 * 24 * 3600,
+        max_age=365 * 24 * 3600,
         httponly=True,
         samesite="Strict",
         secure=secure,
