@@ -407,7 +407,7 @@ func (s *Store) GetUnitStats(ctx context.Context, userID string) []store.UnitSta
 		       COUNT(*) AS total,
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
-		FROM attempts WHERE user_id=$1 AND result!=-1 AND unit IS NOT NULL AND unit!=''
+		FROM attempts WHERE user_id=$1 AND result!= -1 AND unit IS NOT NULL AND unit!=''
 		GROUP BY unit ORDER BY total DESC LIMIT 30`, userID)
 	if err != nil {
 		return nil
@@ -447,7 +447,7 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, limit i
 		       COUNT(*) AS total,
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
-		FROM attempts WHERE user_id=$1 AND result!=-1
+		FROM attempts WHERE user_id=$1 AND result!= -1
 		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
 		ORDER BY wrong DESC, MAX(ts) DESC LIMIT $2`, userID, limit)
 	if err != nil {
@@ -602,7 +602,7 @@ func (s *Store) DiagAttempts(ctx context.Context, userID string) map[string]any 
 		SELECT fingerprint, COUNT(*) AS total,
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
-		FROM attempts WHERE user_id=$1 AND result!=-1
+		FROM attempts WHERE user_id=$1 AND result!= -1
 		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
 		LIMIT 5`, userID)
 	if err3 != nil {
