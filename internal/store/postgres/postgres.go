@@ -10,6 +10,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"log"
 	"math"
 	"time"
@@ -32,6 +33,49 @@ type Store struct {
 }
 
 // New connects to PostgreSQL and runs the schema (idempotent).
+
+// execSchemaSQL splits the schema into individual statements and runs each
+// separately. pgx v5 extended protocol does not support multi-statement Exec.
+func execSchemaSQL(ctx context.Context, pool *pgxpool.Pool, sql string) error {
+	stmts := splitSQL(sql)
+	for _, stmt := range stmts {
+		stmt = strings.TrimSpace(stmt)
+		if stmt == "" {
+			continue
+		}
+		if _, err := pool.Exec(ctx, stmt); err != nil {
+			return fmt.Errorf("stmt %q: %w", stmt[:min(60, len(stmt))], err)
+		}
+	}
+	return nil
+}
+
+// splitSQL splits a SQL script on ";" delimiters (skipping those inside strings).
+func splitSQL(script string) []string {
+	var stmts []string
+	var cur strings.Builder
+	inQuote := false
+	for i := 0; i < len(script); i++ {
+		b := script[i]
+		if b == byte(39) { // single quote
+			inQuote = !inQuote
+		}
+		if b == byte(59) && !inQuote { // semicolon
+			if s := strings.TrimSpace(cur.String()); s != "" {
+				stmts = append(stmts, s)
+			}
+			cur.Reset()
+			continue
+		}
+		cur.WriteByte(b)
+	}
+	if s := strings.TrimSpace(cur.String()); s != "" {
+		stmts = append(stmts, s)
+	}
+	return stmts
+}
+func min(a, b int) int { if a < b { return a }; return b }
+
 func New(ctx context.Context, dsn string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -41,8 +85,8 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("pgstore: ping: %w", err)
 	}
-	// Run schema
-	if _, err := pool.Exec(ctx, schemaSQL); err != nil {
+	// Run schema — split on ; because pgx v5 extended protocol rejects multi-statement
+	if err := execSchemaSQL(ctx, pool, schemaSQL); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("pgstore: schema: %w", err)
 	}
@@ -205,7 +249,7 @@ func (s *Store) DeleteBank(ctx context.Context, bankID int64) error {
 // ── ProgressStore ──────────────────────────────────────────────────
 
 func (s *Store) Init(ctx context.Context) error {
-	if _, err := s.pool.Exec(ctx, schemaSQL); err != nil {
+	if err := execSchemaSQL(ctx, s.pool, schemaSQL); err != nil {
 		return err
 	}
 	// Log how many legacy rows (bank_id=0) remain after migration
