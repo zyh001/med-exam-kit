@@ -20,3 +20,5 @@ DS_Store
 Thumbs.db
 # 第三方依赖目录
 vendor//med-exam-kit
+/med-exam-kit
+med-exam-kit
