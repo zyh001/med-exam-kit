@@ -151,14 +151,15 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 				}
 			}
 		}
-		banks = append(banks, server.BankEntry{
+		entry := server.BankEntry{
 			Path:          bp,
 			Password:      password,
 			Questions:     questions,
 			DB:            db,
-			PgStore:       pg,
 			RecordEnabled: recordEnabled,
-		})
+		}
+		if pg != nil { entry.PgStore = pg } // 避免 nil *Store 赋给 interface 变成非 nil interface
+		banks = append(banks, entry)
 	}
 
 	// 方式2：从 PostgreSQL 加载题库
@@ -178,13 +179,13 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 				}
 			}
 			fmt.Printf("   %s: %d 道题\n", name, len(qs))
-			banks = append(banks, server.BankEntry{
+			pgEntry := server.BankEntry{
 				Path:          fmt.Sprintf("pg:bank:%d", bid),
 				Questions:     qs,
-				DB:            nil,
-				PgStore:       pg,
 				RecordEnabled: !noRecord,
-			})
+			}
+			if pg != nil { pgEntry.PgStore = pg }
+			banks = append(banks, pgEntry)
 		}
 	}
 
