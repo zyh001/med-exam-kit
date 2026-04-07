@@ -55,19 +55,58 @@ func init() {
 	// PostgreSQL flags
 	quizCmd.Flags().String("db", "", "PostgreSQL DSN（postgres://user:pass@host/db）\n留空使用本地 SQLite（默认）")
 	quizCmd.Flags().Int64Slice("bank-id", nil, "从 PostgreSQL 加载的题库 ID（配合 --db 使用）")
+	quizCmd.Flags().String("config", "", "配置文件路径（默认自动查找 med-exam-kit.yaml）")
 }
 
 func runQuiz(cmd *cobra.Command, args []string) error {
 	ctx := context.Background()
+
+	// ── 加载配置文件（CLI 标志优先级更高，会覆盖配置文件值）───────
+	cfgFile, _ := cmd.Flags().GetString("config")
+	fileCfg := defaultConfig()
+	if cfgFile == "" {
+		// 自动查找当前目录的默认配置文件
+		if _, err := os.Stat("med-exam-kit.yaml"); err == nil {
+			cfgFile = "med-exam-kit.yaml"
+		}
+	}
+	if cfgFile != "" {
+		loaded, err := loadConfig(cfgFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "⚠ 读取配置文件 %s 失败: %v\n", cfgFile, err)
+		} else {
+			fileCfg = loaded
+			fmt.Printf("📄 已加载配置文件：%s\n", cfgFile)
+		}
+	}
+
+	// CLI 标志若未显式设置则使用配置文件的值
 	password, _ := cmd.Root().PersistentFlags().GetString("password")
+	if password == "" { password = fileCfg.Password }
+
 	port, _ := cmd.Flags().GetInt("port")
+	if !cmd.Flags().Changed("port") { port = fileCfg.Port }
+
 	host, _ := cmd.Flags().GetString("host")
+	if !cmd.Flags().Changed("host") { host = fileCfg.Host }
+
 	noRecord, _ := cmd.Flags().GetBool("no-record")
+	if !cmd.Flags().Changed("no-record") { noRecord = fileCfg.NoRecord }
+
 	noPin, _ := cmd.Flags().GetBool("no-pin")
+	if !cmd.Flags().Changed("no-pin") { noPin = fileCfg.NoPin }
+
 	customPin, _ := cmd.Flags().GetString("pin")
+	if !cmd.Flags().Changed("pin") { customPin = fileCfg.Pin }
+
 	pgDSN, _ := cmd.Flags().GetString("db")
+	if !cmd.Flags().Changed("db") { pgDSN = fileCfg.DB }
+
 	bankIDs, _ := cmd.Flags().GetInt64Slice("bank-id")
+	if !cmd.Flags().Changed("bank-id") && len(fileCfg.BankIDs) > 0 { bankIDs = fileCfg.BankIDs }
+
 	bankPaths, _ := cmd.Flags().GetStringArray("bank")
+	if !cmd.Flags().Changed("bank") && len(fileCfg.Banks) > 0 { bankPaths = fileCfg.Banks }
 
 	if len(bankPaths) == 0 && len(bankIDs) == 0 {
 		return fmt.Errorf("请用 -b 指定题库路径，或用 --db + --bank-id 从数据库加载")
