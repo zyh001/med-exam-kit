@@ -55,6 +55,7 @@ type pgStorer interface {
 	GetHistory(ctx context.Context, userID string, limit int) []store.HistoryEntry
 	GetSyncStatus(ctx context.Context, userID string) map[string]any
 	ClearUserData(ctx context.Context, userID string) map[string]int
+	DiagAttempts(ctx context.Context, userID string) map[string]any
 }
 
 // bankName derives a display name from the file path (or Name if set).
@@ -2062,6 +2063,16 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 			info.Attempts      = ov.Attempts
 			info.WrongAttempts = ov.Wrong
 			info.WrongTopics   = len(b.PgStore.GetWrongFingerprints(ctx, uid, 10000))
+			banks[i] = info
+			// Detailed diagnostic for first bank
+			if i == 0 {
+				jsonOK(w, map[string]any{
+					"uid": uid, "uid_is_legacy": uid == "_legacy" || uid == "",
+					"banks": banks,
+					"diag": b.PgStore.DiagAttempts(ctx, uid),
+				})
+				return
+			}
 		} else if b.DB != nil {
 			b.DB.QueryRow("SELECT COUNT(*) FROM sessions WHERE user_id=?", uid).Scan(&info.Sessions)
 			b.DB.QueryRow("SELECT COUNT(*) FROM attempts WHERE user_id=?", uid).Scan(&info.Attempts)
