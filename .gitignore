@@ -57,7 +57,6 @@ cover/
 
 # Django stuff:
 *.log
-<<<<<<< Updated upstream
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -214,7 +213,6 @@ __marimo__/
 # 题目压缩包
 /data/tests.zip
 /data/tests
-=======
 *.tmp
 *.out
 *.prof
@@ -227,7 +225,6 @@ DS_Store
 Thumbs.db
 # 第三方依赖目录
 vendor//med-exam-kit
->>>>>>> Stashed changes
 /med-exam-kit
 # Go 编译产物
 *.exe
