@@ -152,11 +152,12 @@ function savePracticeSession() {
 }
 
 /** 练习完成时清除该进度（或标记为已完成） */
-function clearPracticeSession() {
-  if (!S.practiceSessionId) return;
-  const sessions = _getPracticeSessions().filter(s => s.id !== S.practiceSessionId);
+function clearPracticeSession(sessionId) {
+  const targetId = sessionId || S.practiceSessionId;
+  if (!targetId) return;
+  const sessions = _getPracticeSessions().filter(s => s.id !== targetId);
   _setPracticeSessions(sessions);
-  S.practiceSessionId = null;
+  if (targetId === S.practiceSessionId) S.practiceSessionId = null;
 }
 
 /** 从存档恢复练习进度 */
@@ -3384,8 +3385,9 @@ function renderHistorySection() {
   const modeIcon  = { practice:'✏️', exam:'⏱', memo:'🧠' };
   const pinned    = _getPinned();
   const unitsText = h => {
-    const u = Array.isArray(h.units) ? h.units.join('、') : (h.units || '');
-    return u || '全部章节';
+    const arr = Array.isArray(h.units) ? h.units : (h.units ? [h.units] : []);
+    if (!arr.length) return '全部章节';
+    return arr.length <= 2 ? arr.join('、') : arr.slice(0,2).join('、') + ' 等';
   };
 
   // 置顶排前、其余按时间倒序
@@ -3396,18 +3398,33 @@ function renderHistorySection() {
   });
 
   // ── 进行中的练习 ────────────────────────────────
-  practiceSessions.forEach(s => {
-    const ago  = _fmtAgo(s.savedAt);
-    const el   = _mkRecentItem();
-    el.innerHTML = `
-      <div class="rh-content" onclick="resumePracticeSession('${s.id}')">
-        <div class="recent-info">
-          <div class="recent-name">✏️ ${esc(s.title)}<span class="recent-badge ongoing">进行中</span></div>
-          <div class="recent-meta">已答 ${s.answered}/${s.total} 题 · ${ago}</div>
-        </div>
-        <button class="recent-resume-btn">继续 →</button>
+  practiceSessions.forEach((s, psIdx) => {
+    const ago = _fmtAgo(s.savedAt);
+    const el  = _mkRecentItem('ps:' + s.id);
+
+    const delMask = document.createElement('div');
+    delMask.className = 'rh-del-mask';
+    delMask.innerHTML = '🗑 删除';
+
+    const content = document.createElement('div');
+    content.className = 'rh-content';
+    content.innerHTML = `
+      <div class="recent-info" onclick="resumePracticeSession('${s.id}')">
+        <div class="recent-name">✏️ ${esc(s.title)}<span class="recent-badge ongoing">进行中</span></div>
+        <div class="recent-meta">已答 ${s.answered}/${s.total} 题 · ${ago}</div>
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+        <button class="recent-resume-btn" onclick="resumePracticeSession('${s.id}')">继续 →</button>
+        <button class="recent-del-btn pc-only" title="删除"
+          onclick="event.stopPropagation();_deletePracticeSession('${s.id}',this)">✕</button>
       </div>`;
+
+    el.appendChild(delMask);
+    el.appendChild(content);
     list.appendChild(el);
+
+    // 左滑删除（进行中只支持删除，不支持置顶）
+    _bindSwipePractice(el, s.id);
   });
 
   // ── 已完成历史 ───────────────────────────────────
@@ -3552,24 +3569,97 @@ function _togglePin(id, wasPinned) {
 
 // ── 滑动删除 + 撤销 ──────────────────────────────
 function _showDeleteWithUndo(wrap, id, idx) {
-  // 替换整个 wrap 为"已删除·撤销"条
   const undo = document.createElement('div');
   undo.className = 'rh-undo-bar';
   undo.innerHTML = `<span>已删除</span><button onclick="_undoDelete(this,'${id}',${idx})">撤销</button>`;
   wrap.replaceWith(undo);
+  requestAnimationFrame(() => undo.classList.add('rh-undo-in'));
 
-  // 3 秒后真正删除
-  const timer = setTimeout(() => {
+  // 2.7s 后开始淡出，3s 后真正删除
+  const fadeTimer = setTimeout(() => undo.classList.add('rh-undo-out'), 2700);
+  const delTimer  = setTimeout(() => {
     undo.remove();
     deleteHistoryItem(id, idx);
   }, 3000);
-  undo._timer = timer;
+  undo._fadeTimer = fadeTimer;
+  undo._timer     = delTimer;
 }
 
 function _undoDelete(btn, id, idx) {
-  clearTimeout(btn.parentElement._timer);
-  btn.parentElement.remove();
-  renderHistorySection();  // 重新渲染，记录恢复
+  const bar = btn.parentElement;
+  clearTimeout(bar._fadeTimer);
+  clearTimeout(bar._timer);
+  bar.classList.remove('rh-undo-out');
+  bar.classList.add('rh-undo-in');
+  // 淡出后移除
+  bar.classList.add('rh-undo-out');
+  setTimeout(() => { bar.remove(); renderHistorySection(); }, 300);
+}
+
+// ── 进行中练习：左滑删除 ──────────────────────────
+function _bindSwipePractice(wrap, sessionId) {
+  const content = wrap.querySelector('.rh-content');
+  const delMask = wrap.querySelector('.rh-del-mask');
+  const THRESHOLD = 72, MAX_DRAG = 110;
+  let startX = 0, startY = 0, dx = 0, dragging = false, axis = null;
+
+  function onStart(x, y) { startX=x; startY=y; dx=0; axis=null; dragging=true; content.style.transition='none'; }
+  function onMove(x, y) {
+    if (!dragging) return;
+    const rawDx = x-startX, rawDy = y-startY;
+    if (!axis) { if (Math.abs(rawDx)<6 && Math.abs(rawDy)<6) return; axis=Math.abs(rawDx)>Math.abs(rawDy)?'x':'y'; }
+    if (axis==='y') return;
+    dx = Math.max(-MAX_DRAG, Math.min(0, rawDx));  // 进行中只能左滑
+    content.style.transform = `translateX(${dx}px)`;
+    delMask.style.opacity = Math.min(1, -dx/THRESHOLD);
+  }
+  function onEnd() {
+    if (!dragging || axis!=='x') { dragging=false; return; }
+    dragging=false;
+    content.style.transition = 'transform .25s ease';
+    if (dx < -THRESHOLD) {
+      content.style.transform = 'translateX(-100%)';
+      delMask.style.opacity = 1;
+      _showPracticeDeleteUndo(wrap, sessionId);
+    } else {
+      content.style.transform = 'translateX(0)';
+      delMask.style.opacity = 0;
+    }
+  }
+  wrap.addEventListener('touchstart', e=>onStart(e.touches[0].clientX, e.touches[0].clientY), {passive:true});
+  wrap.addEventListener('touchmove', e=>{ if(axis==='x') e.preventDefault(); onMove(e.touches[0].clientX, e.touches[0].clientY); }, {passive:false});
+  wrap.addEventListener('touchend', onEnd, {passive:true});
+  wrap.addEventListener('mousedown', e=>{ if(e.button!==0) return; onStart(e.clientX,e.clientY);
+    const up=()=>{onEnd();cleanup();}; const mv=e2=>onMove(e2.clientX,e2.clientY);
+    const cleanup=()=>{window.removeEventListener('mousemove',mv);window.removeEventListener('mouseup',up);};
+    window.addEventListener('mousemove',mv); window.addEventListener('mouseup',up); });
+}
+
+function _showPracticeDeleteUndo(wrap, sessionId) {
+  const undo = document.createElement('div');
+  undo.className = 'rh-undo-bar';
+  undo.innerHTML = `<span>已删除</span><button onclick="_undoPracticeDelete(this,'${sessionId}')">撤销</button>`;
+  wrap.replaceWith(undo);
+  requestAnimationFrame(() => undo.classList.add('rh-undo-in'));
+  const fadeTimer = setTimeout(() => undo.classList.add('rh-undo-out'), 2700);
+  const delTimer  = setTimeout(() => { undo.remove(); _deletePracticeSession(sessionId); }, 3000);
+  undo._fadeTimer = fadeTimer;
+  undo._timer = delTimer;
+}
+
+function _undoPracticeDelete(btn, sessionId) {
+  const bar = btn.parentElement;
+  clearTimeout(bar._fadeTimer); clearTimeout(bar._timer);
+  bar.classList.add('rh-undo-out');
+  setTimeout(() => { bar.remove(); renderHistorySection(); }, 300);
+}
+
+function _deletePracticeSession(sessionId, btn) {
+  if (btn) { // PC 按钮点击：confirm
+    if (!confirm('确定放弃这条进行中的记录？')) return;
+  }
+  clearPracticeSession(sessionId);
+  renderHistorySection();
 }
 
 // ── PC 按钮删除（confirm） ──────────────────────────
