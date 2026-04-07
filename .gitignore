@@ -229,3 +229,6 @@ Thumbs.db
 vendor//med-exam-kit
 >>>>>>> Stashed changes
 /med-exam-kit
+# Go 编译产物
+*.exe
+# macOS
