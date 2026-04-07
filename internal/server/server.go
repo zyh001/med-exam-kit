@@ -1109,11 +1109,13 @@ func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
 	// 构建 fingerprint → question 索引，为每条错题附上题目文字
 	type wbItem struct {
 		progress.WrongEntry
-		Text    string `json:"text"`
-		Stem    string `json:"stem,omitempty"`
-		Answer  string `json:"answer,omitempty"`
-		Discuss string `json:"discuss,omitempty"`
-		Unit    string `json:"unit,omitempty"`
+		Text          string   `json:"text"`
+		Stem          string   `json:"stem,omitempty"`
+		Answer        string   `json:"answer,omitempty"`
+		Discuss       string   `json:"discuss,omitempty"`
+		Unit          string   `json:"unit,omitempty"`
+		Options       []string `json:"options,omitempty"`
+		SharedOptions []string `json:"shared_options,omitempty"`
 	}
 	fpIdx := map[string]*models.Question{}
 	for i := range b.Questions {
@@ -1125,11 +1127,13 @@ func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
 		item := wbItem{WrongEntry: e}
 		if q, ok := fpIdx[e.Fingerprint]; ok && len(q.SubQuestions) > 0 {
 			sq := q.SubQuestions[0]
-			item.Text    = sq.Text
-			item.Stem    = q.Stem
-			item.Answer  = sq.EffAnswer()
-			item.Discuss = sq.EffDiscuss()
-			item.Unit    = q.Unit
+			item.Text          = sq.Text
+			item.Stem          = q.Stem
+			item.Answer        = sq.EffAnswer()
+			item.Discuss       = sq.EffDiscuss()
+			item.Unit          = q.Unit
+			item.Options       = sq.Options
+			item.SharedOptions = q.SharedOptions
 		}
 		items = append(items, item)
 	}
