@@ -322,6 +322,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/review/due", s.handleReviewDue)
 	m.HandleFunc("GET /api/wrongbook", s.handleWrongbook)
 	m.HandleFunc("POST /api/sync", s.handleSync)
+	m.HandleFunc("GET /api/debug", s.handleDebug)
 	m.HandleFunc("GET /api/sync/status", s.handleSyncStatus)
 }
 
@@ -1056,9 +1057,11 @@ func (s *Server) handleRecordStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := getUserID(r)
+	// Extra fields for client-side diagnostics
+
 	jsonOK(w, map[string]any{
 		"enabled":   b.RecordEnabled,
-		"db_ready":  b.DB != nil,
+		"db_ready":  b.DB != nil || b.PgStore != nil,
 		"user_id":   uid,
 		"is_legacy": uid == progress.LegacyUser,
 	})
@@ -1174,10 +1177,13 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	// SQLite 模式
 	if b.DB == nil {
+		log.Printf("[sync] WARN: b.DB is nil, RecordEnabled=%v", b.RecordEnabled)
 		jsonOK(w, map[string]any{"ok": false, "error": "DB not initialised"})
 		return
 	}
+	log.Printf("[sync] uid=%s sessions=%d", uid, len(payload.Sessions))
 	done, skipped := progress.RecordSessionsBatch(b.DB, payload.Sessions, uid)
+	log.Printf("[sync] done=%v skipped=%v", done, skipped)
 	jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped})
 }
 
@@ -1961,4 +1967,37 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		ok2 = progress.DeleteSession(b.DB, sessionID, uid)
 	}
 	jsonOK(w, map[string]any{"ok": ok2})
+}
+
+// GET /api/debug — 返回当前题库和数据库配置状态（仅供调试）
+func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
+	type bankInfo struct {
+		Index         int    `json:"index"`
+		Path          string `json:"path"`
+		RecordEnabled bool   `json:"record_enabled"`
+		DBNil         bool   `json:"db_nil"`
+		PgStoreNil    bool   `json:"pgstore_nil"`
+		QuestionCount int    `json:"question_count"`
+	}
+	banks := make([]bankInfo, len(s.cfg.Banks))
+	for i, b := range s.cfg.Banks {
+		var sessCnt int
+		if b.DB != nil {
+			b.DB.QueryRow("SELECT COUNT(*) FROM sessions").Scan(&sessCnt)
+		}
+		banks[i] = bankInfo{
+			Index:         i,
+			Path:          b.Path,
+			RecordEnabled: b.RecordEnabled,
+			DBNil:         b.DB == nil,
+			PgStoreNil:    b.PgStore == nil,
+			QuestionCount: len(b.Questions),
+		}
+	}
+	uid := getUserID(r)
+	jsonOK(w, map[string]any{
+		"uid":           uid,
+		"uid_is_legacy": uid == "_legacy" || uid == "",
+		"banks":         banks,
+	})
 }
