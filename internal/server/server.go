@@ -1095,7 +1095,36 @@ func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"items": nil})
 		return
 	}
-	jsonOK(w, map[string]any{"items": progress.GetWrongFingerprints(b.DB, getUserID(r), 300)})
+	entries := progress.GetWrongFingerprints(b.DB, getUserID(r), 300)
+
+	// 构建 fingerprint → question 索引，为每条错题附上题目文字
+	type wbItem struct {
+		progress.WrongEntry
+		Text    string `json:"text"`
+		Stem    string `json:"stem,omitempty"`
+		Answer  string `json:"answer,omitempty"`
+		Discuss string `json:"discuss,omitempty"`
+		Unit    string `json:"unit,omitempty"`
+	}
+	fpIdx := map[string]*models.Question{}
+	for i := range b.Questions {
+		q := b.Questions[i]
+		fpIdx[q.Fingerprint] = q
+	}
+	items := make([]wbItem, 0, len(entries))
+	for _, e := range entries {
+		item := wbItem{WrongEntry: e}
+		if q, ok := fpIdx[e.Fingerprint]; ok && len(q.SubQuestions) > 0 {
+			sq := q.SubQuestions[0]
+			item.Text    = sq.Text
+			item.Stem    = q.Stem
+			item.Answer  = sq.EffAnswer()
+			item.Discuss = sq.EffDiscuss()
+			item.Unit    = q.Unit
+		}
+		items = append(items, item)
+	}
+	jsonOK(w, map[string]any{"items": items})
 }
 
 func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {

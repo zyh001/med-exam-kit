@@ -3252,12 +3252,58 @@ function _renderWrongbookPreview(items) {
     return;
   }
   if (btn) btn.style.display = '';
-  el.innerHTML = items.slice(0, 8).map(it => `
-    <div class="wrongbook-row">
-      <span class="wrongbook-wrong-cnt">✗${it.wrong}</span>
-      <span class="wrongbook-fp">${esc(it.fingerprint)}</span>
-      <span class="wrongbook-acc">${it.accuracy}%</span>
-    </div>`).join('');
+  el.innerHTML = '';
+  items.slice(0, 8).forEach((it, idx) => {
+    const card = document.createElement('div');
+    card.className = 'wb-card';
+    card.dataset.idx = idx;
+
+    // 题目摘要行（始终可见）
+    const preview = it.text
+      ? it.text.replace(/<[^>]+>/g, '').slice(0, 60) + (it.text.length > 60 ? '…' : '')
+      : it.fingerprint.slice(0, 16) + '…';
+
+    card.innerHTML = `
+      <div class="wb-card-header" onclick="_toggleWbCard(this)">
+        <div class="wb-card-left">
+          <span class="wb-wrong-badge">✗${it.wrong}</span>
+          <span class="wb-preview">${esc(preview)}</span>
+        </div>
+        <div class="wb-card-right">
+          <span class="wb-acc" style="color:${it.accuracy>=60?'var(--success)':'var(--danger)'}">
+            ${it.accuracy}%
+          </span>
+          <span class="wb-chevron">▾</span>
+        </div>
+      </div>
+      <div class="wb-card-body" style="display:none">
+        ${it.stem ? `<div class="wb-stem">${renderHTML(it.stem)}</div>` : ''}
+        <div class="wb-text">${renderHTML(it.text || '（题目内容不可用）')}</div>
+        ${it.answer ? `
+          <div class="wb-answer">
+            <span class="wb-label">正确答案：</span><span>${esc(it.answer)}</span>
+          </div>` : ''}
+        ${it.discuss ? `
+          <div class="wb-discuss">
+            <div class="wb-label">解析</div>
+            <div class="wb-discuss-body">${renderHTML(it.discuss)}</div>
+          </div>` : ''}
+        <div class="wb-meta">
+          ${it.unit ? `<span class="wb-unit">${esc(it.unit)}</span>` : ''}
+          <span class="wb-stat">共答 ${it.total} 次 · 答对 ${it.correct} 次</span>
+        </div>
+      </div>`;
+    el.appendChild(card);
+  });
+}
+
+function _toggleWbCard(header) {
+  const body    = header.nextElementSibling;
+  const chevron = header.querySelector('.wb-chevron');
+  const open    = body.style.display === 'none';
+  body.style.display = open ? '' : 'none';
+  if (chevron) chevron.textContent = open ? '▴' : '▾';
+  header.parentElement.classList.toggle('wb-card-open', open);
 }
 
 // ════════════════════════════════════════════

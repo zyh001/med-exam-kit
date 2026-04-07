@@ -111,7 +111,7 @@ func SetAuthCookie(w http.ResponseWriter, r *http.Request, secret, accessCode st
 	http.SetCookie(w, &http.Cookie{
 		Name:     authCook,
 		Value:    sign(secret, accessCode),
-		MaxAge:   7 * 24 * 3600,
+		MaxAge:   365 * 24 * 3600,
 		HttpOnly: true,
 		SameSite: http.SameSiteStrictMode,
 		Secure:   secure,
