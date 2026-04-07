@@ -113,7 +113,7 @@ func SetAuthCookie(w http.ResponseWriter, r *http.Request, secret, accessCode st
 		Value:    sign(secret, accessCode),
 		MaxAge:   365 * 24 * 3600,
 		HttpOnly: true,
-		SameSite: http.SameSiteStrictMode,
+		SameSite: http.SameSiteLaxMode, // Strict blocks PWA standalone navigation; Lax is safe for our use case
 		Secure:   secure,
 		Path:     "/",
 	})
