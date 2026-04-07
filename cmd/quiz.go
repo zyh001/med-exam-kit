@@ -181,6 +181,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 			fmt.Printf("   %s: %d 道题\n", name, len(qs))
 			pgEntry := server.BankEntry{
 				Path:          fmt.Sprintf("pg:bank:%d", bid),
+				Name:          name,
 				Questions:     qs,
 				RecordEnabled: !noRecord,
 			}

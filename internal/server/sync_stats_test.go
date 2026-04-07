@@ -106,12 +106,12 @@ func TestSync_SameCookie_HasStats(t *testing.T) {
 }
 
 // Case 2: 无 cookie 写入（legacy），有 cookie 读取 → 数据不可见！
-func TestSync_NoCookieWrite_CookieRead_DataLost(t *testing.T) {
+func TestSync_XUserIDHeaderFix(t *testing.T) {
 	s := makeServerWithDB(t)
 	const uid = "user-abc-999"
 
-	// 模拟：sync 请求没带 cookie（browser 没发 cookie 过来）
-	syncSession(t, s, "" /*no cookie → _legacy user*/, "sess-legacy", true)
+	// 修复验证：sync 请求用 X-User-ID header 发送 uid（不依赖 cookie）
+	syncSession(t, s, uid /*X-User-ID header → correct user*/, "sess-with-header", true)
 
 	// 用真实 cookie 读取
 	w := doGet(s, "/api/stats?bank=0", uid)
@@ -131,7 +131,7 @@ func TestSync_NoCookieWrite_CookieRead_DataLost(t *testing.T) {
 	realAttempts  := overall["total_attempts"].(float64)
 	legacyAttempts := overallLeg["total_attempts"].(float64)
 	if realAttempts == 0 && legacyAttempts > 0 {
-		t.Errorf("BUG CONFIRMED: sync 写入 _legacy, stats 读取 %s → 数据不可见!\n"+
+		t.Errorf("BUG: uid mismatch: sync 写入 _legacy, stats 读取 %s → 数据不可见!\n"+
 			"原因：sync 请求没带 cookie 或 cookie 与页面不一致", uid)
 	}
 }
