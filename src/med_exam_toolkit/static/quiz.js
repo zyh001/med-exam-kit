@@ -2435,7 +2435,7 @@ async function _recordMemoSession() {
     items,
   };
   try {
-    await SyncManager.record(payload);
+    await SyncManager.record(payload, S.bankID);
   } catch(e) {
     // 降级直接 POST
     try {
@@ -2931,7 +2931,7 @@ async function _recordSessionToServer(results, questions, ans, sessionId) {
   // 即使服务端宕机或无网络，记录也不会丢失
   if (typeof SyncManager !== 'undefined') {
     try {
-      await SyncManager.record(payload);
+      await SyncManager.record(payload, S.bankID);
       return;
     } catch (e) {
       // IndexedDB 不可用（如隐私模式被禁）→ 降级直接 POST
