@@ -3296,6 +3296,18 @@ function _renderWrongbookPreview(items) {
           ? `<div class="wb-text">${renderHTML(it.text)}</div>`
           : `<div class="wb-no-text">题目与当前题库版本不匹配，无法显示内容<br>
              <span style="font-size:11px;opacity:.6">ID: ${esc(it.fingerprint)}</span></div>`}
+        ${(() => {
+          const opts = it.options || it.shared_options || [];
+          if (!opts.length) return '';
+          return '<div class="wb-options">' +
+            opts.slice(0, 5).map((opt, i) => {
+              const letter = 'ABCDE'[i];
+              const isCor  = it.answer && (it.answer === letter || it.answer === opt ||
+                             (it.answer.length === 1 && it.answer.toUpperCase() === letter));
+              return `<div class="wb-option${isCor ? ' wb-option-correct' : ''}">` +
+                `<span class="wb-option-key">${letter}</span>${esc(opt)}</div>`;
+            }).join('') + '</div>';
+        })()}
         ${it.answer ? `
           <div class="wb-answer">
             <span class="wb-label">正确答案：</span><strong>${esc(it.answer)}</strong>
@@ -3443,7 +3455,7 @@ function renderHistorySection() {
 
   // ── 已完成历史 ───────────────────────────────────
   sorted.slice(0, 20).forEach((h, idx) => {
-    const id      = h.id || String(idx);
+    const id      = h.id || ('idx:' + idx);
     const isLocal = !h.id || localOnlyH.some(l => l.id === h.id);
     const isPinned = pinned.has(h.id);
     const syncBadge = isLocal && serverH.length
@@ -3719,8 +3731,8 @@ async function deleteHistoryItem(id, idx) {
     if (!S.deletedIds) S.deletedIds = new Set();
     S.deletedIds.add(id);
   }
-  // 1. 从服务端删除（有 id 且非纯数字 idx 代用 id 时）
-  if (id && isNaN(Number(id))) {
+  // 1. 从服务端删除（有真实 id，排除 'idx:N' 占位符）
+  if (id && !id.startsWith('idx:')) {
     try {
       await apiFetch('/api/session/' + encodeURIComponent(id) + '?' + bankQS(), {
         method: 'DELETE',
@@ -3732,7 +3744,13 @@ async function deleteHistoryItem(id, idx) {
   }
 
   // 2. 从本地历史删除
-  S.history = S.history.filter(h => h.id !== id && S.history.indexOf(h) !== idx);
+  //    有真实 id → 按 id 匹配；仅有占位 idx:N → 按数组位置匹配
+  if (id && !id.startsWith('idx:')) {
+    S.history = S.history.filter(h => h.id !== id);
+  } else {
+    const fakeIdx = parseInt(id.replace('idx:', ''), 10);
+    S.history = S.history.filter((_, i) => i !== fakeIdx);
+  }
   localStorage.setItem(historyKey(), JSON.stringify(S.history));
   if (S.localOnlyHistory) {
     S.localOnlyHistory = S.localOnlyHistory.filter(h => h.id !== id);
