@@ -182,6 +182,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 			pgEntry := server.BankEntry{
 				Path:          fmt.Sprintf("pg:bank:%d", bid),
 				Name:          name,
+				BankID:        int(bid),
 				Questions:     qs,
 				RecordEnabled: !noRecord,
 			}

@@ -36,6 +36,7 @@ import (
 type BankEntry struct {
 	Path          string
 	Name          string             // display name; overrides Path-derived name
+	BankID        int                // PG bank_id (0 for SQLite/legacy)
 	Password      string
 	Questions     []*models.Question
 	DB            *sql.DB             // SQLite progress DB (nil when using PgStore)
@@ -48,14 +49,14 @@ type BankEntry struct {
 type pgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
 	RecordSessionsBatch(ctx context.Context, sessions []map[string]any, userID string) (processed, skipped []string)
-	GetOverallStats(ctx context.Context, userID string) store.OverallStats
-	GetUnitStats(ctx context.Context, userID string) []store.UnitStat
-	GetWrongFingerprints(ctx context.Context, userID string, limit int) []store.WrongEntry
-	GetDueFingerprints(ctx context.Context, userID string) []string
-	GetHistory(ctx context.Context, userID string, limit int) []store.HistoryEntry
-	GetSyncStatus(ctx context.Context, userID string) map[string]any
-	ClearUserData(ctx context.Context, userID string) map[string]int
-	DiagAttempts(ctx context.Context, userID string) map[string]any
+	GetOverallStats(ctx context.Context, userID string, bankID int) store.OverallStats
+	GetUnitStats(ctx context.Context, userID string, bankID int) []store.UnitStat
+	GetWrongFingerprints(ctx context.Context, userID string, bankID int, limit int) []store.WrongEntry
+	GetDueFingerprints(ctx context.Context, userID string, bankID int) []string
+	GetHistory(ctx context.Context, userID string, bankID int, limit int) []store.HistoryEntry
+	GetSyncStatus(ctx context.Context, userID string, bankID int) map[string]any
+	ClearUserData(ctx context.Context, userID string, bankID int) map[string]int
+	DiagAttempts(ctx context.Context, userID string, bankID int) map[string]any
 }
 
 // bankName derives a display name from the file path (or Name if set).
@@ -1086,11 +1087,17 @@ func (s *Server) handleRecordClear(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
-	if b.DB == nil {
-		jsonOK(w, map[string]any{"ok": true, "deleted": map[string]int{}})
+	uid := getUserID(r)
+	if b.PgStore != nil {
+		deleted := b.PgStore.ClearUserData(r.Context(), uid, b.BankID)
+		jsonOK(w, map[string]any{"ok": true, "deleted": deleted})
 		return
 	}
-	jsonOK(w, map[string]any{"ok": true, "deleted": progress.ClearUserData(b.DB, getUserID(r))})
+	if b.DB == nil {
+		jsonOK(w, map[string]any{"ok": true, "deleted": map[string]int{"attempts":0,"sessions":0,"sm2_cards":0}})
+		return
+	}
+	jsonOK(w, map[string]any{"ok": true, "deleted": progress.ClearUserData(b.DB, uid)})
 }
 
 func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -1102,10 +1109,10 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	uid := getUserID(r)
 	ctx := r.Context()
 	if b.PgStore != nil {
-		ov := b.PgStore.GetOverallStats(ctx, uid)
+		ov := b.PgStore.GetOverallStats(ctx, uid, b.BankID)
 		accuracy := 0
 		if ov.Attempts > 0 { accuracy = int(math.Round(float64(ov.Correct)/float64(ov.Attempts)*100)) }
-		wrongTopics := len(b.PgStore.GetWrongFingerprints(ctx, uid, 10000))
+		wrongTopics := len(b.PgStore.GetWrongFingerprints(ctx, uid, b.BankID, 10000))
 		jsonOK(w, map[string]any{
 			"overall": map[string]any{
 				"total_attempts": ov.Attempts, "correct": ov.Correct,
@@ -1113,8 +1120,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 				"sessions": ov.Sessions, "due_today": ov.DueToday,
 				"wrong_topics": wrongTopics,
 			},
-			"history": b.PgStore.GetHistory(ctx, uid, 30),
-			"units":   b.PgStore.GetUnitStats(ctx, uid),
+			"history": b.PgStore.GetHistory(ctx, uid, b.BankID, 30),
+			"units":   b.PgStore.GetUnitStats(ctx, uid, b.BankID),
 		})
 		return
 	}
@@ -1137,7 +1144,7 @@ func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := getUserID(r)
 	if b.PgStore != nil {
-		jsonOK(w, map[string]any{"fingerprints": b.PgStore.GetDueFingerprints(r.Context(), uid)})
+		jsonOK(w, map[string]any{"fingerprints": b.PgStore.GetDueFingerprints(r.Context(), uid, b.BankID)})
 		return
 	}
 	if b.DB == nil {
@@ -1156,7 +1163,7 @@ func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
 	uid := getUserID(r)
 	var entries []progress.WrongEntry
 	if b.PgStore != nil {
-		for _, e := range b.PgStore.GetWrongFingerprints(r.Context(), uid, 300) {
+		for _, e := range b.PgStore.GetWrongFingerprints(r.Context(), uid, b.BankID, 300) {
 			entries = append(entries, progress.WrongEntry{
 				Fingerprint: e.Fingerprint, Total: e.Total,
 				Correct: e.Correct, Wrong: e.Wrong, Accuracy: e.Accuracy,
@@ -1217,6 +1224,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 
 	// PostgreSQL 模式
 	if b.PgStore != nil {
+		for i := range payload.Sessions {
+			if payload.Sessions[i] == nil { payload.Sessions[i] = map[string]any{} }
+			payload.Sessions[i]["bank_id"] = b.BankID
+		}
 		done, skipped := b.PgStore.RecordSessionsBatch(r.Context(), payload.Sessions, uid)
 		jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped})
 		return
@@ -1227,7 +1238,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"ok": false, "error": "DB not initialised"})
 		return
 	}
-	log.Printf("[sync] uid=%s sessions=%d", uid, len(payload.Sessions))
+	// Inject bank_id from BankEntry into each session so progress is isolated per bank
+	for i := range payload.Sessions {
+		if payload.Sessions[i] == nil { payload.Sessions[i] = map[string]any{} }
+		payload.Sessions[i]["bank_id"] = b.BankID
+	}
+	log.Printf("[sync] uid=%s bank=%d sessions=%d", uid, b.BankID, len(payload.Sessions))
 	done, skipped := progress.RecordSessionsBatch(b.DB, payload.Sessions, uid)
 	log.Printf("[sync] done=%v skipped=%v", done, skipped)
 	jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped})
@@ -1241,7 +1257,7 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := getUserID(r)
 	if b.PgStore != nil {
-		jsonOK(w, b.PgStore.GetSyncStatus(r.Context(), uid))
+		jsonOK(w, b.PgStore.GetSyncStatus(r.Context(), uid, b.BankID))
 		return
 	}
 	if b.DB == nil {
@@ -1988,7 +2004,7 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	uid := getUserID(r)
 	if b.PgStore != nil {
-		jsonOK(w, map[string]any{"items": b.PgStore.GetHistory(r.Context(), uid, limit)})
+		jsonOK(w, map[string]any{"items": b.PgStore.GetHistory(r.Context(), uid, b.BankID, limit)})
 		return
 	}
 	if b.DB == nil {
@@ -2058,18 +2074,18 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 			QuestionCount: len(b.Questions),
 		}
 		if b.PgStore != nil {
-			ov := b.PgStore.GetOverallStats(ctx, uid)
+			ov := b.PgStore.GetOverallStats(ctx, uid, b.BankID)
 			info.Sessions      = ov.Sessions
 			info.Attempts      = ov.Attempts
 			info.WrongAttempts = ov.Wrong
-			info.WrongTopics   = len(b.PgStore.GetWrongFingerprints(ctx, uid, 10000))
+			info.WrongTopics   = len(b.PgStore.GetWrongFingerprints(ctx, uid, b.BankID, 10000))
 			banks[i] = info
 			// Detailed diagnostic for first bank
 			if i == 0 {
 				jsonOK(w, map[string]any{
 					"uid": uid, "uid_is_legacy": uid == "_legacy" || uid == "",
 					"banks": banks,
-					"diag": b.PgStore.DiagAttempts(ctx, uid),
+					"diag": b.PgStore.DiagAttempts(ctx, uid, b.BankID),
 				})
 				return
 			}

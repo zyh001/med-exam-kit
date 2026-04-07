@@ -52,6 +52,7 @@ CREATE INDEX IF NOT EXISTS idx_sq_qid ON sub_questions(question_id);
 CREATE TABLE IF NOT EXISTS sessions (
     id        TEXT    NOT NULL,
     user_id   TEXT    NOT NULL DEFAULT '_legacy',
+    bank_id   BIGINT  NOT NULL DEFAULT 0,
     mode      TEXT,
     total     INTEGER DEFAULT 0,
     correct   INTEGER DEFAULT 0,
@@ -61,7 +62,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     sess_date TEXT,
     units     JSONB   DEFAULT '[]',
     ts        BIGINT  NOT NULL,
-    PRIMARY KEY (user_id, id)
+    PRIMARY KEY (user_id, bank_id, id)
 );
 CREATE INDEX IF NOT EXISTS idx_sess_uid ON sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_sess_ts  ON sessions(ts);
@@ -69,6 +70,7 @@ CREATE INDEX IF NOT EXISTS idx_sess_ts  ON sessions(ts);
 CREATE TABLE IF NOT EXISTS attempts (
     id          BIGSERIAL PRIMARY KEY,
     user_id     TEXT    NOT NULL DEFAULT '_legacy',
+    bank_id     BIGINT  NOT NULL DEFAULT 0,
     fingerprint TEXT    NOT NULL,
     session_id  TEXT,
     result      INTEGER NOT NULL,
@@ -83,11 +85,22 @@ CREATE INDEX IF NOT EXISTS idx_att_uid_fp ON attempts(user_id, fingerprint);
 
 CREATE TABLE IF NOT EXISTS sm2 (
     user_id     TEXT    NOT NULL DEFAULT '_legacy',
+    bank_id     BIGINT  NOT NULL DEFAULT 0,
     fingerprint TEXT    NOT NULL,
     ef          FLOAT   NOT NULL DEFAULT 2.5,
     interval    INTEGER NOT NULL DEFAULT 1,
     reps        INTEGER NOT NULL DEFAULT 0,
     next_due    TEXT    NOT NULL,
     updated_at  BIGINT  NOT NULL,
-    PRIMARY KEY (user_id, fingerprint)
+    PRIMARY KEY (user_id, bank_id, fingerprint)
 );
+
+-- ── Migration: add bank_id if upgrading from old schema ────────────
+ALTER TABLE sessions ADD COLUMN IF NOT EXISTS bank_id BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE attempts ADD COLUMN IF NOT EXISTS bank_id BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE sm2      ADD COLUMN IF NOT EXISTS bank_id BIGINT NOT NULL DEFAULT 0;
+
+-- Additional indexes for bank-scoped queries
+CREATE INDEX IF NOT EXISTS idx_sess_uid_bank ON sessions(user_id, bank_id);
+CREATE INDEX IF NOT EXISTS idx_att_uid_bank  ON attempts(user_id, bank_id);
+CREATE INDEX IF NOT EXISTS idx_sm2_uid_bank  ON sm2(user_id, bank_id);

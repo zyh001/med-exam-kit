@@ -2916,6 +2916,7 @@ async function _recordSessionToServer(results, questions, ans, sessionId) {
   const units  = [...new Set(questions.map(q => q.unit).filter(Boolean))];
   const payload = {
     id:       sessionId || String(Date.now()),
+    bank_id:  S.bankID,   // for PG multi-bank isolation
     mode:     results.mode,
     total:    results.total,
     correct:  results.correct,
@@ -3297,7 +3298,7 @@ function _renderWrongbookPreview(items) {
   }
   if (btn) btn.style.display = '';
   el.innerHTML = '';
-  items.slice(0, 20).forEach((it, idx) => {
+  items.slice(0, 5).forEach((it, idx) => {
     const hasText = it.text && it.text.trim();
     // 去除 HTML 标签后的纯文字
     const plainText = hasText

@@ -216,11 +216,12 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 		userID = "_legacy"
 	}
 	unitsJSON, _ := json.Marshal(session["units"])
+	bankID := intV(session["bank_id"]) // 0 if not provided (backward compat)
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO sessions(id,user_id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts)
-		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT(user_id,id) DO NOTHING`,
-		fmt.Sprint(session["id"]), userID,
+		INSERT INTO sessions(id,user_id,bank_id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+		ON CONFLICT DO NOTHING`,
+		fmt.Sprint(session["id"]), userID, bankID,
 		str(session["mode"]), intV(session["total"]), intV(session["correct"]),
 		intV(session["wrong"]), intV(session["skip"]), intV(session["time_sec"]),
 		str(session["date"]), unitsJSON, time.Now().UnixMilli())
@@ -234,15 +235,15 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 				continue
 			}
 			s.pool.Exec(ctx, `
-				INSERT INTO attempts(user_id,fingerprint,session_id,result,mode,unit,ts)
-				VALUES($1,$2,$3,$4,$5,$6,$7)`,
-				userID, str(item["fingerprint"]), sid,
+				INSERT INTO attempts(user_id,bank_id,fingerprint,session_id,result,mode,unit,ts)
+				VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
+				userID, bankID, str(item["fingerprint"]), sid,
 				intV(item["result"]), str(item["mode"]), str(item["unit"]),
 				time.Now().UnixMilli())
 			// SM-2
 			qual := intV(item["result"])
 			if qual >= 0 {
-				s.updateSM2Tx(ctx, userID, str(item["fingerprint"]), qual)
+				s.updateSM2Tx(ctx, userID, bankID, str(item["fingerprint"]), qual)
 			}
 		}
 	}
@@ -273,14 +274,14 @@ func (s *Store) DeleteSession(ctx context.Context, sessionID, userID string) boo
 	return err == nil && res.RowsAffected() > 0
 }
 
-func (s *Store) GetDueFingerprints(ctx context.Context, userID string) []string {
+func (s *Store) GetDueFingerprints(ctx context.Context, userID string, bankID int) []string {
 	if userID == "" {
 		userID = "_legacy"
 	}
 	today := time.Now().Format("2006-01-02")
 	rows, err := s.pool.Query(ctx,
-		`SELECT fingerprint FROM sm2 WHERE user_id=$1 AND next_due<=$2 ORDER BY next_due ASC`,
-		userID, today)
+		`SELECT fingerprint FROM sm2 WHERE user_id=$1 AND bank_id=$2 AND next_due<=$3 ORDER BY next_due ASC`,
+		userID, bankID, today)
 	if err != nil {
 		return nil
 	}
@@ -295,15 +296,15 @@ func (s *Store) GetDueFingerprints(ctx context.Context, userID string) []string 
 }
 
 func (s *Store) UpdateSM2(ctx context.Context, userID, fingerprint string, quality int) error {
-	return s.updateSM2Tx(ctx, userID, fingerprint, quality)
+	return s.updateSM2Tx(ctx, userID, 0, fingerprint, quality)
 }
 
-func (s *Store) updateSM2Tx(ctx context.Context, userID, fingerprint string, quality int) error {
+func (s *Store) updateSM2Tx(ctx context.Context, userID string, bankID int, fingerprint string, quality int) error {
 	var ef float64 = 2.5
 	var interval, reps int
 	s.pool.QueryRow(ctx,
-		`SELECT ef,interval,reps FROM sm2 WHERE user_id=$1 AND fingerprint=$2`,
-		userID, fingerprint).Scan(&ef, &interval, &reps)
+		`SELECT ef,interval,reps FROM sm2 WHERE user_id=$1 AND bank_id=$2 AND fingerprint=$3`,
+		userID, bankID, fingerprint).Scan(&ef, &interval, &reps)
 
 	// SM-2 algorithm
 	if quality >= 3 {
@@ -326,15 +327,15 @@ func (s *Store) updateSM2Tx(ctx context.Context, userID, fingerprint string, qua
 	dueDate := time.Now().AddDate(0, 0, interval).Format("2006-01-02")
 
 	_, err := s.pool.Exec(ctx, `
-		INSERT INTO sm2(user_id,fingerprint,ef,interval,reps,next_due,updated_at)
-		VALUES($1,$2,$3,$4,$5,$6,$7)
-		ON CONFLICT(user_id,fingerprint) DO UPDATE
-		SET ef=$3,interval=$4,reps=$5,next_due=$6,updated_at=$7`,
-		userID, fingerprint, ef, interval, reps, dueDate, time.Now().UnixMilli())
+		INSERT INTO sm2(user_id,bank_id,fingerprint,ef,interval,reps,next_due,updated_at)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+		ON CONFLICT(user_id,bank_id,fingerprint) DO UPDATE
+		SET ef=$4,interval=$5,reps=$6,next_due=$7,updated_at=$8`,
+		userID, bankID, fingerprint, ef, interval, reps, dueDate, time.Now().UnixMilli())
 	return err
 }
 
-func (s *Store) GetHistory(ctx context.Context, userID string, limit int) []store.HistoryEntry {
+func (s *Store) GetHistory(ctx context.Context, userID string, bankID int, limit int) []store.HistoryEntry {
 	if userID == "" {
 		userID = "_legacy"
 	}
@@ -372,13 +373,13 @@ func (s *Store) GetHistory(ctx context.Context, userID string, limit int) []stor
 	return out
 }
 
-func (s *Store) GetOverallStats(ctx context.Context, userID string) store.OverallStats {
+func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int) store.OverallStats {
 	if userID == "" {
 		userID = "_legacy"
 	}
 	var st store.OverallStats
 	var sessions int64
-	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sessions WHERE user_id=$1`, userID).Scan(&sessions)
+	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sessions WHERE user_id=$1 AND bank_id=$2`, userID, bankID).Scan(&sessions)
 	st.Sessions = int(sessions)
 	var attempts, correct, wrong, skip int64
 	s.pool.QueryRow(ctx, `
@@ -386,19 +387,19 @@ func (s *Store) GetOverallStats(ctx context.Context, userID string) store.Overal
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END),
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END),
 		       SUM(CASE WHEN result=-1 THEN 1 ELSE 0 END)
-		FROM attempts WHERE user_id=$1`, userID).Scan(
+		FROM attempts WHERE user_id=$1 AND bank_id=$2`, userID, bankID).Scan(
 		&attempts, &correct, &wrong, &skip)
 	st.Attempts, st.Correct, st.Wrong, st.Skip =
 		int(attempts), int(correct), int(wrong), int(skip)
 	today := time.Now().Format("2006-01-02")
 	var due int64
 	s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM sm2 WHERE user_id=$1 AND next_due<=$2`, userID, today).Scan(&due)
+		`SELECT COUNT(*) FROM sm2 WHERE user_id=$1 AND bank_id=$2 AND next_due<=$3`, userID, bankID, today).Scan(&due)
 	st.DueToday = int(due)
 	return st
 }
 
-func (s *Store) GetUnitStats(ctx context.Context, userID string) []store.UnitStat {
+func (s *Store) GetUnitStats(ctx context.Context, userID string, bankID int) []store.UnitStat {
 	if userID == "" {
 		userID = "_legacy"
 	}
@@ -435,7 +436,7 @@ func (s *Store) GetUnitStats(ctx context.Context, userID string) []store.UnitSta
 	return out
 }
 
-func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, limit int) []store.WrongEntry {
+func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, bankID int, limit int) []store.WrongEntry {
 	if userID == "" {
 		userID = "_legacy"
 	}
@@ -479,27 +480,32 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, limit i
 	return out
 }
 
-func (s *Store) GetSyncStatus(ctx context.Context, userID string) map[string]any {
+func (s *Store) GetSyncStatus(ctx context.Context, userID string, bankID int) map[string]any {
 	if userID == "" {
 		userID = "_legacy"
 	}
 	var cnt int
 	var lastTS *int64
 	s.pool.QueryRow(ctx,
-		`SELECT COUNT(*), MAX(ts) FROM sessions WHERE user_id=$1`, userID).Scan(&cnt, &lastTS)
+		`SELECT COUNT(*), MAX(ts) FROM sessions WHERE user_id=$1 AND bank_id=$2`, userID, bankID).Scan(&cnt, &lastTS)
 	return map[string]any{"session_count": cnt, "last_ts": lastTS}
 }
 
-func (s *Store) ClearUserData(ctx context.Context, userID string) map[string]int {
+func (s *Store) ClearUserData(ctx context.Context, userID string, bankID int) map[string]int {
 	if userID == "" {
 		userID = "_legacy"
 	}
 	counts := map[string]int{}
 	for _, tbl := range []string{"attempts", "sessions", "sm2"} {
-		res, _ := s.pool.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id=$1", tbl), userID)
+		res, _ := s.pool.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id=$1 AND bank_id=$2", tbl), userID, int64(bankID))
 		counts[tbl] = int(res.RowsAffected())
 	}
-	return counts
+	// Return with consistent key names matching SQLite
+	return map[string]int{
+		"attempts":  counts["attempts"],
+		"sessions":  counts["sessions"],
+		"sm2_cards": counts["sm2"],
+	}
 }
 
 func (s *Store) MigrateUserData(ctx context.Context, fromUID, toUID string) (map[string]int, error) {
@@ -556,13 +562,13 @@ func intV(v any) int {
 }
 
 // DiagAttempts returns raw diagnostics about the attempts table for a user.
-func (s *Store) DiagAttempts(ctx context.Context, userID string) map[string]any {
+func (s *Store) DiagAttempts(ctx context.Context, userID string, bankID int) map[string]any {
 	out := map[string]any{}
 
 	// 1. Raw counts by result value
 	rows, err := s.pool.Query(ctx,
-		`SELECT result, COUNT(*) FROM attempts WHERE user_id=$1 GROUP BY result ORDER BY result`,
-		userID)
+		`SELECT result, COUNT(*) FROM attempts WHERE user_id=$1 AND bank_id=$2 GROUP BY result ORDER BY result`,
+		userID, bankID)
 	if err != nil {
 		out["result_counts_error"] = err.Error()
 	} else {
@@ -582,7 +588,7 @@ func (s *Store) DiagAttempts(ctx context.Context, userID string) map[string]any 
 
 	// 2. Sample fingerprints with result=0
 	rows2, err2 := s.pool.Query(ctx,
-		`SELECT fingerprint, result FROM attempts WHERE user_id=$1 LIMIT 5`, userID)
+		`SELECT fingerprint, result FROM attempts WHERE user_id=$1 AND bank_id=$2 LIMIT 5`, userID, bankID)
 	if err2 != nil {
 		out["sample_error"] = err2.Error()
 	} else {
