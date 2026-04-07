@@ -357,7 +357,7 @@ func GetWrongFingerprints(db *sql.DB, userID string, limit int) []WrongEntry {
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong,
 		       MAX(ts) AS last_ts
 		FROM attempts
-		WHERE user_id=? AND result!=-1
+		WHERE user_id=? AND result!= -1
 		GROUP BY fingerprint HAVING wrong>0
 		ORDER BY wrong DESC, last_ts DESC LIMIT ?`, userID, limit)
 	if err != nil {
@@ -452,7 +452,7 @@ func GetUnitStats(db *sql.DB, userID string) []UnitStat {
 		SELECT unit, COUNT(*) AS total,
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct
 		FROM attempts
-		WHERE user_id=? AND result!=-1 AND unit IS NOT NULL AND unit!=''
+		WHERE user_id=? AND result!= -1 AND unit IS NOT NULL AND unit!=''
 		GROUP BY unit ORDER BY total DESC`, userID)
 	if err != nil {
 		return nil
@@ -493,7 +493,7 @@ func GetOverallStats(db *sql.DB, userID string) OverallStats {
 	db.QueryRow(`SELECT COUNT(*),
 		SUM(CASE WHEN result=1 THEN 1 ELSE 0 END),
 		SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)
-		FROM attempts WHERE user_id=? AND result!=-1`, userID).
+		FROM attempts WHERE user_id=? AND result!= -1`, userID).
 		Scan(&total, &correct, &wrong)
 
 	s.TotalAttempts = int(total.Int64)
