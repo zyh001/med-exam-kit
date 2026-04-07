@@ -1650,7 +1650,7 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .wb-preview-text{
   font-size:14px;line-height:1.5;color:var(--text);
-  /* 最多2行截断 */
+  /* 最多3行截断 */
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
   overflow:hidden;
   /* 降级：固定最大高度 */
@@ -1677,6 +1677,21 @@ button,a,[role=button],label{touch-action:manipulation}
   padding:14px;border-top:1px solid var(--border);
   background:var(--surface);
 }
+/* 选项列表 */
+.wb-options{ display:flex;flex-direction:column;gap:2px;margin-bottom:10px }
+.wb-option{
+  display:flex;align-items:flex-start;gap:8px;
+  padding:5px 8px;border-radius:6px;
+  font-size:13px;line-height:1.5;color:var(--text);
+}
+.wb-option-key{
+  flex-shrink:0;font-weight:700;min-width:18px;
+  color:var(--muted);
+}
+.wb-option-correct{
+  background:var(--success-bg);color:var(--success);border-radius:6px;
+}
+.wb-option-correct .wb-option-key{ color:var(--success) }
 .wb-stem{
   font-size:13px;color:var(--muted);line-height:1.6;
   border-left:3px solid var(--border);
