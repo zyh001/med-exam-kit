@@ -1151,7 +1151,13 @@ func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"fingerprints": nil})
 		return
 	}
-	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprints(b.DB, uid)})
+	// Filter to fingerprints that exist in the current bank
+	allDue := progress.GetDueFingerprints(b.DB, uid)
+	fpSet := make(map[string]bool, len(b.Questions))
+	for i := range b.Questions { fpSet[b.Questions[i].Fingerprint] = true }
+	filtered := allDue[:0]
+	for _, fp := range allDue { if fpSet[fp] { filtered = append(filtered, fp) } }
+	jsonOK(w, map[string]any{"fingerprints": filtered})
 }
 
 func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
@@ -1192,20 +1198,27 @@ func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
 		q := b.Questions[i]
 		fpIdx[q.Fingerprint] = q
 	}
+	// Only include entries whose fingerprint exists in the current bank's questions.
+	// This is the definitive cross-bank filter: even if DB returns stale rows from
+	// another bank (e.g. old data with bank_id=0), they are silently dropped here.
 	items := make([]wbItem, 0, len(entries))
 	for _, e := range entries {
-		item := wbItem{WrongEntry: e}
-		if q, ok := fpIdx[e.Fingerprint]; ok && len(q.SubQuestions) > 0 {
-			sq := q.SubQuestions[0]
-			item.Text          = sq.Text
-			item.Stem          = q.Stem
-			item.Answer        = sq.EffAnswer()
-			item.Discuss       = sq.EffDiscuss()
-			item.Unit          = q.Unit
-			item.Options       = sq.Options
-			item.SharedOptions = q.SharedOptions
+		q, found := fpIdx[e.Fingerprint]
+		if !found || len(q.SubQuestions) == 0 {
+			// Fingerprint does not belong to current bank — skip entirely
+			continue
 		}
-		items = append(items, item)
+		sq := q.SubQuestions[0]
+		items = append(items, wbItem{
+			WrongEntry:    e,
+			Text:          sq.Text,
+			Stem:          q.Stem,
+			Answer:        sq.EffAnswer(),
+			Discuss:       sq.EffDiscuss(),
+			Unit:          q.Unit,
+			Options:       sq.Options,
+			SharedOptions: q.SharedOptions,
+		})
 	}
 	jsonOK(w, map[string]any{"items": items})
 }
