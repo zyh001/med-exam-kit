@@ -103,9 +103,10 @@ const SyncManager = (() => {
   // ══════════════════════════════════════════
 
   /** 把一条 session payload 写入本地 IndexedDB 队列 */
-  async function _enqueue(payload) {
+  async function _enqueue(payload, bankIdx) {
     const entry = {
       session_id: payload.id,
+      bank:      (bankIdx !== undefined && bankIdx !== null) ? Number(bankIdx) : 0,
       payload,
       queued_at: Date.now(),
       retries:   0,
@@ -230,8 +231,8 @@ const SyncManager = (() => {
    * 1. 先写 IndexedDB（可靠，断网也不丢）
    * 2. 立即尝试 flush 到服务端
    */
-  async function record(payload) {
-    await _enqueue(payload);
+  async function record(payload, bankIdx) {
+    await _enqueue(payload, bankIdx);
     flush();   // 不 await，后台运行
   }
 
