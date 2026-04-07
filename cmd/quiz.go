@@ -54,7 +54,7 @@ func init() {
 	quizCmd.Flags().StringArrayP("bank", "b", nil, "题库路径（.mqb，可重复：-b a.mqb -b b.mqb）")
 	// PostgreSQL flags
 	quizCmd.Flags().String("db", "", "PostgreSQL DSN（postgres://user:pass@host/db）\n留空使用本地 SQLite（默认）")
-	quizCmd.Flags().Int64Array("bank-id", nil, "从 PostgreSQL 加载的题库 ID（配合 --db 使用）")
+	quizCmd.Flags().Int64Slice("bank-id", nil, "从 PostgreSQL 加载的题库 ID（配合 --db 使用）")
 }
 
 func runQuiz(cmd *cobra.Command, args []string) error {
@@ -66,7 +66,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	noPin, _ := cmd.Flags().GetBool("no-pin")
 	customPin, _ := cmd.Flags().GetString("pin")
 	pgDSN, _ := cmd.Flags().GetString("db")
-	bankIDs, _ := cmd.Flags().GetInt64Array("bank-id")
+	bankIDs, _ := cmd.Flags().GetInt64Slice("bank-id")
 	bankPaths, _ := cmd.Flags().GetStringArray("bank")
 
 	if len(bankPaths) == 0 && len(bankIDs) == 0 {
