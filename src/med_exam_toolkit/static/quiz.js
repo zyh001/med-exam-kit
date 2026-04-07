@@ -2655,20 +2655,37 @@ function esc(s) {
       .replace(/"/g,'"').replace(/'/g,'&#39;');
 }
 
-function highlightInductiveWords(text) {
-  // 关键词按长度降序，确保长词优先匹配（如"不可能"先于"不可"）
+function highlightInductiveWords(html) {
+  // 关键词列表：独立维护，新增/删除在这里改即可
+  // 不需要按长度手动排序——算法会自动处理
   const keywords = [
     '不恰当', '不合适', '不正确', '不包括', '不属于', '不常见',
     '不得不', '不适用', '不对的', '错误的',
     '不可能', '排除', '除外', '除了', '不是', '无需', '不必',
     '禁止', '不得', '不应', '不可', '不宜', '欠妥', '不妥',
     '不当', '相反', '例外', '无关', '不含', '无效'
-  ].sort((a, b) => b.length - a.length); // 运行时再按长度排序，防止手动排序错误
+  ];
 
-  // 一次性构建单个 alternation 正则，避免多次替换导致已包裹 span 被二次匹配
-  const escaped = keywords.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
-  const regex = new RegExp(escaped.join('|'), 'g');
-  return text.replace(regex, m => `<span class="inductive-word">${m}</span>`);
+  // 核心思路：把 HTML 拆成「标签」和「纯文字」交替的片段，
+  // 只对纯文字片段做关键词替换，标签原样返回。
+  // 这样已经包裹在 <span> 里的文字不会被第二次匹配，
+  // 同时"不可能"和"不可"各自出现时都能正常高亮。
+  //
+  // 在纯文字片段内，用长词优先的 alternation 一次性匹配，
+  // 保证同一位置只会被最长的关键词命中一次。
+  const sorted  = [...keywords].sort((a, b) => b.length - a.length);
+  const escaped = sorted.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const kwRe    = new RegExp(escaped.join('|'), 'g');
+
+  // /(<[^>]+>)|([^<]+)/g 将整个字符串切分为：
+  //   group 1：HTML 标签（< ... >）
+  //   group 2：标签之间的纯文字
+  return html.replace(/(<[^>]+>)|([^<]+)/g, (match, tag, text) => {
+    if (tag)  return tag;                              // 是标签：原样返回
+    if (!text) return match;
+    return text.replace(kwRe, m =>                    // 是纯文字：高亮关键词
+      `<span class="inductive-word">${m}</span>`);
+  });
 }
 
 function showReview() {
