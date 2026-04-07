@@ -303,6 +303,8 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/record/status", s.handleRecordStatus)
 	m.HandleFunc("POST /api/record/clear", s.handleRecordClear)
 	m.HandleFunc("POST /api/record/migrate", s.handleRecordMigrate)
+	m.HandleFunc("GET /api/history", s.handleHistory)
+	m.HandleFunc("DELETE /api/session/", s.handleDeleteSession)
 		// Web Push
 		m.HandleFunc("GET /api/push/vapid-key", s.handleVapidKey)
 		m.HandleFunc("POST /api/push/subscribe", s.handlePushSubscribe)
@@ -1872,4 +1874,52 @@ func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]any{
 		"ok": true, "sent": sent, "failed": failed, "removed": removed,
 	})
+}
+
+// GET /api/history?bank=N&limit=50
+// 返回服务端保存的完整历史记录（sessions 表），供主页展示
+func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.DB == nil {
+		jsonOK(w, map[string]any{"items": nil})
+		return
+	}
+	limit := 50
+	if v := r.URL.Query().Get("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
+			limit = n
+		}
+	}
+	uid := getUserID(r)
+	jsonOK(w, map[string]any{
+		"items": progress.GetHistory(b.DB, uid, limit),
+	})
+}
+
+// DELETE /api/session/{id}?bank=N
+// 删除指定会话记录（只能删除自己的）
+func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	if b.DB == nil {
+		jsonError(w, "record not enabled", http.StatusServiceUnavailable)
+		return
+	}
+	// 路径：/api/session/{id}
+	sessionID := strings.TrimPrefix(r.URL.Path, "/api/session/")
+	sessionID = strings.Trim(sessionID, "/")
+	if sessionID == "" {
+		jsonError(w, "session id required", http.StatusBadRequest)
+		return
+	}
+	uid := getUserID(r)
+	ok2 := progress.DeleteSession(b.DB, sessionID, uid)
+	jsonOK(w, map[string]any{"ok": ok2})
 }
