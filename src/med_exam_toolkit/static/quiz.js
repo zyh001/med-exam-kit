@@ -3276,34 +3276,26 @@ function _renderWrongbookPreview(items) {
   if (btn) btn.style.display = '';
   el.innerHTML = '';
   items.slice(0, 8).forEach((it, idx) => {
+    const hasText = it.text && it.text.trim();
+    // 去除 HTML 标签后的纯文字
+    const plainText = hasText
+      ? it.text.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim()
+      : '';
+
     const card = document.createElement('div');
     card.className = 'wb-card';
-    card.dataset.idx = idx;
 
-    // 题目摘要行（始终可见）
-    const preview = it.text
-      ? it.text.replace(/<[^>]+>/g, '').slice(0, 28) + (it.text.replace(/<[^>]+>/g,'').length > 28 ? '…' : '')
-      : it.fingerprint.slice(0, 16) + '…';
-
-    card.innerHTML = `
-      <div class="wb-card-header" onclick="_toggleWbCard(this)">
-        <div class="wb-card-left">
-          <span class="wb-wrong-badge">✗${it.wrong}</span>
-          <span class="wb-preview">${esc(preview)}</span>
-        </div>
-        <div class="wb-card-right">
-          <span class="wb-acc" style="color:${it.accuracy>=60?'var(--success)':'var(--danger)'}">
-            ${it.accuracy}%
-          </span>
-          <span class="wb-chevron">▾</span>
-        </div>
-      </div>
+    // ── 展开体（完整内容）────────────────────────────────
+    const bodyHTML = `
       <div class="wb-card-body" style="display:none">
         ${it.stem ? `<div class="wb-stem">${renderHTML(it.stem)}</div>` : ''}
-        <div class="wb-text">${renderHTML(it.text || '（题目内容不可用）')}</div>
+        ${hasText
+          ? `<div class="wb-text">${renderHTML(it.text)}</div>`
+          : `<div class="wb-no-text">题目与当前题库版本不匹配，无法显示内容<br>
+             <span style="font-size:11px;opacity:.6">ID: ${esc(it.fingerprint)}</span></div>`}
         ${it.answer ? `
           <div class="wb-answer">
-            <span class="wb-label">正确答案：</span><span>${esc(it.answer)}</span>
+            <span class="wb-label">正确答案：</span><strong>${esc(it.answer)}</strong>
           </div>` : ''}
         ${it.discuss ? `
           <div class="wb-discuss">
@@ -3312,20 +3304,38 @@ function _renderWrongbookPreview(items) {
           </div>` : ''}
         <div class="wb-meta">
           ${it.unit ? `<span class="wb-unit">${esc(it.unit)}</span>` : ''}
-          <span class="wb-stat">共答 ${it.total} 次 · 答对 ${it.correct} 次</span>
+          <span class="wb-stat">共答 ${it.total} 次，答对 ${it.correct} 次，正确率 ${it.accuracy}%</span>
         </div>
       </div>`;
+
+    // ── 标题行（始终可见）────────────────────────────────
+    card.innerHTML = `
+      <div class="wb-card-header" onclick="_toggleWbCard(this)">
+        <div class="wb-wrong-badge">✗${it.wrong}</div>
+        <div class="wb-card-main">
+          <div class="wb-preview-text">${esc(plainText || '（题目内容不可用）')}</div>
+          <div class="wb-preview-meta">
+            ${it.unit ? `<span class="wb-unit-inline">${esc(it.unit)}</span>` : ''}
+            <span>正确率 <strong style="color:${it.accuracy>=60?'var(--success)':'var(--danger)'}">${it.accuracy}%</strong></span>
+            <span>共答 ${it.total} 次</span>
+          </div>
+        </div>
+        <div class="wb-chevron">▾</div>
+      </div>
+      ${bodyHTML}`;
+
     el.appendChild(card);
   });
 }
 
 function _toggleWbCard(header) {
+  const card    = header.parentElement;
   const body    = header.nextElementSibling;
   const chevron = header.querySelector('.wb-chevron');
   const open    = body.style.display === 'none';
   body.style.display = open ? '' : 'none';
   if (chevron) chevron.textContent = open ? '▴' : '▾';
-  header.parentElement.classList.toggle('wb-card-open', open);
+  card.classList.toggle('wb-card-open', open);
 }
 
 // ════════════════════════════════════════════
