@@ -496,7 +496,6 @@ async function selectBankAndEnter(idx) {
   try {
     await loadBankAndRenderHome();
     showScreen('s-home');
-    refreshHomeData();
 
     // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
     checkResumeSession();
@@ -515,6 +514,12 @@ function showScreen(id, dir = 'forward') {
   const cur  = document.querySelector('.screen.active');
   const next = document.getElementById(id);
   if (!next || next === cur) return;
+
+  // 每次切换回主页：先用本地数据即时渲染，再异步拉服务端最新数据
+  if (id === 's-home') {
+    renderHistorySection();   // 本地数据，无网络延迟
+    refreshHomeData();        // 异步拉服务端记录、刷新徽章
+  }
 
   // 新屏：先标记为 sliding（visibility:visible），再移除偏移类，最后 active
   next.classList.add('sliding');
@@ -2019,7 +2024,6 @@ function quitQuiz() {
     toast('练习进度已保存，下次可继续作答');
   }
   showScreen('s-home', 'back');
-  refreshHomeData();
 }
 
 // ── Exam timer ──────────────────────────────
