@@ -57,6 +57,7 @@ cover/
 
 # Django stuff:
 *.log
+<<<<<<< Updated upstream
 local_settings.py
 db.sqlite3
 db.sqlite3-journal
@@ -213,3 +214,18 @@ __marimo__/
 # 题目压缩包
 /data/tests.zip
 /data/tests
+=======
+*.tmp
+*.out
+*.prof
+# IDE 和编辑器生成的文件
+.idea/
+.vscode/
+*.sublime*
+# 系统生成的文件
+DS_Store
+Thumbs.db
+# 第三方依赖目录
+vendor//med-exam-kit
+>>>>>>> Stashed changes
+/med-exam-kit
