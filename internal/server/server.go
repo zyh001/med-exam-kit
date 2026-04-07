@@ -253,7 +253,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
 		return
 	}
-	if strings.HasPrefix(r.URL.Path, "/api/") {
+	// /api/debug 只需访问码，无需 Session Token（调试用，不含敏感操作）
+	if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/debug" {
 		tok := r.Header.Get("X-Session-Token")
 		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.sessionToken)) != 1 {
 			jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
