@@ -3739,6 +3739,12 @@ function openHistoryResult(id, idx) {
     if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; }
   } catch (e) { /* 缓存读取失败静默忽略 */ }
 
+  // 恢复 S.questions 和 S.mode，让"再练一次"能复用同一批题目
+  if (cachedQs) {
+    S.questions = cachedQs;
+    S.mode      = h.mode || S.mode;
+  }
+
   S.results = {
     mode:    h.mode,
     total:   h.total,
