@@ -11,6 +11,7 @@ import (
 	"io"
 	"io/fs"
 	"log"
+	"math"
 	"math/big"
 	"net"
 	"net/http"
@@ -28,11 +29,13 @@ import (
 	"github.com/zyh001/med-exam-kit/internal/bank"
 	"github.com/zyh001/med-exam-kit/internal/models"
 	"github.com/zyh001/med-exam-kit/internal/progress"
+	"github.com/zyh001/med-exam-kit/internal/store"
 )
 
 // BankEntry holds one loaded question bank and its associated state.
 type BankEntry struct {
 	Path          string
+	Name          string             // display name; overrides Path-derived name
 	Password      string
 	Questions     []*models.Question
 	DB            *sql.DB             // SQLite progress DB (nil when using PgStore)
@@ -45,10 +48,18 @@ type BankEntry struct {
 type pgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
 	RecordSessionsBatch(ctx context.Context, sessions []map[string]any, userID string) (processed, skipped []string)
+	GetOverallStats(ctx context.Context, userID string) store.OverallStats
+	GetUnitStats(ctx context.Context, userID string) []store.UnitStat
+	GetWrongFingerprints(ctx context.Context, userID string, limit int) []store.WrongEntry
+	GetDueFingerprints(ctx context.Context, userID string) []string
+	GetHistory(ctx context.Context, userID string, limit int) []store.HistoryEntry
+	GetSyncStatus(ctx context.Context, userID string) map[string]any
+	ClearUserData(ctx context.Context, userID string) map[string]int
 }
 
-// bankName derives a display name from the file path.
+// bankName derives a display name from the file path (or Name if set).
 func (b *BankEntry) bankName() string {
+	if b.Name != "" { return b.Name }
 	base := filepath.Base(b.Path)
 	ext := filepath.Ext(base)
 	return strings.TrimSuffix(base, ext)
@@ -1086,11 +1097,29 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
+	uid := getUserID(r)
+	ctx := r.Context()
+	if b.PgStore != nil {
+		ov := b.PgStore.GetOverallStats(ctx, uid)
+		accuracy := 0
+		if ov.Attempts > 0 { accuracy = int(math.Round(float64(ov.Correct)/float64(ov.Attempts)*100)) }
+		wrongTopics := len(b.PgStore.GetWrongFingerprints(ctx, uid, 10000))
+		jsonOK(w, map[string]any{
+			"overall": map[string]any{
+				"total_attempts": ov.Attempts, "correct": ov.Correct,
+				"wrong_attempts": ov.Wrong, "accuracy": accuracy,
+				"sessions": ov.Sessions, "due_today": ov.DueToday,
+				"wrong_topics": wrongTopics,
+			},
+			"history": b.PgStore.GetHistory(ctx, uid, 30),
+			"units":   b.PgStore.GetUnitStats(ctx, uid),
+		})
+		return
+	}
 	if b.DB == nil {
 		jsonOK(w, map[string]any{"overall": map[string]any{}, "history": nil, "units": nil})
 		return
 	}
-	uid := getUserID(r)
 	jsonOK(w, map[string]any{
 		"overall": progress.GetOverallStats(b.DB, uid),
 		"history": progress.GetHistory(b.DB, uid, 30),
@@ -1104,11 +1133,16 @@ func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
+	uid := getUserID(r)
+	if b.PgStore != nil {
+		jsonOK(w, map[string]any{"fingerprints": b.PgStore.GetDueFingerprints(r.Context(), uid)})
+		return
+	}
 	if b.DB == nil {
 		jsonOK(w, map[string]any{"fingerprints": nil})
 		return
 	}
-	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprints(b.DB, getUserID(r))})
+	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprints(b.DB, uid)})
 }
 
 func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
@@ -1117,11 +1151,21 @@ func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
-	if b.DB == nil {
+	uid := getUserID(r)
+	var entries []progress.WrongEntry
+	if b.PgStore != nil {
+		for _, e := range b.PgStore.GetWrongFingerprints(r.Context(), uid, 300) {
+			entries = append(entries, progress.WrongEntry{
+				Fingerprint: e.Fingerprint, Total: e.Total,
+				Correct: e.Correct, Wrong: e.Wrong, Accuracy: e.Accuracy,
+			})
+		}
+	} else if b.DB == nil {
 		jsonOK(w, map[string]any{"items": nil})
 		return
+	} else {
+		entries = progress.GetWrongFingerprints(b.DB, uid, 300)
 	}
-	entries := progress.GetWrongFingerprints(b.DB, getUserID(r), 300)
 
 	// 构建 fingerprint → question 索引，为每条错题附上题目文字
 	type wbItem struct {
@@ -1193,11 +1237,16 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
+	uid := getUserID(r)
+	if b.PgStore != nil {
+		jsonOK(w, b.PgStore.GetSyncStatus(r.Context(), uid))
+		return
+	}
 	if b.DB == nil {
 		jsonOK(w, map[string]any{"session_count": 0, "last_ts": nil})
 		return
 	}
-	jsonOK(w, progress.GetSyncStatus(b.DB, getUserID(r)))
+	jsonOK(w, progress.GetSyncStatus(b.DB, uid))
 }
 
 // ── Icon handlers ─────────────────────────────────────────────────────
@@ -1678,6 +1727,11 @@ func (s *Server) validHost(r *http.Request) bool {
 }
 
 func getUserID(r *http.Request) string {
+	// Prefer explicit header (sent by apiFetch, works through any proxy)
+	if uid := r.Header.Get("X-User-ID"); uid != "" {
+		return uid
+	}
+	// Fallback: cookie (same-origin direct access)
 	c, err := r.Cookie("med_exam_uid")
 	if err != nil {
 		return progress.LegacyUser
@@ -1924,10 +1978,6 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
-	if b.DB == nil {
-		jsonOK(w, map[string]any{"items": nil})
-		return
-	}
 	limit := 50
 	if v := r.URL.Query().Get("limit"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 && n <= 200 {
@@ -1935,6 +1985,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	uid := getUserID(r)
+	if b.PgStore != nil {
+		jsonOK(w, map[string]any{"items": b.PgStore.GetHistory(r.Context(), uid, limit)})
+		return
+	}
+	if b.DB == nil {
+		jsonOK(w, map[string]any{"items": nil})
+		return
+	}
 	jsonOK(w, map[string]any{
 		"items": progress.GetHistory(b.DB, uid, limit),
 	})
