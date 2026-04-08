@@ -102,6 +102,7 @@ function _bankSuffix() { return '-b' + S.bankID; }
 function practiceSessionsKey() { return 'quiz_practice_sessions_v1' + _bankSuffix(); }
 function examSessionKey()      { return 'quiz_exam_session_v1'      + _bankSuffix(); }
 function historyKey()          { return 'quiz-history'              + _bankSuffix(); }
+function deletedIdsKey()       { return 'quiz-deleted-ids'        + _bankSuffix(); }
 function _reviewCacheKey()     { return 'quiz-review-cache'         + _bankSuffix(); }
 
 const MAX_PRACTICE_SESSIONS = 5;
@@ -3393,6 +3394,10 @@ function _toggleWbCard(header) {
 // ════════════════════════════════════════════
 function loadHistory() {
   try { S.history = JSON.parse(localStorage.getItem(historyKey()) || '[]'); } catch { S.history = []; }
+  try {
+    const arr = JSON.parse(localStorage.getItem(deletedIdsKey()) || '[]');
+    S.deletedIds = new Set(arr);
+  } catch { S.deletedIds = new Set(); }
   // 同时从服务端拉取完整历史，成功后合并刷新（不阻塞本地渲染）
   _fetchServerHistory();
 }
@@ -3795,6 +3800,7 @@ async function deleteHistoryItem(id, idx) {
   if (id) {
     if (!S.deletedIds) S.deletedIds = new Set();
     S.deletedIds.add(id);
+    localStorage.setItem(deletedIdsKey(), JSON.stringify([...S.deletedIds]));
   }
   // 1. 从服务端删除（有真实 id，排除 'idx:N' 占位符）
   if (id && !id.startsWith('idx:')) {
@@ -4262,4 +4268,62 @@ init();
     // 2. 显示持久横幅
     _showAuthExpiredBanner(saveMsg);
   };
+})();
+
+// Review 页面：左右滑动切换 Tab
+(function setupReviewTabSwipe(){
+  const THRESHOLD = 50, VELOCITY = 0.3;
+  let tx=0, ty=0, t0=0, locked=null, dragging=false;
+
+  const reviewScreen = document.getElementById('s-review');
+  if (!reviewScreen) return;
+  const reviewBody = reviewScreen.querySelector('.review-list');
+  if (!reviewBody) return;
+
+  function getCurrentTab(){
+    const active = reviewScreen.querySelector('.rtab.active');
+    return active ? parseInt(active.dataset.tab || '0', 10) : 0;
+  }
+
+  function switchTab(direction){
+    const current = getCurrentTab();
+    let next;
+    if (direction === 'left'){
+      next = Math.min(current + 1, 3);
+    } else {
+      next = Math.max(current - 1, 0);
+    }
+    if (next !== current){
+      const btn = reviewScreen.querySelector(`.rtab[data-tab="${next}"]`);
+      if (btn) { btn.click(); vibrate(10); }
+    }
+  }
+
+  reviewBody.addEventListener('touchstart', e => {
+    if (document.querySelector('.screen.active')?.id !== 's-review') return;
+    const t = e.touches[0]; tx = t.clientX; ty = t.clientY; t0 = Date.now();
+    locked = null; dragging = false;
+  }, { passive: true });
+
+  reviewBody.addEventListener('touchmove', e => {
+    if (document.querySelector('.screen.active')?.id !== 's-review') return;
+    const t = e.touches[0];
+    const dx = t.clientX - tx, dy = t.clientY - ty;
+    if (!locked){ const d = getSwipeDir(dx, dy); if (!d) return; locked = d; }
+    if (locked === 'vertical') return;
+    e.preventDefault();
+    dragging = true;
+  }, { passive: false });
+
+  reviewBody.addEventListener('touchend', e => {
+    if (!dragging){ dragging = false; return; }
+    dragging = false;
+    const dx = e.changedTouches[0].clientX - tx;
+    const dt = Date.now() - t0;
+    const vel = Math.abs(dx) / dt;
+    if (Math.abs(dx) >= THRESHOLD || vel >= VELOCITY){
+      if (dx < 0) switchTab('left');
+      else if (dx > 0) switchTab('right');
+    }
+  }, { passive: true });
 })();
