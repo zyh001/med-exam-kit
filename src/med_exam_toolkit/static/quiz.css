@@ -1053,6 +1053,9 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 @keyframes rl-in-left{from{transform:translateX(30%);opacity:0}to{transform:translateX(0);opacity:1}}
 @keyframes rl-in-right{from{transform:translateX(-30%);opacity:0}to{transform:translateX(0);opacity:1}}
 .review-item{
+  background:var(--card);border:1px solid var(--border);border-radius:12px;
+  margin-bottom:10px;overflow:hidden;cursor:pointer;
+}
 .review-item-head{
   display:flex;align-items:center;gap:10px;padding:12px 14px;
 }
