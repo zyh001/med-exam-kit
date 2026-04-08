@@ -2887,6 +2887,7 @@ function filterReview(type, tabEl) {
       <div class="review-expand" id="rexp-${i}">
         <div class="review-expand-inner">
           ${_buildReviewScoreBadge(q, sel, i)}
+          ${q.stem ? `<div class="review-stem">${renderHTML(q.stem)}</div>` : ''}
           ${sharedOptsReviewHtml}
           ${isMulti ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">正确答案：<span style="color:var(--success);font-weight:700">${q.answer.split('').join(' ')}</span></div>` : ''}
           <div class="review-opts-list">${optsHtml}</div>
@@ -3399,7 +3400,6 @@ function _renderWrongbookPreview(items) {
         <div class="wb-card-main">
           <div class="wb-preview-text">${esc(plainText || '（题目内容不可用）')}</div>
           <div class="wb-preview-meta">
-            ${it.unit ? `<span class="wb-unit-inline">${esc(it.unit)}</span>` : ''}
             <span>正确率 <strong style="color:${it.accuracy>=60?'var(--success)':'var(--danger)'}">${it.accuracy}%</strong></span>
             <span>共答 ${it.total} 次</span>
           </div>
