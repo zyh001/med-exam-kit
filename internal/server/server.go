@@ -1235,6 +1235,21 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	json.NewDecoder(r.Body).Decode(&payload)
 	uid := getUserID(r)
 
+	// sessions 中既不在 processed 也不在 skipped 的 → 写入失败，让客户端重试
+	computeFailed := func(sessions []map[string]any, done, skipped []string) []map[string]any {
+		okSet := make(map[string]bool, len(done)+len(skipped))
+		for _, id := range done    { okSet[id] = true }
+		for _, id := range skipped { okSet[id] = true }
+		var failed []map[string]any
+		for _, sess := range sessions {
+			sid := fmt.Sprint(sess["id"])
+			if !okSet[sid] {
+				failed = append(failed, map[string]any{"session_id": sid})
+			}
+		}
+		return failed
+	}
+
 	// PostgreSQL 模式
 	if b.PgStore != nil {
 		for i := range payload.Sessions {
@@ -1242,7 +1257,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 			payload.Sessions[i]["bank_id"] = b.BankID
 		}
 		done, skipped := b.PgStore.RecordSessionsBatch(r.Context(), payload.Sessions, uid)
-		jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped})
+		failed := computeFailed(payload.Sessions, done, skipped)
+		if len(failed) > 0 {
+			log.Printf("[sync] PG uid=%s bank=%d processed=%d skipped=%d failed=%d",
+				uid, b.BankID, len(done), len(skipped), len(failed))
+		}
+		jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped, "failed": failed})
 		return
 	}
 	// SQLite 模式
@@ -1251,15 +1271,15 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		jsonOK(w, map[string]any{"ok": false, "error": "DB not initialised"})
 		return
 	}
-	// Inject bank_id from BankEntry into each session so progress is isolated per bank
 	for i := range payload.Sessions {
 		if payload.Sessions[i] == nil { payload.Sessions[i] = map[string]any{} }
 		payload.Sessions[i]["bank_id"] = b.BankID
 	}
 	log.Printf("[sync] uid=%s bank=%d sessions=%d", uid, b.BankID, len(payload.Sessions))
 	done, skipped := progress.RecordSessionsBatch(b.DB, payload.Sessions, uid)
-	log.Printf("[sync] done=%v skipped=%v", done, skipped)
-	jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped})
+	failed := computeFailed(payload.Sessions, done, skipped)
+	log.Printf("[sync] done=%v skipped=%v failed=%d", done, skipped, len(failed))
+	jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped, "failed": failed})
 }
 
 func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
