@@ -1039,7 +1039,10 @@ func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data map[string]any
-	json.NewDecoder(r.Body).Decode(&data)
+	if err := json.NewDecoder(r.Body).Decode(&data); err != nil || data == nil {
+		jsonError(w, "invalid request body", http.StatusBadRequest)
+		return
+	}
 	uid := getUserID(r)
 	// PostgreSQL 模式
 	if b.PgStore != nil {
