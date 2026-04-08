@@ -2420,7 +2420,7 @@ async function _recordMemoSession() {
   });
   if (!items.length) return;
 
-  const today = new Date().toLocaleDateString('zh-CN');
+  const today = new Date().toISOString().slice(0, 10);
   const units  = [...new Set(items.map(it => it.unit).filter(Boolean))];
   const payload = {
     id:       'memo-' + String(Date.now()),
@@ -2573,7 +2573,7 @@ function calculateResults() {
     skip,
     timeSec: S.results.timeSec,
     time_sec: S.results.timeSec,
-    date: new Date().toLocaleDateString('zh-CN'),
+    date: new Date().toISOString().slice(0, 10),
     units: [...new Set(qs.map(q => q.unit).filter(Boolean))].slice(0,2).join('、'),
   };
   S.history.unshift(record);
@@ -2589,8 +2589,11 @@ function calculateResults() {
   } catch (e) { /* localStorage 满时静默忽略 */ }
 
   // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
-  _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(() => {
-    // 记录完成后刷新主页徽章
+  _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(async () => {
+    // 等待数据同步到服务端后再刷新主页徽章
+    if (typeof SyncManager !== 'undefined') {
+      try { await SyncManager.flush(); } catch(e) { /* 静默 */ }
+    }
     _refreshProgressBadges();
   });
 
@@ -2912,7 +2915,7 @@ async function _recordSessionToServer(results, questions, ans, sessionId) {
     items.push({ fingerprint: fp, result, mode: q.mode, unit: q.unit });
   });
 
-  const today = new Date().toLocaleDateString('zh-CN');
+  const today = new Date().toISOString().slice(0, 10);
   const units  = [...new Set(questions.map(q => q.unit).filter(Boolean))];
   const payload = {
     id:       sessionId || String(Date.now()),
@@ -2958,21 +2961,23 @@ async function _refreshProgressBadges() {
       apiFetch('/api/review/due?' + bankQS()).then(r => r.json()),
       apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json()),
     ]);
+    const dueCount   = (dueRes.fingerprints || []).length;
+    const wrongCount = (wbRes.items || []).length;
     const dueBadge   = document.getElementById('due-badge');
     const wrongBadge = document.getElementById('wrong-badge');
     if (dueBadge) {
-      dueBadge.textContent = dueRes.count || 0;
-      dueBadge.style.display = dueRes.count > 0 ? '' : 'none';
+      dueBadge.textContent = dueCount;
+      dueBadge.style.display = dueCount > 0 ? '' : 'none';
     }
     if (wrongBadge) {
-      wrongBadge.textContent = wbRes.count || 0;
-      wrongBadge.style.display = wbRes.count > 0 ? '' : 'none';
+      wrongBadge.textContent = wrongCount;
+      wrongBadge.style.display = wrongCount > 0 ? '' : 'none';
     }
     // 成绩页按钮
     const resWB  = document.getElementById('res-wrongbook-btn');
     const resRev = document.getElementById('res-review-btn');
-    if (resWB)  resWB.style.display  = wbRes.count  > 0 ? '' : 'none';
-    if (resRev) resRev.style.display = dueRes.count > 0 ? '' : 'none';
+    if (resWB)  resWB.style.display  = wrongCount > 0 ? '' : 'none';
+    if (resRev) resRev.style.display = dueCount   > 0 ? '' : 'none';
   } catch (e) { /* 静默失败，不影响主流程 */ }
 }
 
@@ -3027,6 +3032,10 @@ async function startWrongBookReview() {
 /** 打开统计页面 */
 async function openStats() {
   showScreen('s-stats');
+  // 先确保所有待同步数据已上传到服务端，再读取统计
+  if (typeof SyncManager !== 'undefined') {
+    try { await SyncManager.flush(); } catch(e) { /* 静默，不影响主流程 */ }
+  }
   try {
     const [d, wb, rs] = await Promise.all([
       apiFetch('/api/stats?' + bankQS()).then(r => r.json()),
@@ -4104,51 +4113,42 @@ setInterval(() => {
 // ════════════════════════════════════════════
 
 /**
- * 根据 SyncManager 状态更新同步角标。
- * 角标元素 #sync-badge 在 quiz.html 中定义：
- *   pending > 0 且 offline → 显示橙色"离线 N"
- *   pending > 0 且 online  → 显示蓝色"同步中 N"（短暂）
+ * 根据 SyncManager 状态更新同步呼吸点。
+ *   pending > 0 且 offline → 橙色呼吸点
+ *   pending > 0 且 online  → 蓝色呼吸点
  *   pending = 0            → 隐藏
  */
 function _updateSyncBadge(syncState) {
-  const badge = document.getElementById('sync-badge');
-  const btn   = document.getElementById('sync-now-btn');
-  if (!badge) return;
+  const dot = document.getElementById('sync-dot');
+  const tip = document.getElementById('sync-dot-tip');
+  if (!dot) return;
 
   const { pending, online, syncing } = syncState;
   if (pending === 0) {
-    badge.style.display = 'none';
-    if (btn) btn.style.display = 'none';
+    dot.style.display = 'none';
     return;
   }
 
-  badge.style.display = '';
-  if (btn) btn.style.display = '';
-
+  dot.style.display = '';
   if (!online) {
-    badge.textContent    = `离线 · ${pending} 待同步`;
-    badge.dataset.status = 'offline';
+    dot.dataset.status = 'offline';
+    if (tip) tip.textContent = `离线 · ${pending} 条待同步`;
   } else if (syncing) {
-    badge.textContent    = `同步中…`;
-    badge.dataset.status = 'syncing';
+    dot.dataset.status = 'syncing';
+    if (tip) tip.textContent = '同步中…';
   } else {
-    badge.textContent    = `${pending} 条待同步`;
-    badge.dataset.status = 'pending';
+    dot.dataset.status = 'pending';
+    if (tip) tip.textContent = `${pending} 条待同步 · 点击同步`;
   }
 }
 
-/** 手动触发同步（绑定到"立即同步"按钮） */
+/** 手动触发同步（绑定到呼吸点） */
 async function syncNow() {
   if (typeof SyncManager === 'undefined') return;
-  const btn = document.getElementById('sync-now-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
   try {
     await SyncManager.flush();
-    // 同步成功后刷新一次服务端统计徽章
     _refreshProgressBadges();
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '立即同步'; }
-  }
+  } catch(e) { /* 静默 */ }
 }
 
 // ════════════════════════════════════════════

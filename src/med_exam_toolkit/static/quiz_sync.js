@@ -103,9 +103,10 @@ const SyncManager = (() => {
   // ══════════════════════════════════════════
 
   /** 把一条 session payload 写入本地 IndexedDB 队列 */
-  async function _enqueue(payload) {
+  async function _enqueue(payload, bankIdx) {
     const entry = {
       session_id: payload.id,
+      bank:      (bankIdx !== undefined && bankIdx !== null) ? Number(bankIdx) : 0,
       payload,
       queued_at: Date.now(),
       retries:   0,
@@ -179,6 +180,15 @@ const SyncManager = (() => {
 
         if (!res.ok) {
           console.warn('[Sync] Server returned', res.status, 'for bank', bankIdx);
+          // 401/403 = token 过期或无权限，重试无意义，直接按失败计数
+          // 其他错误也 bump retry，避免永久卡在队列中
+          await Promise.all(bankItems.map(e => {
+            if (e.retries >= MAX_RETRIES) {
+              console.warn('[Sync] Dropping after max retries:', e.session_id);
+              return _dequeue(e.id);
+            }
+            return _bumpRetry(e.id, e.retries);
+          }));
           continue;
         }
 
@@ -230,8 +240,8 @@ const SyncManager = (() => {
    * 1. 先写 IndexedDB（可靠，断网也不丢）
    * 2. 立即尝试 flush 到服务端
    */
-  async function record(payload) {
-    await _enqueue(payload);
+  async function record(payload, bankIdx) {
+    await _enqueue(payload, bankIdx);
     flush();   // 不 await，后台运行
   }
 
