@@ -273,7 +273,10 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 	if userID == "" {
 		userID = "_legacy"
 	}
-	unitsJSON, _ := json.Marshal(session["units"])
+	unitsRaw, _ := json.Marshal(session["units"])
+	// pgx v5 treats []byte as bytea, NOT jsonb — must pass as string so PostgreSQL
+	// receives it as text and auto-casts to jsonb via input function.
+	unitsStr := string(unitsRaw)
 	bankID := intV(session["bank_id"]) // 0 if not provided (backward compat)
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO sessions(id,user_id,bank_id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts)
@@ -282,7 +285,7 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 		fmt.Sprint(session["id"]), userID, bankID,
 		str(session["mode"]), intV(session["total"]), intV(session["correct"]),
 		intV(session["wrong"]), intV(session["skip"]), intV(session["time_sec"]),
-		str(session["date"]), unitsJSON, time.Now().UnixMilli())
+		str(session["date"]), unitsStr, time.Now().UnixMilli())
 
 	// Record attempts
 	if items, ok := session["items"].([]any); ok {

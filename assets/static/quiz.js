@@ -2589,8 +2589,11 @@ function calculateResults() {
   } catch (e) { /* localStorage 满时静默忽略 */ }
 
   // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
-  _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(() => {
-    // 记录完成后刷新主页徽章
+  _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(async () => {
+    // 等待数据同步到服务端后再刷新主页徽章
+    if (typeof SyncManager !== 'undefined') {
+      try { await SyncManager.flush(); } catch(e) { /* 静默 */ }
+    }
     _refreshProgressBadges();
   });
 
@@ -3029,6 +3032,10 @@ async function startWrongBookReview() {
 /** 打开统计页面 */
 async function openStats() {
   showScreen('s-stats');
+  // 先确保所有待同步数据已上传到服务端，再读取统计
+  if (typeof SyncManager !== 'undefined') {
+    try { await SyncManager.flush(); } catch(e) { /* 静默，不影响主流程 */ }
+  }
   try {
     const [d, wb, rs] = await Promise.all([
       apiFetch('/api/stats?' + bankQS()).then(r => r.json()),
