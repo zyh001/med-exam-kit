@@ -1043,6 +1043,7 @@ func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
 	uid := getUserID(r)
 	// PostgreSQL 模式
 	if b.PgStore != nil {
+		data["bank_id"] = b.BankID // inject real PG bank_id (client sends array index)
 		sessions := []map[string]any{data}
 		done, _ := b.PgStore.RecordSessionsBatch(r.Context(), sessions, uid)
 		if len(done) == 0 {
