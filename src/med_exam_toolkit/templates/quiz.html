@@ -30,8 +30,8 @@
       display: block;
     }
   </style>
-  <script>window.SESSION_TOKEN = "{{SESSION_TOKEN}}";</script>
-  <script>window.ASSET_VER = "{{ASSET_VER}}";</script>
+  <script>window.SESSION_TOKEN = "{{session_token}}";</script>
+  <script>window.ASSET_VER = "{{asset_ver}}";</script>
   <script src="/static/common.js"></script>
   <script>
     if ('serviceWorker' in navigator) {
@@ -175,8 +175,7 @@
           </div>
         </div>
         <div class="topbar-right">
-          <span id="sync-badge" class="sync-badge" style="display:none"></span>
-          <button id="sync-now-btn" class="sync-now-btn" onclick="syncNow()" style="display:none" title="立即同步到服务端">立即同步</button>
+          <span id="sync-dot" class="sync-dot" style="display:none" onclick="syncNow()"><span class="sync-dot-tip" id="sync-dot-tip"></span></span>
           <button id="pwa-install-btn" class="icon-btn" onclick="pwaTriggerInstall()" title="安装到桌面" style="display:none">📲</button>
           <button id="push-bell-btn" class="icon-btn" onclick="togglePushNotify()" title="每日复习提醒" style="display:none">🔔</button>
           <button class="icon-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
