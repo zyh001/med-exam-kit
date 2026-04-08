@@ -226,41 +226,38 @@ input,select{font-family:inherit;outline:none}
 }
 .icon-btn:hover{border-color:var(--accent);color:var(--accent)}
 
-/* ── 同步状态角标 & 手动同步按钮 ──────────────────────────────────── */
+/* ── 同步状态呼吸点 ──────────────────────────────────── */
+.sync-dot{
+  width:8px;height:8px;border-radius:50%;flex-shrink:0;cursor:pointer;
+  transition:background .2s,box-shadow .2s;position:relative;
+}
+.sync-dot[data-status="offline"]{
+  background:#e07800;box-shadow:0 0 0 3px rgba(255,160,0,.25);
+}
+.sync-dot[data-status="pending"]{
+  background:var(--accent);box-shadow:0 0 0 3px rgba(68,147,248,.25);
+  animation:sync-breathe 2s ease-in-out infinite;
+}
+.sync-dot[data-status="syncing"]{
+  background:var(--accent);box-shadow:0 0 0 3px rgba(68,147,248,.25);
+  animation:sync-breathe .8s ease-in-out infinite;
+}
+@keyframes sync-breathe{
+  0%,100%{opacity:1;box-shadow:0 0 0 3px rgba(68,147,248,.25)}
+  50%{opacity:.4;box-shadow:0 0 0 6px rgba(68,147,248,.1)}
+}
+.sync-dot-tip{
+  position:absolute;right:0;top:calc(100% + 8px);
+  background:var(--card);border:1px solid var(--border);border-radius:8px;
+  padding:6px 10px;font-size:11px;color:var(--text);white-space:nowrap;
+  box-shadow:0 4px 12px rgba(0,0,0,.2);pointer-events:none;
+  opacity:0;transition:opacity .15s;z-index:100;
+}
+.sync-dot:hover .sync-dot-tip,.sync-dot:active .sync-dot-tip{opacity:1}
 .topbar-right{
   display:flex;align-items:center;gap:8px;
 }
-.sync-badge{
-  font-size:11px;font-weight:600;padding:3px 8px;border-radius:20px;
-  white-space:nowrap;transition:background .2s,color .2s;
-}
-.sync-badge[data-status="offline"]{
-  background:rgba(255,160,0,.15);color:#e07800;
-  border:1px solid rgba(255,160,0,.3);
-}
-[data-theme="light"] .sync-badge[data-status="offline"]{
-  background:rgba(220,120,0,.1);color:#c06000;
-}
-.sync-badge[data-status="pending"]{
-  background:rgba(68,147,248,.12);color:var(--accent);
-  border:1px solid rgba(68,147,248,.25);
-}
-.sync-badge[data-status="syncing"]{
-  background:rgba(68,147,248,.08);color:var(--accent);
-  border:1px solid rgba(68,147,248,.15);
-  animation:sync-pulse 1s ease-in-out infinite;
-}
-@keyframes sync-pulse{
-  0%,100%{opacity:1}
-  50%{opacity:.5}
-}
-.sync-now-btn{
-  font-size:11px;font-weight:600;padding:3px 10px;border-radius:20px;
-  background:var(--accent);color:#fff;border:none;
-  transition:opacity .15s;white-space:nowrap;
-}
-.sync-now-btn:hover{opacity:.85}
-.sync-now-btn:disabled{opacity:.45;cursor:not-allowed}
+/* sync-badge/sync-now-btn legacy: replaced by .sync-dot */
 
 
 .bank-card{

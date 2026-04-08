@@ -461,8 +461,8 @@ func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int) 
 	var attempts, correct, wrong, skip int64
 	s.pool.QueryRow(ctx, `
 		SELECT COUNT(*),
-		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END),
+		       COALESCE(SUM(CASE WHEN result=1 THEN 1 ELSE 0 END), 0),
+		       COALESCE(SUM(CASE WHEN result=0 THEN 1 ELSE 0 END), 0),
 		       0
 		FROM attempts WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND result != -1`, userID, int64(bankID)).Scan(
 		&attempts, &correct, &wrong, &skip)

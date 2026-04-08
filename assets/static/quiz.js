@@ -4113,51 +4113,42 @@ setInterval(() => {
 // ════════════════════════════════════════════
 
 /**
- * 根据 SyncManager 状态更新同步角标。
- * 角标元素 #sync-badge 在 quiz.html 中定义：
- *   pending > 0 且 offline → 显示橙色"离线 N"
- *   pending > 0 且 online  → 显示蓝色"同步中 N"（短暂）
+ * 根据 SyncManager 状态更新同步呼吸点。
+ *   pending > 0 且 offline → 橙色呼吸点
+ *   pending > 0 且 online  → 蓝色呼吸点
  *   pending = 0            → 隐藏
  */
 function _updateSyncBadge(syncState) {
-  const badge = document.getElementById('sync-badge');
-  const btn   = document.getElementById('sync-now-btn');
-  if (!badge) return;
+  const dot = document.getElementById('sync-dot');
+  const tip = document.getElementById('sync-dot-tip');
+  if (!dot) return;
 
   const { pending, online, syncing } = syncState;
   if (pending === 0) {
-    badge.style.display = 'none';
-    if (btn) btn.style.display = 'none';
+    dot.style.display = 'none';
     return;
   }
 
-  badge.style.display = '';
-  if (btn) btn.style.display = '';
-
+  dot.style.display = '';
   if (!online) {
-    badge.textContent    = `离线 · ${pending} 待同步`;
-    badge.dataset.status = 'offline';
+    dot.dataset.status = 'offline';
+    if (tip) tip.textContent = `离线 · ${pending} 条待同步`;
   } else if (syncing) {
-    badge.textContent    = `同步中…`;
-    badge.dataset.status = 'syncing';
+    dot.dataset.status = 'syncing';
+    if (tip) tip.textContent = '同步中…';
   } else {
-    badge.textContent    = `${pending} 条待同步`;
-    badge.dataset.status = 'pending';
+    dot.dataset.status = 'pending';
+    if (tip) tip.textContent = `${pending} 条待同步 · 点击同步`;
   }
 }
 
-/** 手动触发同步（绑定到"立即同步"按钮） */
+/** 手动触发同步（绑定到呼吸点） */
 async function syncNow() {
   if (typeof SyncManager === 'undefined') return;
-  const btn = document.getElementById('sync-now-btn');
-  if (btn) { btn.disabled = true; btn.textContent = '同步中…'; }
   try {
     await SyncManager.flush();
-    // 同步成功后刷新一次服务端统计徽章
     _refreshProgressBadges();
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = '立即同步'; }
-  }
+  } catch(e) { /* 静默 */ }
 }
 
 // ════════════════════════════════════════════

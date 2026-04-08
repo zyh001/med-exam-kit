@@ -180,6 +180,15 @@ const SyncManager = (() => {
 
         if (!res.ok) {
           console.warn('[Sync] Server returned', res.status, 'for bank', bankIdx);
+          // 401/403 = token 过期或无权限，重试无意义，直接按失败计数
+          // 其他错误也 bump retry，避免永久卡在队列中
+          await Promise.all(bankItems.map(e => {
+            if (e.retries >= MAX_RETRIES) {
+              console.warn('[Sync] Dropping after max retries:', e.session_id);
+              return _dequeue(e.id);
+            }
+            return _bumpRetry(e.id, e.retries);
+          }));
           continue;
         }
 
