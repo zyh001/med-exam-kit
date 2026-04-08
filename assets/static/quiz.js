@@ -2724,10 +2724,43 @@ function highlightInductiveWords(html) {
 
 function showReview() {
   showScreen('s-review');
+  // 更新标签页数量角标
+  _updateReviewTabCounts();
   // 默认显示全部题目
   setTimeout(() => {
     filterReview('all', document.querySelector('.rtab.active') || document.querySelector('.rtab'));
   }, 250);
+}
+
+/** 为解析页标签添加数量角标 */
+function _updateReviewTabCounts() {
+  const R = S.results;
+  if (!R || !R.qs) return;
+  let okN = 0, wrongN = 0, skipN = 0;
+  R.qs.forEach((q, i) => {
+    let sel = R.ans ? R.ans[i] : S.ans[i];
+    if (sel && sel.__set) sel = new Set(sel.v);
+    const isMulti    = isMultiQ(q);
+    const correctSet = new Set(isMulti ? q.answer.split('') : [q.answer]);
+    const isEmpty    = !sel || (sel instanceof Set && sel.size === 0);
+    if (isEmpty) { skipN++; return; }
+    let isCorrect;
+    if (isMulti) {
+      const selSet = sel instanceof Set ? sel : new Set([sel]);
+      isCorrect = selSet.size === correctSet.size && [...correctSet].every(l => selSet.has(l));
+    } else {
+      isCorrect = sel === q.answer;
+    }
+    if (isCorrect) okN++; else wrongN++;
+  });
+  const tabs = document.querySelectorAll('.rtab');
+  const counts = [R.qs.length, wrongN, okN, skipN];
+  tabs.forEach(t => {
+    const idx = parseInt(t.dataset.tab || '0', 10);
+    let badge = t.querySelector('.rtab-count');
+    if (!badge) { badge = document.createElement('span'); badge.className = 'rtab-count'; t.appendChild(badge); }
+    badge.textContent = counts[idx] > 0 ? counts[idx] : '';
+  });
 }
 
 /** 计算单题得分并返回徽章 HTML（仅考试计分模式下有内容）*/
@@ -4270,7 +4303,7 @@ init();
   };
 })();
 
-// Review 页面：左右滑动切换 Tab
+// Review 页面：左右滑动切换 Tab（带滑动动画 + 跟手拖拽反馈）
 (function setupReviewTabSwipe(){
   const THRESHOLD = 50, VELOCITY = 0.3;
   let tx=0, ty=0, t0=0, locked=null, dragging=false;
@@ -4285,24 +4318,39 @@ init();
     return active ? parseInt(active.dataset.tab || '0', 10) : 0;
   }
 
-  function switchTab(direction){
+  function switchTabAnimated(direction){
     const current = getCurrentTab();
-    let next;
-    if (direction === 'left'){
-      next = Math.min(current + 1, 3);
-    } else {
-      next = Math.max(current - 1, 0);
-    }
-    if (next !== current){
+    const next = direction === 'left'
+      ? Math.min(current + 1, 3)
+      : Math.max(current - 1, 0);
+    if (next === current) return;
+
+    const outClass = direction === 'left' ? 'slide-out-left' : 'slide-out-right';
+    const inClass  = direction === 'left' ? 'slide-in-left'  : 'slide-in-right';
+
+    // 1. 滑出动画
+    reviewBody.classList.add(outClass);
+    reviewBody.addEventListener('animationend', function once(){
+      reviewBody.removeEventListener('animationend', once);
+      reviewBody.classList.remove(outClass);
+      // 2. 切换 tab 内容
       const btn = reviewScreen.querySelector(`.rtab[data-tab="${next}"]`);
-      if (btn) { btn.click(); vibrate(10); }
-    }
+      if (btn) btn.click();
+      // 3. 滑入动画
+      reviewBody.classList.add(inClass);
+      reviewBody.addEventListener('animationend', function once2(){
+        reviewBody.removeEventListener('animationend', once2);
+        reviewBody.classList.remove(inClass);
+      });
+    });
+    vibrate(10);
   }
 
   reviewBody.addEventListener('touchstart', e => {
     if (document.querySelector('.screen.active')?.id !== 's-review') return;
     const t = e.touches[0]; tx = t.clientX; ty = t.clientY; t0 = Date.now();
     locked = null; dragging = false;
+    reviewBody.style.transition = 'none';
   }, { passive: true });
 
   reviewBody.addEventListener('touchmove', e => {
@@ -4313,17 +4361,31 @@ init();
     if (locked === 'vertical') return;
     e.preventDefault();
     dragging = true;
+    // 跟手拖拽反馈（最大偏移 80px）
+    const clamp = Math.max(-80, Math.min(80, dx));
+    const fade  = 1 - Math.abs(clamp) / 200;
+    reviewBody.style.transform = `translateX(${clamp}px)`;
+    reviewBody.style.opacity   = fade;
   }, { passive: false });
 
   reviewBody.addEventListener('touchend', e => {
     if (!dragging){ dragging = false; return; }
     dragging = false;
+    // 弹回
+    reviewBody.style.transition = 'transform .15s, opacity .15s';
+    reviewBody.style.transform  = '';
+    reviewBody.style.opacity    = '';
+
     const dx = e.changedTouches[0].clientX - tx;
     const dt = Date.now() - t0;
     const vel = Math.abs(dx) / dt;
     if (Math.abs(dx) >= THRESHOLD || vel >= VELOCITY){
-      if (dx < 0) switchTab('left');
-      else if (dx > 0) switchTab('right');
+      // 重置 inline style 再跑动画
+      reviewBody.style.transition = '';
+      reviewBody.style.transform  = '';
+      reviewBody.style.opacity    = '';
+      if (dx < 0) switchTabAnimated('left');
+      else        switchTabAnimated('right');
     }
   }, { passive: true });
 })();

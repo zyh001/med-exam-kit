@@ -1028,17 +1028,26 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .rtab{
   padding:6px 16px;border-radius:20px;font-size:13px;font-weight:500;
   background:transparent;color:var(--muted);border:1px solid transparent;
-  transition:all .15s;cursor:pointer;
+  transition:all .15s;cursor:pointer;position:relative;
+}
+.rtab-count{
+  display:inline-block;font-size:10px;margin-left:3px;opacity:.7;
+  min-width:14px;text-align:center;
 }
 .rtab.active{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
 .rtab.wrong-tab.active{background:var(--danger-bg);border-color:var(--danger);color:var(--danger)}
 .rtab.ok-tab.active{background:var(--success-bg);border-color:var(--success);color:var(--success)}
 
-.review-list{flex:1;overflow-y:auto;padding:12px 16px}
+.review-list{flex:1;overflow-y:auto;padding:12px 16px;position:relative}
+.review-list.slide-out-left{animation:rl-out-left .18s ease-out forwards}
+.review-list.slide-out-right{animation:rl-out-right .18s ease-out forwards}
+.review-list.slide-in-left{animation:rl-in-left .18s ease-out forwards}
+.review-list.slide-in-right{animation:rl-in-right .18s ease-out forwards}
+@keyframes rl-out-left{from{transform:translateX(0);opacity:1}to{transform:translateX(-30%);opacity:0}}
+@keyframes rl-out-right{from{transform:translateX(0);opacity:1}to{transform:translateX(30%);opacity:0}}
+@keyframes rl-in-left{from{transform:translateX(30%);opacity:0}to{transform:translateX(0);opacity:1}}
+@keyframes rl-in-right{from{transform:translateX(-30%);opacity:0}to{transform:translateX(0);opacity:1}}
 .review-item{
-  background:var(--card);border:1px solid var(--border);border-radius:12px;
-  margin-bottom:10px;overflow:hidden;cursor:pointer;
-}
 .review-item-head{
   display:flex;align-items:center;gap:10px;padding:12px 14px;
 }
