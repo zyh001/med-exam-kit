@@ -301,10 +301,18 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 				userID, bankID, str(item["fingerprint"]), sid,
 				intV(item["result"]), str(item["mode"]), str(item["unit"]),
 				time.Now().UnixMilli())
-			// SM-2
-			qual := intV(item["result"])
-			if qual >= 0 {
-				s.updateSM2Tx(ctx, userID, bankID, str(item["fingerprint"]), qual)
+			// SM-2: map result to quality (must match SQLite logic in progress.go)
+			res := intV(item["result"])
+			if res != -1 {
+				quality := 4 // correct → good recall
+				if res == 0 {
+					quality = 1 // wrong → poor recall
+				}
+				// respect explicit quality override from client
+				if qv, ok := item["quality"].(float64); ok {
+					quality = int(math.Max(0, math.Min(5, qv)))
+				}
+				s.updateSM2Tx(ctx, userID, bankID, str(item["fingerprint"]), quality)
 			}
 		}
 	}
@@ -455,8 +463,8 @@ func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int) 
 		SELECT COUNT(*),
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END),
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END),
-		       SUM(CASE WHEN result=-1 THEN 1 ELSE 0 END)
-		FROM attempts WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2)`, userID, int64(bankID)).Scan(
+		       0
+		FROM attempts WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND result != -1`, userID, int64(bankID)).Scan(
 		&attempts, &correct, &wrong, &skip)
 	st.Attempts, st.Correct, st.Wrong, st.Skip =
 		int(attempts), int(correct), int(wrong), int(skip)
