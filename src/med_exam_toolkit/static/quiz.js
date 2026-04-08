@@ -102,6 +102,7 @@ function _bankSuffix() { return '-b' + S.bankID; }
 function practiceSessionsKey() { return 'quiz_practice_sessions_v1' + _bankSuffix(); }
 function examSessionKey()      { return 'quiz_exam_session_v1'      + _bankSuffix(); }
 function historyKey()          { return 'quiz-history'              + _bankSuffix(); }
+function deletedIdsKey()       { return 'quiz-deleted-ids'        + _bankSuffix(); }
 function _reviewCacheKey()     { return 'quiz-review-cache'         + _bankSuffix(); }
 
 const MAX_PRACTICE_SESSIONS = 5;
@@ -2723,10 +2724,43 @@ function highlightInductiveWords(html) {
 
 function showReview() {
   showScreen('s-review');
+  // 更新标签页数量角标
+  _updateReviewTabCounts();
   // 默认显示全部题目
   setTimeout(() => {
     filterReview('all', document.querySelector('.rtab.active') || document.querySelector('.rtab'));
   }, 250);
+}
+
+/** 为解析页标签添加数量角标 */
+function _updateReviewTabCounts() {
+  const R = S.results;
+  if (!R || !R.qs) return;
+  let okN = 0, wrongN = 0, skipN = 0;
+  R.qs.forEach((q, i) => {
+    let sel = R.ans ? R.ans[i] : S.ans[i];
+    if (sel && sel.__set) sel = new Set(sel.v);
+    const isMulti    = isMultiQ(q);
+    const correctSet = new Set(isMulti ? q.answer.split('') : [q.answer]);
+    const isEmpty    = !sel || (sel instanceof Set && sel.size === 0);
+    if (isEmpty) { skipN++; return; }
+    let isCorrect;
+    if (isMulti) {
+      const selSet = sel instanceof Set ? sel : new Set([sel]);
+      isCorrect = selSet.size === correctSet.size && [...correctSet].every(l => selSet.has(l));
+    } else {
+      isCorrect = sel === q.answer;
+    }
+    if (isCorrect) okN++; else wrongN++;
+  });
+  const tabs = document.querySelectorAll('.rtab');
+  const counts = [R.qs.length, wrongN, okN, skipN];
+  tabs.forEach(t => {
+    const idx = parseInt(t.dataset.tab || '0', 10);
+    let badge = t.querySelector('.rtab-count');
+    if (!badge) { badge = document.createElement('span'); badge.className = 'rtab-count'; t.appendChild(badge); }
+    badge.textContent = counts[idx] > 0 ? counts[idx] : '';
+  });
 }
 
 /** 计算单题得分并返回徽章 HTML（仅考试计分模式下有内容）*/
@@ -2853,6 +2887,7 @@ function filterReview(type, tabEl) {
       <div class="review-expand" id="rexp-${i}">
         <div class="review-expand-inner">
           ${_buildReviewScoreBadge(q, sel, i)}
+          ${q.stem ? `<div class="review-stem">${renderHTML(q.stem)}</div>` : ''}
           ${sharedOptsReviewHtml}
           ${isMulti ? `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">正确答案：<span style="color:var(--success);font-weight:700">${q.answer.split('').join(' ')}</span></div>` : ''}
           <div class="review-opts-list">${optsHtml}</div>
@@ -3365,7 +3400,6 @@ function _renderWrongbookPreview(items) {
         <div class="wb-card-main">
           <div class="wb-preview-text">${esc(plainText || '（题目内容不可用）')}</div>
           <div class="wb-preview-meta">
-            ${it.unit ? `<span class="wb-unit-inline">${esc(it.unit)}</span>` : ''}
             <span>正确率 <strong style="color:${it.accuracy>=60?'var(--success)':'var(--danger)'}">${it.accuracy}%</strong></span>
             <span>共答 ${it.total} 次</span>
           </div>
@@ -3393,6 +3427,10 @@ function _toggleWbCard(header) {
 // ════════════════════════════════════════════
 function loadHistory() {
   try { S.history = JSON.parse(localStorage.getItem(historyKey()) || '[]'); } catch { S.history = []; }
+  try {
+    const arr = JSON.parse(localStorage.getItem(deletedIdsKey()) || '[]');
+    S.deletedIds = new Set(arr);
+  } catch { S.deletedIds = new Set(); }
   // 同时从服务端拉取完整历史，成功后合并刷新（不阻塞本地渲染）
   _fetchServerHistory();
 }
@@ -3795,6 +3833,7 @@ async function deleteHistoryItem(id, idx) {
   if (id) {
     if (!S.deletedIds) S.deletedIds = new Set();
     S.deletedIds.add(id);
+    localStorage.setItem(deletedIdsKey(), JSON.stringify([...S.deletedIds]));
   }
   // 1. 从服务端删除（有真实 id，排除 'idx:N' 占位符）
   if (id && !id.startsWith('idx:')) {
@@ -4262,4 +4301,91 @@ init();
     // 2. 显示持久横幅
     _showAuthExpiredBanner(saveMsg);
   };
+})();
+
+// Review 页面：左右滑动切换 Tab（带滑动动画 + 跟手拖拽反馈）
+(function setupReviewTabSwipe(){
+  const THRESHOLD = 50, VELOCITY = 0.3;
+  let tx=0, ty=0, t0=0, locked=null, dragging=false;
+
+  const reviewScreen = document.getElementById('s-review');
+  if (!reviewScreen) return;
+  const reviewBody = reviewScreen.querySelector('.review-list');
+  if (!reviewBody) return;
+
+  function getCurrentTab(){
+    const active = reviewScreen.querySelector('.rtab.active');
+    return active ? parseInt(active.dataset.tab || '0', 10) : 0;
+  }
+
+  function switchTabAnimated(direction){
+    const current = getCurrentTab();
+    const next = direction === 'left'
+      ? Math.min(current + 1, 3)
+      : Math.max(current - 1, 0);
+    if (next === current) return;
+
+    const outClass = direction === 'left' ? 'slide-out-left' : 'slide-out-right';
+    const inClass  = direction === 'left' ? 'slide-in-left'  : 'slide-in-right';
+
+    // 1. 滑出动画
+    reviewBody.classList.add(outClass);
+    reviewBody.addEventListener('animationend', function once(){
+      reviewBody.removeEventListener('animationend', once);
+      reviewBody.classList.remove(outClass);
+      // 2. 切换 tab 内容
+      const btn = reviewScreen.querySelector(`.rtab[data-tab="${next}"]`);
+      if (btn) btn.click();
+      // 3. 滑入动画
+      reviewBody.classList.add(inClass);
+      reviewBody.addEventListener('animationend', function once2(){
+        reviewBody.removeEventListener('animationend', once2);
+        reviewBody.classList.remove(inClass);
+      });
+    });
+    vibrate(10);
+  }
+
+  reviewBody.addEventListener('touchstart', e => {
+    if (document.querySelector('.screen.active')?.id !== 's-review') return;
+    const t = e.touches[0]; tx = t.clientX; ty = t.clientY; t0 = Date.now();
+    locked = null; dragging = false;
+    reviewBody.style.transition = 'none';
+  }, { passive: true });
+
+  reviewBody.addEventListener('touchmove', e => {
+    if (document.querySelector('.screen.active')?.id !== 's-review') return;
+    const t = e.touches[0];
+    const dx = t.clientX - tx, dy = t.clientY - ty;
+    if (!locked){ const d = getSwipeDir(dx, dy); if (!d) return; locked = d; }
+    if (locked === 'vertical') return;
+    e.preventDefault();
+    dragging = true;
+    // 跟手拖拽反馈（最大偏移 80px）
+    const clamp = Math.max(-80, Math.min(80, dx));
+    const fade  = 1 - Math.abs(clamp) / 200;
+    reviewBody.style.transform = `translateX(${clamp}px)`;
+    reviewBody.style.opacity   = fade;
+  }, { passive: false });
+
+  reviewBody.addEventListener('touchend', e => {
+    if (!dragging){ dragging = false; return; }
+    dragging = false;
+    // 弹回
+    reviewBody.style.transition = 'transform .15s, opacity .15s';
+    reviewBody.style.transform  = '';
+    reviewBody.style.opacity    = '';
+
+    const dx = e.changedTouches[0].clientX - tx;
+    const dt = Date.now() - t0;
+    const vel = Math.abs(dx) / dt;
+    if (Math.abs(dx) >= THRESHOLD || vel >= VELOCITY){
+      // 重置 inline style 再跑动画
+      reviewBody.style.transition = '';
+      reviewBody.style.transform  = '';
+      reviewBody.style.opacity    = '';
+      if (dx < 0) switchTabAnimated('left');
+      else        switchTabAnimated('right');
+    }
+  }, { passive: true });
 })();

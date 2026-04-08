@@ -581,7 +581,7 @@
           <div class="results-actions fade-up">
             <button class="res-btn primary"   onclick="showReview()" id="res-review-detail-btn">📖 查看解析</button>
             <button class="res-btn ghost"     onclick="retryQuiz()">🔁 再练一次</button>
-            <button class="res-btn wrongbook" onclick="startWrongBookReview()" id="res-wrongbook-btn" style="display:none">📕 练错题</button>
+            <button class="res-btn wrongbook" onclick="startWrongBookReview()" id="res-wrongbook-btn" style="display:none">📕 练习错题</button>
             <button class="res-btn review"    onclick="startReview()" id="res-review-btn" style="display:none">🔄 今日复习</button>
             <button class="res-btn ghost"     onclick="showScreen('s-home')">🏠 回到主页</button>
           </div>
@@ -597,10 +597,10 @@
       <h2>题目解析</h2>
     </div>
     <div class="review-tabs">
-      <button class="rtab active"    onclick="filterReview('all',this)">全部</button>
-      <button class="rtab wrong-tab" onclick="filterReview('wrong',this)">答错</button>
-      <button class="rtab ok-tab"    onclick="filterReview('ok',this)">答对</button>
-      <button class="rtab"           onclick="filterReview('skip',this)">未答</button>
+      <button class="rtab active"    data-tab="0" onclick="filterReview('all',this)">全部</button>
+      <button class="rtab wrong-tab" data-tab="1" onclick="filterReview('wrong',this)">答错</button>
+      <button class="rtab ok-tab"    data-tab="2" onclick="filterReview('ok',this)">答对</button>
+      <button class="rtab"           data-tab="3" onclick="filterReview('skip',this)">未答</button>
     </div>
     <div class="review-list" id="review-list"></div>
   </div>
