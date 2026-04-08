@@ -2420,7 +2420,7 @@ async function _recordMemoSession() {
   });
   if (!items.length) return;
 
-  const today = new Date().toLocaleDateString('zh-CN');
+  const today = new Date().toISOString().slice(0, 10);
   const units  = [...new Set(items.map(it => it.unit).filter(Boolean))];
   const payload = {
     id:       'memo-' + String(Date.now()),
@@ -2573,7 +2573,7 @@ function calculateResults() {
     skip,
     timeSec: S.results.timeSec,
     time_sec: S.results.timeSec,
-    date: new Date().toLocaleDateString('zh-CN'),
+    date: new Date().toISOString().slice(0, 10),
     units: [...new Set(qs.map(q => q.unit).filter(Boolean))].slice(0,2).join('、'),
   };
   S.history.unshift(record);
@@ -2912,7 +2912,7 @@ async function _recordSessionToServer(results, questions, ans, sessionId) {
     items.push({ fingerprint: fp, result, mode: q.mode, unit: q.unit });
   });
 
-  const today = new Date().toLocaleDateString('zh-CN');
+  const today = new Date().toISOString().slice(0, 10);
   const units  = [...new Set(questions.map(q => q.unit).filter(Boolean))];
   const payload = {
     id:       sessionId || String(Date.now()),
@@ -2958,21 +2958,23 @@ async function _refreshProgressBadges() {
       apiFetch('/api/review/due?' + bankQS()).then(r => r.json()),
       apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json()),
     ]);
+    const dueCount   = (dueRes.fingerprints || []).length;
+    const wrongCount = (wbRes.items || []).length;
     const dueBadge   = document.getElementById('due-badge');
     const wrongBadge = document.getElementById('wrong-badge');
     if (dueBadge) {
-      dueBadge.textContent = dueRes.count || 0;
-      dueBadge.style.display = dueRes.count > 0 ? '' : 'none';
+      dueBadge.textContent = dueCount;
+      dueBadge.style.display = dueCount > 0 ? '' : 'none';
     }
     if (wrongBadge) {
-      wrongBadge.textContent = wbRes.count || 0;
-      wrongBadge.style.display = wbRes.count > 0 ? '' : 'none';
+      wrongBadge.textContent = wrongCount;
+      wrongBadge.style.display = wrongCount > 0 ? '' : 'none';
     }
     // 成绩页按钮
     const resWB  = document.getElementById('res-wrongbook-btn');
     const resRev = document.getElementById('res-review-btn');
-    if (resWB)  resWB.style.display  = wbRes.count  > 0 ? '' : 'none';
-    if (resRev) resRev.style.display = dueRes.count > 0 ? '' : 'none';
+    if (resWB)  resWB.style.display  = wrongCount > 0 ? '' : 'none';
+    if (resRev) resRev.style.display = dueCount   > 0 ? '' : 'none';
   } catch (e) { /* 静默失败，不影响主流程 */ }
 }
 
