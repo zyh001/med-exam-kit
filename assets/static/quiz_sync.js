@@ -199,7 +199,7 @@ const SyncManager = (() => {
           continue;
         }
         const { failed = [] } = json;
-        const failedIds = new Set(failed.map(f => f.session_id));
+        const failedIds = new Set((failed || []).map(f => f.session_id));
 
         // 已成功处理的 → 从队列删除
         await Promise.all(
