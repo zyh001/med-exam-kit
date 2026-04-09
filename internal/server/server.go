@@ -106,6 +106,9 @@ type Server struct {
 	// 考试防作弊：sealed 模式下答案存服务端，提交后才下发
 	examMu       sync.Mutex
 	examSessions map[string]*examSession // examID → answers
+	// 试卷分享
+	shareMu     sync.Mutex
+	shareTokens map[string]*shareConfig
 }
 
 type examAnswer struct {
@@ -115,6 +118,13 @@ type examAnswer struct {
 type examSession struct {
 	answers map[string]examAnswer // fingerprint → answer+discuss
 	ts      int64
+}
+
+type shareConfig struct {
+	Fingerprints []string `json:"fingerprints"`
+	Mode         string   `json:"mode"`
+	BankIdx      int      `json:"bank_idx"`
+	Ts           int64    `json:"ts"`
 }
 
 const (
@@ -153,6 +163,7 @@ func New(cfg Config) *Server {
 	s.pushStores     = pushStores
 	s.pushTestBuckets = pushTestBuckets
 	s.examSessions    = map[string]*examSession{}
+	s.shareTokens     = map[string]*shareConfig{}
 	if keys, err := generateVAPIDKeys(); err == nil {
 		s.vapidKeys = keys
 	} else {
@@ -353,6 +364,8 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/debug", s.handleDebug)
 	m.HandleFunc("GET /api/sync/status", s.handleSyncStatus)
 	m.HandleFunc("GET /api/exam/reveal", s.handleExamReveal)
+	m.HandleFunc("POST /api/exam/share", s.handleExamShare)
+	m.HandleFunc("GET /api/exam/join", s.handleExamJoin)
 }
 
 // ── Bank selection ────────────────────────────────────────────────────
@@ -1370,6 +1383,88 @@ func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]any{"answers": sess.answers})
+}
+
+// handleExamShare 生成试卷分享令牌
+func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
+	_, bankIdx, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
+	var body struct {
+		Fingerprints []string `json:"fingerprints"`
+		Mode         string   `json:"mode"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Fingerprints) == 0 {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	tok := make([]byte, 8)
+	rand.Read(tok)
+	token := hex.EncodeToString(tok)
+	s.shareMu.Lock()
+	// 清理超过 72h 的旧分享
+	now := time.Now().Unix()
+	for k, v := range s.shareTokens {
+		if now-v.Ts > 72*3600 { delete(s.shareTokens, k) }
+	}
+	s.shareTokens[token] = &shareConfig{
+		Fingerprints: body.Fingerprints,
+		Mode:         body.Mode,
+		BankIdx:      bankIdx,
+		Ts:           now,
+	}
+	s.shareMu.Unlock()
+	jsonOK(w, map[string]any{"ok": true, "token": token})
+}
+
+// handleExamJoin 加入分享试卷
+func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
+	token := r.URL.Query().Get("token")
+	if token == "" {
+		jsonError(w, "缺少 token", http.StatusBadRequest)
+		return
+	}
+	s.shareMu.Lock()
+	cfg, ok := s.shareTokens[token]
+	s.shareMu.Unlock()
+	if !ok {
+		jsonError(w, "分享链接已过期或无效", http.StatusNotFound)
+		return
+	}
+	if cfg.BankIdx < 0 || cfg.BankIdx >= len(s.cfg.Banks) {
+		jsonError(w, "题库不存在", http.StatusNotFound)
+		return
+	}
+	b := &s.cfg.Banks[cfg.BankIdx]
+	fpSet := map[string]struct{}{}
+	for _, fp := range cfg.Fingerprints { fpSet[fp] = struct{}{} }
+	rows, _ := selectQuestions(b.Questions, selectOpts{fpSet: fpSet})
+	if rows == nil { rows = []sqFlat{} }
+	// sealed 模式：剥离答案
+	var eid string
+	if cfg.Mode == "exam" && len(rows) > 0 {
+		eidBytes := make([]byte, 16); rand.Read(eidBytes)
+		eid = hex.EncodeToString(eidBytes)
+		answers := make(map[string]examAnswer, len(rows))
+		for i := range rows {
+			answers[rows[i].Fingerprint] = examAnswer{Answer: rows[i].Answer, Discuss: rows[i].Discuss}
+			rows[i].Answer = ""
+			rows[i].Discuss = ""
+		}
+		s.examMu.Lock()
+		now := time.Now().Unix()
+		for k, v := range s.examSessions {
+			if now-v.ts > 86400 { delete(s.examSessions, k) }
+		}
+		s.examSessions[eid] = &examSession{answers: answers, ts: now}
+		s.examMu.Unlock()
+	}
+	jsonOK(w, map[string]any{
+		"items": rows, "total": len(rows), "mode": cfg.Mode,
+		"exam_id": eid, "time_limit": 3600,
+	})
 }
 
 // ── Icon handlers ─────────────────────────────────────────────────────
