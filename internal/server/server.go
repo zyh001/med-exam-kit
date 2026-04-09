@@ -2243,8 +2243,8 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	} else if b.DB != nil {
 		ok2 = progress.DeleteSession(b.DB, sessionID, uid)
 	} else {
-		jsonError(w, "record not enabled", http.StatusServiceUnavailable)
-		return
+		// DB 不存在时视为「无需删除」（本地记录可能尚未同步到服务端）
+		ok2 = true
 	}
 	jsonOK(w, map[string]any{"ok": ok2})
 }
