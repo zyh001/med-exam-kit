@@ -34,6 +34,35 @@ const S = {
 };
 
 // 返回当前题库的 query string 参数 (bank=N)
+// ── AES-256-GCM 解密（考试防作弊端到端加密）─────────────────────────
+async function _aesDecrypt(keyB64, cipherB64) {
+  if (!cipherB64) return '';
+  try {
+    const keyBytes = Uint8Array.from(atob(keyB64), c => c.charCodeAt(0));
+    const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
+    const ct = Uint8Array.from(atob(cipherB64), c => c.charCodeAt(0));
+    const iv = ct.slice(0, 12);
+    const data = ct.slice(12);
+    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
+    return new TextDecoder().decode(plain);
+  } catch (e) {
+    console.warn('[Crypto] decrypt failed:', e);
+    return cipherB64; // fallback: return raw (non-encrypted or corrupted)
+  }
+}
+async function _decryptQuestions(items, keyB64) {
+  for (const q of items) {
+    q.text = await _aesDecrypt(keyB64, q.text);
+    q.stem = await _aesDecrypt(keyB64, q.stem);
+  }
+}
+async function _decryptAnswers(items, keyB64) {
+  for (const q of items) {
+    q.answer  = await _aesDecrypt(keyB64, q.answer);
+    q.discuss = await _aesDecrypt(keyB64, q.discuss);
+  }
+}
+
 function bankQS() { return 'bank=' + S.bankID; }
 
 // 安全渲染 HTML：允许 <img> 标签，过滤脚本等危险元素
@@ -1462,6 +1491,11 @@ async function startSession() {
 
   S.questions = data.items;
   S.examId    = data.exam_id || null; // sealed 模式下服务端返回的 exam ID
+
+  // 端到端加密：用 keyQ 解密题干（keyA 交卷后获取）
+  if (data.key_q) {
+    await _decryptQuestions(S.questions, data.key_q);
+  }
   S.cur = 0;
   S.ans = {};
   S.marked = new Set();
@@ -2155,27 +2189,23 @@ document.addEventListener('click', e => {
 // ── Submit ──────────────────────────────────
 async function submitExam() {
   clearInterval(S.timerInterval);
-  clearExamSession();   // 正常交卷，清除存档
+  clearExamSession();
 
-  // sealed 模式：从服务端获取答案后再评分
+  // 端到端加密：获取 keyA 解密答案和解析
   if (S.examId) {
     try {
       const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(S.examId) + '&' + bankQS());
       if (res.ok) {
-        const { answers } = await res.json();
-        // 将答案填回题目
-        S.questions.forEach(q => {
-          const a = answers[q.fingerprint];
-          if (a) { q.answer = a.answer; q.discuss = a.discuss; }
-        });
+        const { key_a } = await res.json();
+        if (key_a) {
+          await _decryptAnswers(S.questions, key_a);
+        }
         S.examId = null;
       } else {
-        // 离线或服务端异常：提示稍后获取
-        toast('⚠ 无法获取答案，请联网后在历史记录中查看解析', true);
-        // 存储 examId 到 localStorage，供后续联网获取
+        toast('⚠ 无法获取答案密钥，请联网后在历史记录中查看解析', true);
         try {
           const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
-          pending.push({ examId: S.examId, ts: Date.now(), qs: S.questions.map(q => q.fingerprint) });
+          pending.push({ examId: S.examId, ts: Date.now() });
           localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
         } catch(e) {}
       }
