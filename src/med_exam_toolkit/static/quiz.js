@@ -3593,7 +3593,6 @@ async function _fetchServerHistory() {
     if (!res.ok) return;
     const data = await res.json();
     const items = data.items || [];
-    if (!items.length) return;
     // 过滤掉本地已删除的 id（防止并发时已删项被服务端响应覆盖写回）
     const filtered = items.filter(h => !S.deletedIds?.has(h.id));
     // 合并：服务端历史作为主数据，用 id 去重本地记录
@@ -3820,6 +3819,12 @@ function _togglePin(id, wasPinned) {
 
 // ── 滑动删除 + 撤销 ──────────────────────────────
 function _showDeleteWithUndo(wrap, id, idx) {
+  // 立即标记为已删，防止 _fetchServerHistory 在等待期间把它加回来
+  if (id) {
+    if (!S.deletedIds) S.deletedIds = new Set();
+    S.deletedIds.add(id);
+    localStorage.setItem(deletedIdsKey(), JSON.stringify([...S.deletedIds]));
+  }
   const undo = document.createElement('div');
   undo.className = 'rh-undo-bar';
   undo.innerHTML = `<span>已删除</span><button onclick="_undoDelete(this,'${id}',${idx})">撤销</button>`;
@@ -3840,6 +3845,11 @@ function _undoDelete(btn, id, idx) {
   const bar = btn.parentElement;
   clearTimeout(bar._fadeTimer);
   clearTimeout(bar._timer);
+  // 撤销：从 deletedIds 移除
+  if (id && S.deletedIds) {
+    S.deletedIds.delete(id);
+    localStorage.setItem(deletedIdsKey(), JSON.stringify([...S.deletedIds]));
+  }
   bar.classList.remove('rh-undo-out');
   bar.classList.add('rh-undo-in');
   // 淡出后移除
@@ -3990,13 +4000,21 @@ async function deleteHistoryItem(id, idx) {
   // 1. 从服务端删除（有真实 id，排除 'idx:N' 占位符）
   if (id && !id.startsWith('idx:')) {
     try {
-      await apiFetch('/api/session/' + encodeURIComponent(id) + '?' + bankQS(), {
+      const res = await apiFetch('/api/session/' + encodeURIComponent(id) + '?' + bankQS(), {
         method: 'DELETE',
       });
+      if (res.ok) {
+        // 服务端删除成功，可以从 deletedIds 中移除（不再需要客户端过滤）
+        if (S.deletedIds) {
+          S.deletedIds.delete(id);
+          localStorage.setItem(deletedIdsKey(), JSON.stringify([...S.deletedIds]));
+        }
+      }
+      // 无论成功失败都从本地列表移除（deletedIds 兜底过滤）
       if (S.serverHistory) {
         S.serverHistory = S.serverHistory.filter(h => h.id !== id);
       }
-    } catch (e) { /* 离线时仍删本地 */ }
+    } catch (e) { /* 离线时仍删本地，deletedIds 会持久过滤 */ }
   }
 
   // 2. 从本地历史删除
