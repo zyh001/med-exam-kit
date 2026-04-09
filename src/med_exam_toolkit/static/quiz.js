@@ -34,35 +34,6 @@ const S = {
 };
 
 // 返回当前题库的 query string 参数 (bank=N)
-// ── AES-256-GCM 解密（考试防作弊端到端加密）─────────────────────────
-async function _aesDecrypt(keyB64, cipherB64) {
-  if (!cipherB64) return '';
-  try {
-    const keyBytes = Uint8Array.from(atob(keyB64), c => c.charCodeAt(0));
-    const key = await crypto.subtle.importKey('raw', keyBytes, 'AES-GCM', false, ['decrypt']);
-    const ct = Uint8Array.from(atob(cipherB64), c => c.charCodeAt(0));
-    const iv = ct.slice(0, 12);
-    const data = ct.slice(12);
-    const plain = await crypto.subtle.decrypt({ name: 'AES-GCM', iv }, key, data);
-    return new TextDecoder().decode(plain);
-  } catch (e) {
-    console.warn('[Crypto] decrypt failed:', e);
-    return cipherB64; // fallback: return raw (non-encrypted or corrupted)
-  }
-}
-async function _decryptQuestions(items, keyB64) {
-  for (const q of items) {
-    q.text = await _aesDecrypt(keyB64, q.text);
-    q.stem = await _aesDecrypt(keyB64, q.stem);
-  }
-}
-async function _decryptAnswers(items, keyB64) {
-  for (const q of items) {
-    q.answer  = await _aesDecrypt(keyB64, q.answer);
-    q.discuss = await _aesDecrypt(keyB64, q.discuss);
-  }
-}
-
 function bankQS() { return 'bank=' + S.bankID; }
 
 // 安全渲染 HTML：允许 <img> 标签，过滤脚本等危险元素
@@ -530,6 +501,9 @@ async function selectBankAndEnter(idx) {
 
     // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
     checkResumeSession();
+
+    // 检查 URL hash 是否包含分享试卷令牌
+    _checkShareToken();
 
     // 多题库时，让左上角题库名称变成可点击的切换入口
     _updateBrandClickable();
@@ -1490,20 +1464,7 @@ async function startSession() {
   if (!data.items.length) { toast('没有符合条件的题目'); return; }
 
   S.questions = data.items;
-  S.examId    = data.exam_id || null;
-
-  // 端到端加密：保存加密的答案/解析（供复盘缓存使用，不存明文）
-  if (data.exam_id) {
-    S._encryptedAnswers = {};
-    S.questions.forEach(q => {
-      S._encryptedAnswers[q.fingerprint] = { answer: q.answer, discuss: q.discuss };
-    });
-  }
-
-  // 用 keyQ 解密题干（keyA 交卷后获取）
-  if (data.key_q) {
-    await _decryptQuestions(S.questions, data.key_q);
-  }
+  S.examId    = data.exam_id || null; // sealed 模式下服务端返回的 exam ID
   S.cur = 0;
   S.ans = {};
   S.marked = new Set();
@@ -1695,7 +1656,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
         : 'B型题共享选项';
     const soItems = q.shared_options.map((o, i) => {
       const l = String.fromCharCode(65 + i);
-      const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+      const clean = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
       return `<div class="q-shared-opt-row">
         <span class="q-shared-opt-lbl">${l}</span>
         <span>${esc(clean)}</span>
@@ -1755,7 +1716,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
       btn.onclick = () => selectOpt(letter, btn);
     }
     // 剥离选项文本里可能自带的字母前缀（"A." "A、" "A．" 等），避免字母重复显示
-    const cleanOpt = opt.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+    const cleanOpt = opt.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
     btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>`;
     opts.appendChild(btn);
   });
@@ -1971,7 +1932,7 @@ function buildExplain(q, selected) {
     soBox.appendChild(soTitle);
     q.shared_options.forEach((o, i) => {
       const l = String.fromCharCode(65 + i);
-      const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+      const clean = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
       const row = document.createElement('div');
       row.className = 'explain-shared-opt-row' + (correctSet.has(l) ? ' is-ans' : '');
       row.innerHTML = `<span class="opt-lbl">${l}</span><span>${esc(clean)}</span>`;
@@ -2197,23 +2158,28 @@ document.addEventListener('click', e => {
 // ── Submit ──────────────────────────────────
 async function submitExam() {
   clearInterval(S.timerInterval);
-  clearExamSession();
+  clearExamSession();   // 正常交卷，清除存档
+  S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
 
-  // 端到端加密：获取 keyA 解密答案和解析
+  // sealed 模式：从服务端获取答案后再评分
   if (S.examId) {
     try {
       const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(S.examId) + '&' + bankQS());
       if (res.ok) {
-        const { key_a } = await res.json();
-        if (key_a) {
-          await _decryptAnswers(S.questions, key_a);
-        }
-        // examId 保留到 calculateResults 写完复盘缓存后再清除
+        const { answers } = await res.json();
+        // 将答案填回题目
+        S.questions.forEach(q => {
+          const a = answers[q.fingerprint];
+          if (a) { q.answer = a.answer; q.discuss = a.discuss; }
+        });
+        S.examId = null;
       } else {
-        toast('⚠ 无法获取答案密钥，请联网后在历史记录中查看解析', true);
+        // 离线或服务端异常：提示稍后获取
+        toast('⚠ 无法获取答案，请联网后在历史记录中查看解析', true);
+        // 存储 examId 到 localStorage，供后续联网获取
         try {
           const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
-          pending.push({ examId: S.examId, ts: Date.now() });
+          pending.push({ examId: S.examId, ts: Date.now(), qs: S.questions.map(q => q.fingerprint) });
           localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
         } catch(e) {}
       }
@@ -2308,14 +2274,14 @@ function renderMemo(dir = 'forward') {
         <div class="memo-shared-opts-title">B型题共享选项</div>
         ${q.shared_options.map((o,i) => {
         const l = String.fromCharCode(65+i);
-        const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+        const co = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
         return `<div class="memo-shared-opt-row"><span class="opt-lbl">${l}</span><span>${esc(co)}</span></div>`;
       }).join('')}
       </div>`
       : '';
   const optsHtml = q.options.map((o, i) => {
     const l = String.fromCharCode(65 + i);
-    const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+    const co = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
     return `<div class="memo-opt" id="mopt-${l}">
       <span class="memo-opt-label">${l}</span><span>${esc(co)}</span>
     </div>`;
@@ -2655,24 +2621,9 @@ function calculateResults() {
   try {
     const cacheKey = _reviewCacheKey();
     const cache = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-    // 考试防作弊：不存明文答案，存加密版本 + examId
-    let cacheQs = S.questions;
-    let encAnswers = null;
-    if (S._encryptedAnswers) {
-      encAnswers = S._encryptedAnswers;
-      // 复制题目但清空答案/解析（localStorage 里不留明文）
-      cacheQs = S.questions.map(q => ({...q, answer: '', discuss: ''}));
-    }
-    const entry = { id: sessionId, qs: cacheQs, ans: _serializeAns(S.ans) };
-    if (encAnswers) entry.enc = encAnswers;
-    if (S.examId) entry.examId = S.examId;
-    cache.unshift(entry);
+    cache.unshift({ id: sessionId, qs: S.questions, ans: _serializeAns(S.ans) });
     localStorage.setItem(cacheKey, JSON.stringify(cache.slice(0, 10)));
   } catch (e) { /* localStorage 满时静默忽略 */ }
-
-  // 清理考试加密状态（缓存已保存加密版本）
-  S.examId = null;
-  S._encryptedAnswers = null;
 
   // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
   _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(async () => {
@@ -2763,6 +2714,17 @@ function renderResults() {
     sb.style.display = '';
   } else {
     sb.style.display = 'none';
+  }
+
+  // ── 本次错题按钮：有答错题目时显示 ─────────────────────────────────
+  const swBtn = document.getElementById('res-wrongbook-btn');
+  if (swBtn) {
+    swBtn.style.display = (R.wrong > 0 && R.qs) ? '' : 'none';
+  }
+  // ── 分享试卷按钮（仅考试模式有意义）──────────────────────────────
+  const shareBtn = document.getElementById('res-share-btn');
+  if (shareBtn) {
+    shareBtn.style.display = (R.qs && R.qs.length > 0) ? '' : 'none';
   }
 }
 
@@ -2943,7 +2905,7 @@ function filterReview(type, tabEl) {
           ${q.shared_options.map((o,oi) => {
           const l = String.fromCharCode(65+oi);
           const isCor = correctSet.has(l);
-          const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+          const clean = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
           return `<div class="review-shared-opt-row${isCor ? ' is-ans' : ''}">
               <span class="opt-lbl">${l}</span><span>${esc(clean)}</span>
             </div>`;
@@ -3094,9 +3056,7 @@ async function _refreshProgressBadges() {
       wrongBadge.style.display = wrongCount > 0 ? '' : 'none';
     }
     // 成绩页按钮
-    const resWB  = document.getElementById('res-wrongbook-btn');
     const resRev = document.getElementById('res-review-btn');
-    if (resWB)  resWB.style.display  = wrongCount > 0 ? '' : 'none';
     if (resRev) resRev.style.display = dueCount   > 0 ? '' : 'none';
   } catch (e) { /* 静默失败，不影响主流程 */ }
 }
@@ -3147,6 +3107,97 @@ async function startWrongBookReview() {
     toast(`📕 错题模式：共 ${data.items.length} 题`);
     startQuiz();
   } catch(e) { toast('加载错题失败'); }
+}
+
+/** 只练习本次答错的题目 */
+function practiceSessionWrong() {
+  const R = S.results;
+  if (!R || !R.qs || !R.ans) { toast('没有可用的错题数据'); return; }
+  const wrongQs = [];
+  R.qs.forEach((q, i) => {
+    let sel = R.ans[i];
+    if (sel && sel.__set) sel = new Set(sel.v);
+    const isEmpty = !sel || (sel instanceof Set && sel.size === 0);
+    if (isEmpty) return; // 未答不算错
+    const isMulti = isMultiQ(q);
+    const correctSet = new Set(isMulti ? q.answer.split('') : [q.answer]);
+    let isCorrect;
+    if (isMulti) {
+      const selSet = sel instanceof Set ? sel : new Set([sel]);
+      isCorrect = selSet.size === correctSet.size && [...correctSet].every(l => selSet.has(l));
+    } else {
+      isCorrect = sel === q.answer;
+    }
+    if (!isCorrect) wrongQs.push(q);
+  });
+  if (!wrongQs.length) { toast('本次没有答错的题目 👍'); return; }
+  S.mode      = 'practice';
+  S.questions = wrongQs;
+  S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
+  S.examStart = Date.now();
+  S.modeGroups = buildModeGroups(wrongQs);
+  S.currentGroupIdx = 0; S.caseMaxReached = {};
+  S.practiceSessionId = String(Date.now());
+  S.streak = 0;
+  toast(`📕 本次错题：共 ${wrongQs.length} 题`);
+  startQuiz();
+}
+
+/** 分享试卷（生成分享链接） */
+async function shareExam() {
+  const R = S.results;
+  if (!R || !R.qs || !R.qs.length) { toast('没有可分享的题目'); return; }
+  const fps = R.qs.map(q => q.fingerprint).filter(Boolean);
+  if (!fps.length) { toast('题目缺少标识，无法分享'); return; }
+  try {
+    const res = await apiFetch('/api/exam/share?' + bankQS(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprints: fps, mode: R.mode || 'exam' }),
+    });
+    const d = await res.json();
+    if (!d.token) { toast('分享失败', true); return; }
+    const url = location.origin + location.pathname + '#share=' + d.token;
+    if (navigator.share) {
+      navigator.share({ title: '医考练习 - 试卷分享', text: `共 ${fps.length} 题`, url }).catch(()=>{});
+    } else if (navigator.clipboard) {
+      await navigator.clipboard.writeText(url);
+      toast('✅ 分享链接已复制到剪贴板');
+    } else {
+      prompt('分享链接：', url);
+    }
+  } catch(e) { toast('分享失败: ' + e.message, true); }
+}
+
+/** 检查 URL hash 是否包含分享令牌，自动加入 */
+async function _checkShareToken() {
+  const m = location.hash.match(/share=([a-f0-9]+)/);
+  if (!m) return;
+  const token = m[1];
+  location.hash = ''; // 清除 hash 防止重复触发
+  try {
+    const res = await apiFetch('/api/exam/join?token=' + token + '&' + bankQS());
+    const d   = await res.json();
+    if (!d.items || !d.items.length) { toast('试卷已过期或无效'); return; }
+    S.mode      = d.mode || 'exam';
+    S.questions = d.items;
+    S.examId    = d.exam_id || null;
+    S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
+    S.examStart = Date.now();
+    S.modeGroups = buildModeGroups(d.items);
+    S.currentGroupIdx = 0; S.caseMaxReached = {};
+    S.practiceSessionId = null;
+    S.streak = 0;
+    toast(`📋 已加载分享试卷：${d.items.length} 题`);
+    if (S.mode === 'exam' || S.mode === 'exam_done') {
+      S.mode = 'exam';
+      S.examLimit = d.time_limit || 3600;
+      startQuiz();
+      saveExamSession();
+    } else {
+      startQuiz();
+    }
+  } catch(e) { toast('加载分享试卷失败', true); }
 }
 
 /** 打开统计页面 */
@@ -3340,7 +3391,23 @@ function _renderTrendChart(history) {
   const svg   = document.getElementById('trend-chart');
   const empty = document.getElementById('trend-empty');
   svg.innerHTML = '';
-  const recent = history.filter(h => h.mode !== 'memo').slice(0, 15).reverse();
+  const sessions = history.filter(h => h.mode !== 'memo' && h.date);
+  if (!sessions.length) {
+    svg.style.display = 'none';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  // 按天聚合：同一天的所有 session 合并计算正确率
+  const byDay = {};
+  sessions.forEach(h => {
+    if (!byDay[h.date]) byDay[h.date] = { total: 0, correct: 0, date: h.date };
+    byDay[h.date].total   += h.total || 0;
+    byDay[h.date].correct += h.correct || 0;
+  });
+  const recent = Object.values(byDay)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-15)
+    .map(d => ({ ...d, pct: d.total > 0 ? Math.round(d.correct / d.total * 100) : 0 }));
   if (!recent.length) {
     svg.style.display = 'none';
     if (empty) empty.style.display = '';
@@ -3861,7 +3928,7 @@ function _fmtAgo(ts) {
 }
 
 /** 点击已完成记录 → 查看结果摘要页 */
-async function openHistoryResult(id, idx) {
+function openHistoryResult(id, idx) {
   const allH = (S.serverHistory && S.serverHistory.length)
     ? [...(S.localOnlyHistory||[]), ...S.serverHistory]
     : S.history;
@@ -3871,38 +3938,12 @@ async function openHistoryResult(id, idx) {
   if (!h) return;
 
   // 尝试从复盘缓存恢复题目和答案
-  let cachedQs = null, cachedAns = null, cacheEntry = null;
+  let cachedQs = null, cachedAns = null;
   try {
     const cache = JSON.parse(localStorage.getItem(_reviewCacheKey()) || '[]');
-    cacheEntry = cache.find(e => e.id === String(id));
-    if (cacheEntry) { cachedQs = cacheEntry.qs; cachedAns = cacheEntry.ans; }
+    const entry = cache.find(e => e.id === String(id));
+    if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; }
   } catch (e) { /* 缓存读取失败静默忽略 */ }
-
-  // 考试防作弊：缓存中存的是加密答案，需联网获取密钥解密
-  if (cacheEntry && cacheEntry.enc && cachedQs) {
-    try {
-      const eid = cacheEntry.examId;
-      if (eid) {
-        const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(eid) + '&' + bankQS());
-        if (res.ok) {
-          const { key_a } = await res.json();
-          if (key_a) {
-            for (const q of cachedQs) {
-              const e = cacheEntry.enc[q.fingerprint];
-              if (e) {
-                q.answer  = await _aesDecrypt(key_a, e.answer);
-                q.discuss = await _aesDecrypt(key_a, e.discuss);
-              }
-            }
-          }
-        } else {
-          toast('⚠ 需联网才能查看考试答案解析', true);
-        }
-      }
-    } catch(e) {
-      toast('⚠ 网络异常，无法获取答案密钥', true);
-    }
-  }
 
   // 恢复 S.questions 和 S.mode，让"再练一次"能复用同一批题目
   if (cachedQs) {
