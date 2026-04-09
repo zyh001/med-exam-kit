@@ -267,6 +267,27 @@ const SyncManager = (() => {
     await _refreshPendingCount();
   }
 
+  /** 从队列中移除指定 session_id 的条目（防止已删除的会话被重新同步） */
+  async function purgeSession(sessionId) {
+    try {
+      const db = await _openDB();
+      const tx = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      const idx = store.index('session_id');
+      const req = idx.getKey(sessionId);
+      await new Promise((resolve, reject) => {
+        req.onsuccess = () => {
+          if (req.result != null) {
+            store.delete(req.result);
+          }
+          resolve();
+        };
+        req.onerror = () => resolve(); // 不存在也无所谓
+      });
+      await _refreshPendingCount();
+    } catch(e) { /* 静默 */ }
+  }
+
   // ══════════════════════════════════════════
   // 网络状态监听 + 定期 flush
   // ══════════════════════════════════════════
@@ -297,5 +318,5 @@ const SyncManager = (() => {
 
   _init().catch(e => console.warn('[Sync] init error:', e));
 
-  return { record, flush: manualSync, onStateChange, getState, purgeAll };
+  return { record, flush: manualSync, onStateChange, getState, purgeAll, purgeSession };
 })();
