@@ -2229,10 +2229,6 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
-	if b.DB == nil {
-		jsonError(w, "record not enabled", http.StatusServiceUnavailable)
-		return
-	}
 	// 路径：/api/session/{id}
 	sessionID := strings.TrimPrefix(r.URL.Path, "/api/session/")
 	sessionID = strings.Trim(sessionID, "/")
@@ -2244,8 +2240,11 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 	var ok2 bool
 	if b.PgStore != nil {
 		ok2 = b.PgStore.DeleteSession(r.Context(), sessionID, uid)
-	} else {
+	} else if b.DB != nil {
 		ok2 = progress.DeleteSession(b.DB, sessionID, uid)
+	} else {
+		jsonError(w, "record not enabled", http.StatusServiceUnavailable)
+		return
 	}
 	jsonOK(w, map[string]any{"ok": ok2})
 }
