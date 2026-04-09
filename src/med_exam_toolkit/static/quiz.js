@@ -1490,9 +1490,17 @@ async function startSession() {
   if (!data.items.length) { toast('没有符合条件的题目'); return; }
 
   S.questions = data.items;
-  S.examId    = data.exam_id || null; // sealed 模式下服务端返回的 exam ID
+  S.examId    = data.exam_id || null;
 
-  // 端到端加密：用 keyQ 解密题干（keyA 交卷后获取）
+  // 端到端加密：保存加密的答案/解析（供复盘缓存使用，不存明文）
+  if (data.exam_id) {
+    S._encryptedAnswers = {};
+    S.questions.forEach(q => {
+      S._encryptedAnswers[q.fingerprint] = { answer: q.answer, discuss: q.discuss };
+    });
+  }
+
+  // 用 keyQ 解密题干（keyA 交卷后获取）
   if (data.key_q) {
     await _decryptQuestions(S.questions, data.key_q);
   }
@@ -2200,7 +2208,7 @@ async function submitExam() {
         if (key_a) {
           await _decryptAnswers(S.questions, key_a);
         }
-        S.examId = null;
+        // examId 保留到 calculateResults 写完复盘缓存后再清除
       } else {
         toast('⚠ 无法获取答案密钥，请联网后在历史记录中查看解析', true);
         try {
@@ -2647,9 +2655,24 @@ function calculateResults() {
   try {
     const cacheKey = _reviewCacheKey();
     const cache = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-    cache.unshift({ id: sessionId, qs: S.questions, ans: _serializeAns(S.ans) });
+    // 考试防作弊：不存明文答案，存加密版本 + examId
+    let cacheQs = S.questions;
+    let encAnswers = null;
+    if (S._encryptedAnswers) {
+      encAnswers = S._encryptedAnswers;
+      // 复制题目但清空答案/解析（localStorage 里不留明文）
+      cacheQs = S.questions.map(q => ({...q, answer: '', discuss: ''}));
+    }
+    const entry = { id: sessionId, qs: cacheQs, ans: _serializeAns(S.ans) };
+    if (encAnswers) entry.enc = encAnswers;
+    if (S.examId) entry.examId = S.examId;
+    cache.unshift(entry);
     localStorage.setItem(cacheKey, JSON.stringify(cache.slice(0, 10)));
   } catch (e) { /* localStorage 满时静默忽略 */ }
+
+  // 清理考试加密状态（缓存已保存加密版本）
+  S.examId = null;
+  S._encryptedAnswers = null;
 
   // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
   _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(async () => {
@@ -3838,7 +3861,7 @@ function _fmtAgo(ts) {
 }
 
 /** 点击已完成记录 → 查看结果摘要页 */
-function openHistoryResult(id, idx) {
+async function openHistoryResult(id, idx) {
   const allH = (S.serverHistory && S.serverHistory.length)
     ? [...(S.localOnlyHistory||[]), ...S.serverHistory]
     : S.history;
@@ -3848,12 +3871,38 @@ function openHistoryResult(id, idx) {
   if (!h) return;
 
   // 尝试从复盘缓存恢复题目和答案
-  let cachedQs = null, cachedAns = null;
+  let cachedQs = null, cachedAns = null, cacheEntry = null;
   try {
     const cache = JSON.parse(localStorage.getItem(_reviewCacheKey()) || '[]');
-    const entry = cache.find(e => e.id === String(id));
-    if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; }
+    cacheEntry = cache.find(e => e.id === String(id));
+    if (cacheEntry) { cachedQs = cacheEntry.qs; cachedAns = cacheEntry.ans; }
   } catch (e) { /* 缓存读取失败静默忽略 */ }
+
+  // 考试防作弊：缓存中存的是加密答案，需联网获取密钥解密
+  if (cacheEntry && cacheEntry.enc && cachedQs) {
+    try {
+      const eid = cacheEntry.examId;
+      if (eid) {
+        const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(eid) + '&' + bankQS());
+        if (res.ok) {
+          const { key_a } = await res.json();
+          if (key_a) {
+            for (const q of cachedQs) {
+              const e = cacheEntry.enc[q.fingerprint];
+              if (e) {
+                q.answer  = await _aesDecrypt(key_a, e.answer);
+                q.discuss = await _aesDecrypt(key_a, e.discuss);
+              }
+            }
+          }
+        } else {
+          toast('⚠ 需联网才能查看考试答案解析', true);
+        }
+      }
+    } catch(e) {
+      toast('⚠ 网络异常，无法获取答案密钥', true);
+    }
+  }
 
   // 恢复 S.questions 和 S.mode，让"再练一次"能复用同一批题目
   if (cachedQs) {
