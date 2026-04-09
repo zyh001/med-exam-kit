@@ -2,9 +2,12 @@ package server
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"crypto/rand"
 	"crypto/subtle"
 	"database/sql"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -108,13 +111,22 @@ type Server struct {
 	examSessions map[string]*examSession // examID → answers
 }
 
-type examAnswer struct {
-	Answer  string `json:"answer"`
-	Discuss string `json:"discuss"`
-}
 type examSession struct {
-	answers map[string]examAnswer // fingerprint → answer+discuss
-	ts      int64
+	keyA []byte // AES-256 key for answer/discuss decryption
+	ts   int64
+}
+
+// encryptAESGCM encrypts plaintext with AES-256-GCM, returns base64(nonce+ciphertext).
+func encryptAESGCM(key []byte, plaintext string) string {
+	if plaintext == "" { return "" }
+	block, err := aes.NewCipher(key)
+	if err != nil { return plaintext }
+	gcm, err := cipher.NewGCM(block)
+	if err != nil { return plaintext }
+	nonce := make([]byte, gcm.NonceSize())
+	rand.Read(nonce)
+	ct := gcm.Seal(nonce, nonce, []byte(plaintext), nil)
+	return base64.StdEncoding.EncodeToString(ct)
 }
 
 const (
@@ -606,24 +618,29 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 		rows = []sqFlat{}
 	}
 
-	// sealed=1: 考试防作弊模式，剥离答案和解析，服务端暂存
+	// sealed=1: 端到端加密考试模式
+	// keyQ 加密题干（立即下发），keyA 加密答案/解析（交卷后下发）
 	if q.Get("sealed") == "1" && len(rows) > 0 {
 		eid := hex.EncodeToString(func() []byte { b := make([]byte, 16); rand.Read(b); return b }())
-		answers := make(map[string]examAnswer, len(rows))
+		keyQ := make([]byte, 32); rand.Read(keyQ)
+		keyA := make([]byte, 32); rand.Read(keyA)
 		for i := range rows {
-			answers[rows[i].Fingerprint] = examAnswer{Answer: rows[i].Answer, Discuss: rows[i].Discuss}
-			rows[i].Answer = ""
-			rows[i].Discuss = ""
+			rows[i].Text = encryptAESGCM(keyQ, rows[i].Text)
+			rows[i].Stem = encryptAESGCM(keyQ, rows[i].Stem)
+			rows[i].Answer  = encryptAESGCM(keyA, rows[i].Answer)
+			rows[i].Discuss = encryptAESGCM(keyA, rows[i].Discuss)
 		}
 		s.examMu.Lock()
-		// 清理超过 24h 的旧 session（简单 LRU）
 		now := time.Now().Unix()
 		for k, v := range s.examSessions {
 			if now-v.ts > 86400 { delete(s.examSessions, k) }
 		}
-		s.examSessions[eid] = &examSession{answers: answers, ts: now}
+		s.examSessions[eid] = &examSession{keyA: keyA, ts: now}
 		s.examMu.Unlock()
-		jsonOK(w, map[string]any{"total": len(rows), "items": rows, "exam_id": eid})
+		jsonOK(w, map[string]any{
+			"total": len(rows), "items": rows, "exam_id": eid,
+			"key_q": base64.StdEncoding.EncodeToString(keyQ),
+		})
 		return
 	}
 
@@ -1352,7 +1369,7 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 	jsonOK(w, progress.GetSyncStatus(b.DB, uid))
 }
 
-// handleExamReveal 考试防作弊：提交后下发答案
+// handleExamReveal 考试防作弊：交卷后下发答案解密密钥
 func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
 	eid := r.URL.Query().Get("id")
 	if eid == "" {
@@ -1369,7 +1386,7 @@ func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "考试会话已过期或不存在", http.StatusNotFound)
 		return
 	}
-	jsonOK(w, map[string]any{"answers": sess.answers})
+	jsonOK(w, map[string]any{"key_a": base64.StdEncoding.EncodeToString(sess.keyA)})
 }
 
 // ── Icon handlers ─────────────────────────────────────────────────────
