@@ -1454,10 +1454,14 @@ async function startSession() {
     }
   }
 
+  // 考试模式：防作弊，服务端不下发答案
+  if (S.mode === 'exam') params.set('sealed', '1');
+
   const data = await apiFetch('/api/questions?' + params + '&' + bankQS()).then(r => r.json());
   if (!data.items.length) { toast('没有符合条件的题目'); return; }
 
   S.questions = data.items;
+  S.examId    = data.exam_id || null; // sealed 模式下服务端返回的 exam ID
   S.cur = 0;
   S.ans = {};
   S.marked = new Set();
@@ -2149,9 +2153,37 @@ document.addEventListener('click', e => {
 });
 
 // ── Submit ──────────────────────────────────
-function submitExam() {
+async function submitExam() {
   clearInterval(S.timerInterval);
   clearExamSession();   // 正常交卷，清除存档
+
+  // sealed 模式：从服务端获取答案后再评分
+  if (S.examId) {
+    try {
+      const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(S.examId) + '&' + bankQS());
+      if (res.ok) {
+        const { answers } = await res.json();
+        // 将答案填回题目
+        S.questions.forEach(q => {
+          const a = answers[q.fingerprint];
+          if (a) { q.answer = a.answer; q.discuss = a.discuss; }
+        });
+        S.examId = null;
+      } else {
+        // 离线或服务端异常：提示稍后获取
+        toast('⚠ 无法获取答案，请联网后在历史记录中查看解析', true);
+        // 存储 examId 到 localStorage，供后续联网获取
+        try {
+          const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
+          pending.push({ examId: S.examId, ts: Date.now(), qs: S.questions.map(q => q.fingerprint) });
+          localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
+        } catch(e) {}
+      }
+    } catch(e) {
+      toast('⚠ 网络异常，答案待联网后获取', true);
+    }
+  }
+
   calculateResults();
   showScreen('s-results');
 }
@@ -3005,7 +3037,7 @@ async function _refreshProgressBadges() {
       dueBadge.style.display = dueCount > 0 ? '' : 'none';
     }
     if (wrongBadge) {
-      wrongBadge.textContent = wrongCount;
+      wrongBadge.textContent = wrongCount > 99 ? '99+' : wrongCount;
       wrongBadge.style.display = wrongCount > 0 ? '' : 'none';
     }
     // 成绩页按钮
