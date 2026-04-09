@@ -1378,9 +1378,7 @@ func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
 	}
 	s.examMu.Lock()
 	sess, ok := s.examSessions[eid]
-	if ok {
-		delete(s.examSessions, eid) // 一次性使用
-	}
+	// 不删除，保留 24h 供多次回顾（自动清理由 handleQuestions sealed 入口负责）
 	s.examMu.Unlock()
 	if !ok {
 		jsonError(w, "考试会话已过期或不存在", http.StatusNotFound)
