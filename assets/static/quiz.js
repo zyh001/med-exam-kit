@@ -502,6 +502,9 @@ async function selectBankAndEnter(idx) {
     // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
     checkResumeSession();
 
+    // 检查 URL hash 是否包含分享试卷令牌
+    _checkShareToken();
+
     // 多题库时，让左上角题库名称变成可点击的切换入口
     _updateBrandClickable();
   } catch(e) {
@@ -1653,7 +1656,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
         : 'B型题共享选项';
     const soItems = q.shared_options.map((o, i) => {
       const l = String.fromCharCode(65 + i);
-      const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+      const clean = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
       return `<div class="q-shared-opt-row">
         <span class="q-shared-opt-lbl">${l}</span>
         <span>${esc(clean)}</span>
@@ -1713,7 +1716,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
       btn.onclick = () => selectOpt(letter, btn);
     }
     // 剥离选项文本里可能自带的字母前缀（"A." "A、" "A．" 等），避免字母重复显示
-    const cleanOpt = opt.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+    const cleanOpt = opt.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
     btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>`;
     opts.appendChild(btn);
   });
@@ -1929,7 +1932,7 @@ function buildExplain(q, selected) {
     soBox.appendChild(soTitle);
     q.shared_options.forEach((o, i) => {
       const l = String.fromCharCode(65 + i);
-      const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+      const clean = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
       const row = document.createElement('div');
       row.className = 'explain-shared-opt-row' + (correctSet.has(l) ? ' is-ans' : '');
       row.innerHTML = `<span class="opt-lbl">${l}</span><span>${esc(clean)}</span>`;
@@ -2156,6 +2159,7 @@ document.addEventListener('click', e => {
 async function submitExam() {
   clearInterval(S.timerInterval);
   clearExamSession();   // 正常交卷，清除存档
+  S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
 
   // sealed 模式：从服务端获取答案后再评分
   if (S.examId) {
@@ -2270,14 +2274,14 @@ function renderMemo(dir = 'forward') {
         <div class="memo-shared-opts-title">B型题共享选项</div>
         ${q.shared_options.map((o,i) => {
         const l = String.fromCharCode(65+i);
-        const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+        const co = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
         return `<div class="memo-shared-opt-row"><span class="opt-lbl">${l}</span><span>${esc(co)}</span></div>`;
       }).join('')}
       </div>`
       : '';
   const optsHtml = q.options.map((o, i) => {
     const l = String.fromCharCode(65 + i);
-    const co = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+    const co = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
     return `<div class="memo-opt" id="mopt-${l}">
       <span class="memo-opt-label">${l}</span><span>${esc(co)}</span>
     </div>`;
@@ -2711,6 +2715,17 @@ function renderResults() {
   } else {
     sb.style.display = 'none';
   }
+
+  // ── 本次错题按钮：有答错题目时显示 ─────────────────────────────────
+  const swBtn = document.getElementById('res-wrongbook-btn');
+  if (swBtn) {
+    swBtn.style.display = (R.wrong > 0 && R.qs) ? '' : 'none';
+  }
+  // ── 分享试卷按钮（仅考试模式有意义）──────────────────────────────
+  const shareBtn = document.getElementById('res-share-btn');
+  if (shareBtn) {
+    shareBtn.style.display = (R.qs && R.qs.length > 0) ? '' : 'none';
+  }
 }
 
 // ════════════════════════════════════════════
@@ -2890,7 +2905,7 @@ function filterReview(type, tabEl) {
           ${q.shared_options.map((o,oi) => {
           const l = String.fromCharCode(65+oi);
           const isCor = correctSet.has(l);
-          const clean = o.replace(/^[A-Ea-e]\s*[.．、·\s]\s*/u, '').trim();
+          const clean = o.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
           return `<div class="review-shared-opt-row${isCor ? ' is-ans' : ''}">
               <span class="opt-lbl">${l}</span><span>${esc(clean)}</span>
             </div>`;
@@ -3041,9 +3056,7 @@ async function _refreshProgressBadges() {
       wrongBadge.style.display = wrongCount > 0 ? '' : 'none';
     }
     // 成绩页按钮
-    const resWB  = document.getElementById('res-wrongbook-btn');
     const resRev = document.getElementById('res-review-btn');
-    if (resWB)  resWB.style.display  = wrongCount > 0 ? '' : 'none';
     if (resRev) resRev.style.display = dueCount   > 0 ? '' : 'none';
   } catch (e) { /* 静默失败，不影响主流程 */ }
 }
@@ -3094,6 +3107,97 @@ async function startWrongBookReview() {
     toast(`📕 错题模式：共 ${data.items.length} 题`);
     startQuiz();
   } catch(e) { toast('加载错题失败'); }
+}
+
+/** 只练习本次答错的题目 */
+function practiceSessionWrong() {
+  const R = S.results;
+  if (!R || !R.qs || !R.ans) { toast('没有可用的错题数据'); return; }
+  const wrongQs = [];
+  R.qs.forEach((q, i) => {
+    let sel = R.ans[i];
+    if (sel && sel.__set) sel = new Set(sel.v);
+    const isEmpty = !sel || (sel instanceof Set && sel.size === 0);
+    if (isEmpty) return; // 未答不算错
+    const isMulti = isMultiQ(q);
+    const correctSet = new Set(isMulti ? q.answer.split('') : [q.answer]);
+    let isCorrect;
+    if (isMulti) {
+      const selSet = sel instanceof Set ? sel : new Set([sel]);
+      isCorrect = selSet.size === correctSet.size && [...correctSet].every(l => selSet.has(l));
+    } else {
+      isCorrect = sel === q.answer;
+    }
+    if (!isCorrect) wrongQs.push(q);
+  });
+  if (!wrongQs.length) { toast('本次没有答错的题目 👍'); return; }
+  S.mode      = 'practice';
+  S.questions = wrongQs;
+  S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
+  S.examStart = Date.now();
+  S.modeGroups = buildModeGroups(wrongQs);
+  S.currentGroupIdx = 0; S.caseMaxReached = {};
+  S.practiceSessionId = String(Date.now());
+  S.streak = 0;
+  toast(`📕 本次错题：共 ${wrongQs.length} 题`);
+  startQuiz();
+}
+
+/** 分享试卷（生成分享链接） */
+async function shareExam() {
+  const R = S.results;
+  if (!R || !R.qs || !R.qs.length) { toast('没有可分享的题目'); return; }
+  const fps = R.qs.map(q => q.fingerprint).filter(Boolean);
+  if (!fps.length) { toast('题目缺少标识，无法分享'); return; }
+  try {
+    const res = await apiFetch('/api/exam/share?' + bankQS(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fingerprints: fps, mode: R.mode || 'exam' }),
+    });
+    const d = await res.json();
+    if (!d.token) { toast('分享失败', true); return; }
+    const url = location.origin + location.pathname + '#share=' + d.token;
+    if (navigator.share) {
+      navigator.share({ title: '医考练习 - 试卷分享', text: `共 ${fps.length} 题`, url }).catch(()=>{});
+    } else if (navigator.clipboard) {
+      await navigator.clipboard.writeText(url);
+      toast('✅ 分享链接已复制到剪贴板');
+    } else {
+      prompt('分享链接：', url);
+    }
+  } catch(e) { toast('分享失败: ' + e.message, true); }
+}
+
+/** 检查 URL hash 是否包含分享令牌，自动加入 */
+async function _checkShareToken() {
+  const m = location.hash.match(/share=([a-f0-9]+)/);
+  if (!m) return;
+  const token = m[1];
+  location.hash = ''; // 清除 hash 防止重复触发
+  try {
+    const res = await apiFetch('/api/exam/join?token=' + token + '&' + bankQS());
+    const d   = await res.json();
+    if (!d.items || !d.items.length) { toast('试卷已过期或无效'); return; }
+    S.mode      = d.mode || 'exam';
+    S.questions = d.items;
+    S.examId    = d.exam_id || null;
+    S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
+    S.examStart = Date.now();
+    S.modeGroups = buildModeGroups(d.items);
+    S.currentGroupIdx = 0; S.caseMaxReached = {};
+    S.practiceSessionId = null;
+    S.streak = 0;
+    toast(`📋 已加载分享试卷：${d.items.length} 题`);
+    if (S.mode === 'exam' || S.mode === 'exam_done') {
+      S.mode = 'exam';
+      S.examLimit = d.time_limit || 3600;
+      startQuiz();
+      saveExamSession();
+    } else {
+      startQuiz();
+    }
+  } catch(e) { toast('加载分享试卷失败', true); }
 }
 
 /** 打开统计页面 */
@@ -3287,7 +3391,23 @@ function _renderTrendChart(history) {
   const svg   = document.getElementById('trend-chart');
   const empty = document.getElementById('trend-empty');
   svg.innerHTML = '';
-  const recent = history.filter(h => h.mode !== 'memo').slice(0, 15).reverse();
+  const sessions = history.filter(h => h.mode !== 'memo' && h.date);
+  if (!sessions.length) {
+    svg.style.display = 'none';
+    if (empty) empty.style.display = '';
+    return;
+  }
+  // 按天聚合：同一天的所有 session 合并计算正确率
+  const byDay = {};
+  sessions.forEach(h => {
+    if (!byDay[h.date]) byDay[h.date] = { total: 0, correct: 0, date: h.date };
+    byDay[h.date].total   += h.total || 0;
+    byDay[h.date].correct += h.correct || 0;
+  });
+  const recent = Object.values(byDay)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .slice(-15)
+    .map(d => ({ ...d, pct: d.total > 0 ? Math.round(d.correct / d.total * 100) : 0 }));
   if (!recent.length) {
     svg.style.display = 'none';
     if (empty) empty.style.display = '';
