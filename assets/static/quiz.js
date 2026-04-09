@@ -2759,7 +2759,7 @@ function _updateReviewTabCounts() {
     const idx = parseInt(t.dataset.tab || '0', 10);
     let badge = t.querySelector('.rtab-count');
     if (!badge) { badge = document.createElement('span'); badge.className = 'rtab-count'; t.appendChild(badge); }
-    badge.textContent = counts[idx] > 0 ? counts[idx] : '';
+    badge.textContent = counts[idx];
   });
 }
 
@@ -4303,10 +4303,10 @@ init();
   };
 })();
 
-// Review 页面：左右滑动切换 Tab（带滑动动画 + 跟手拖拽反馈）
+// Review 页面：左右滑动切换 Tab（跟手拖拽 + 平滑过渡）
 (function setupReviewTabSwipe(){
-  const THRESHOLD = 50, VELOCITY = 0.3;
-  let tx=0, ty=0, t0=0, locked=null, dragging=false;
+  const THRESHOLD = 40, VELOCITY = 0.25;
+  let tx=0, ty=0, t0=0, locked=null, dragging=false, animating=false;
 
   const reviewScreen = document.getElementById('s-review');
   if (!reviewScreen) return;
@@ -4318,35 +4318,45 @@ init();
     return active ? parseInt(active.dataset.tab || '0', 10) : 0;
   }
 
-  function switchTabAnimated(direction){
+  function switchTab(direction){
+    if (animating) return;
     const current = getCurrentTab();
     const next = direction === 'left'
       ? Math.min(current + 1, 3)
       : Math.max(current - 1, 0);
     if (next === current) return;
+    animating = true;
 
-    const outClass = direction === 'left' ? 'slide-out-left' : 'slide-out-right';
-    const inClass  = direction === 'left' ? 'slide-in-left'  : 'slide-in-right';
+    // 滑出方向
+    const offset = direction === 'left' ? '-100%' : '100%';
+    const enterFrom = direction === 'left' ? '60%' : '-60%';
 
-    // 1. 滑出动画
-    reviewBody.classList.add(outClass);
-    reviewBody.addEventListener('animationend', function once(){
-      reviewBody.removeEventListener('animationend', once);
-      reviewBody.classList.remove(outClass);
-      // 2. 切换 tab 内容
+    reviewBody.style.transition = 'transform .15s ease-out, opacity .15s ease-out';
+    reviewBody.style.transform  = `translateX(${offset})`;
+    reviewBody.style.opacity    = '0';
+
+    setTimeout(() => {
+      // 切换内容（无过渡）
+      reviewBody.style.transition = 'none';
+      reviewBody.style.transform  = `translateX(${enterFrom})`;
       const btn = reviewScreen.querySelector(`.rtab[data-tab="${next}"]`);
       if (btn) btn.click();
-      // 3. 滑入动画
-      reviewBody.classList.add(inClass);
-      reviewBody.addEventListener('animationend', function once2(){
-        reviewBody.removeEventListener('animationend', once2);
-        reviewBody.classList.remove(inClass);
-      });
-    });
+
+      // 强制 reflow
+      void reviewBody.offsetHeight;
+
+      // 滑入
+      reviewBody.style.transition = 'transform .15s ease-out, opacity .15s ease-out';
+      reviewBody.style.transform  = '';
+      reviewBody.style.opacity    = '';
+
+      setTimeout(() => { animating = false; }, 160);
+    }, 150);
     vibrate(10);
   }
 
   reviewBody.addEventListener('touchstart', e => {
+    if (animating) return;
     if (document.querySelector('.screen.active')?.id !== 's-review') return;
     const t = e.touches[0]; tx = t.clientX; ty = t.clientY; t0 = Date.now();
     locked = null; dragging = false;
@@ -4354,6 +4364,7 @@ init();
   }, { passive: true });
 
   reviewBody.addEventListener('touchmove', e => {
+    if (animating) return;
     if (document.querySelector('.screen.active')?.id !== 's-review') return;
     const t = e.touches[0];
     const dx = t.clientX - tx, dy = t.clientY - ty;
@@ -4361,31 +4372,30 @@ init();
     if (locked === 'vertical') return;
     e.preventDefault();
     dragging = true;
-    // 跟手拖拽反馈（最大偏移 80px）
     const clamp = Math.max(-80, Math.min(80, dx));
-    const fade  = 1 - Math.abs(clamp) / 200;
     reviewBody.style.transform = `translateX(${clamp}px)`;
-    reviewBody.style.opacity   = fade;
+    reviewBody.style.opacity   = String(1 - Math.abs(clamp) / 200);
   }, { passive: false });
 
   reviewBody.addEventListener('touchend', e => {
     if (!dragging){ dragging = false; return; }
     dragging = false;
-    // 弹回
-    reviewBody.style.transition = 'transform .15s, opacity .15s';
-    reviewBody.style.transform  = '';
-    reviewBody.style.opacity    = '';
-
     const dx = e.changedTouches[0].clientX - tx;
     const dt = Date.now() - t0;
     const vel = Math.abs(dx) / dt;
-    if (Math.abs(dx) >= THRESHOLD || vel >= VELOCITY){
-      // 重置 inline style 再跑动画
-      reviewBody.style.transition = '';
+
+    if ((Math.abs(dx) >= THRESHOLD || vel >= VELOCITY) && !animating){
+      // 触发切换（switchTab 内部会处理动画）
+      reviewBody.style.transition = 'none';
       reviewBody.style.transform  = '';
       reviewBody.style.opacity    = '';
-      if (dx < 0) switchTabAnimated('left');
-      else        switchTabAnimated('right');
+      if (dx < 0) switchTab('left');
+      else        switchTab('right');
+    } else {
+      // 弹回
+      reviewBody.style.transition = 'transform .15s, opacity .15s';
+      reviewBody.style.transform  = '';
+      reviewBody.style.opacity    = '';
     }
   }, { passive: true });
 })();
