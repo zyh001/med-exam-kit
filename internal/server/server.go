@@ -57,6 +57,7 @@ type pgStorer interface {
 	GetSyncStatus(ctx context.Context, userID string, bankID int) map[string]any
 	ClearUserData(ctx context.Context, userID string, bankID int) map[string]int
 	DiagAttempts(ctx context.Context, userID string, bankID int) map[string]any
+	ImportBank(ctx context.Context, name, source string, questions []*models.Question) (int64, error)
 }
 
 // bankName derives a display name from the file path (or Name if set).
@@ -102,6 +103,18 @@ type Server struct {
 	pushStores     map[string]*pushStore // bankPath → store
 	pushTestMu     sync.Mutex
 	pushTestBuckets map[string][]time.Time // ip → timestamps for push/test rate limit
+	// 考试防作弊：sealed 模式下答案存服务端，提交后才下发
+	examMu       sync.Mutex
+	examSessions map[string]*examSession // examID → answers
+}
+
+type examAnswer struct {
+	Answer  string `json:"answer"`
+	Discuss string `json:"discuss"`
+}
+type examSession struct {
+	answers map[string]examAnswer // fingerprint → answer+discuss
+	ts      int64
 }
 
 const (
@@ -139,6 +152,7 @@ func New(cfg Config) *Server {
 	}
 	s.pushStores     = pushStores
 	s.pushTestBuckets = pushTestBuckets
+	s.examSessions    = map[string]*examSession{}
 	if keys, err := generateVAPIDKeys(); err == nil {
 		s.vapidKeys = keys
 	} else {
@@ -338,6 +352,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("POST /api/sync", s.handleSync)
 	m.HandleFunc("GET /api/debug", s.handleDebug)
 	m.HandleFunc("GET /api/sync/status", s.handleSyncStatus)
+	m.HandleFunc("GET /api/exam/reveal", s.handleExamReveal)
 }
 
 // ── Bank selection ────────────────────────────────────────────────────
@@ -590,6 +605,28 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 	if rows == nil {
 		rows = []sqFlat{}
 	}
+
+	// sealed=1: 考试防作弊模式，剥离答案和解析，服务端暂存
+	if q.Get("sealed") == "1" && len(rows) > 0 {
+		eid := hex.EncodeToString(func() []byte { b := make([]byte, 16); rand.Read(b); return b }())
+		answers := make(map[string]examAnswer, len(rows))
+		for i := range rows {
+			answers[rows[i].Fingerprint] = examAnswer{Answer: rows[i].Answer, Discuss: rows[i].Discuss}
+			rows[i].Answer = ""
+			rows[i].Discuss = ""
+		}
+		s.examMu.Lock()
+		// 清理超过 24h 的旧 session（简单 LRU）
+		now := time.Now().Unix()
+		for k, v := range s.examSessions {
+			if now-v.ts > 86400 { delete(s.examSessions, k) }
+		}
+		s.examSessions[eid] = &examSession{answers: answers, ts: now}
+		s.examMu.Unlock()
+		jsonOK(w, map[string]any{"total": len(rows), "items": rows, "exam_id": eid})
+		return
+	}
+
 	jsonOK(w, map[string]any{"total": len(rows), "items": rows})
 }
 
@@ -1016,6 +1053,17 @@ func (s *Server) handleSave(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
+	// PG 模式：写回数据库
+	if b.PgStore != nil {
+		_, err := b.PgStore.ImportBank(r.Context(), b.bankName(), "editor", b.Questions)
+		if err != nil {
+			jsonError(w, fmt.Sprintf("保存到数据库失败: %v", err), http.StatusInternalServerError)
+			return
+		}
+		jsonOK(w, map[string]any{"ok": true, "path": "PostgreSQL", "count": len(b.Questions)})
+		return
+	}
+	// .mqb 文件模式
 	if b.Path == "" {
 		jsonError(w, "未配置题库路径，无法保存", http.StatusBadRequest)
 		return
@@ -1302,6 +1350,26 @@ func (s *Server) handleSyncStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, progress.GetSyncStatus(b.DB, uid))
+}
+
+// handleExamReveal 考试防作弊：提交后下发答案
+func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
+	eid := r.URL.Query().Get("id")
+	if eid == "" {
+		jsonError(w, "缺少 exam id", http.StatusBadRequest)
+		return
+	}
+	s.examMu.Lock()
+	sess, ok := s.examSessions[eid]
+	if ok {
+		delete(s.examSessions, eid) // 一次性使用
+	}
+	s.examMu.Unlock()
+	if !ok {
+		jsonError(w, "考试会话已过期或不存在", http.StatusNotFound)
+		return
+	}
+	jsonOK(w, map[string]any{"answers": sess.answers})
 }
 
 // ── Icon handlers ─────────────────────────────────────────────────────
