@@ -531,7 +531,7 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, bankID 
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
 		FROM attempts WHERE user_id=$1 AND result != -1
-		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
+		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0 AND SUM(CASE WHEN result=1 THEN 1 ELSE 0 END)*1.0/COUNT(*) < 0.8
 		ORDER BY wrong DESC, MAX(ts) DESC LIMIT $2`
 		args = []any{userID, limit}
 	} else {
@@ -540,7 +540,7 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, bankID 
 		       SUM(CASE WHEN result=1 THEN 1 ELSE 0 END) AS correct,
 		       SUM(CASE WHEN result=0 THEN 1 ELSE 0 END) AS wrong
 		FROM attempts WHERE user_id=$1 AND bank_id=$2 AND result != -1
-		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0
+		GROUP BY fingerprint HAVING SUM(CASE WHEN result=0 THEN 1 ELSE 0 END)>0 AND SUM(CASE WHEN result=1 THEN 1 ELSE 0 END)*1.0/COUNT(*) < 0.8
 		ORDER BY wrong DESC, MAX(ts) DESC LIMIT $3`
 		args = []any{userID, bankID, limit}
 	}

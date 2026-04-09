@@ -359,7 +359,7 @@ func GetWrongFingerprints(db *sql.DB, userID string, limit int) []WrongEntry {
 		       MAX(ts) AS last_ts
 		FROM attempts
 		WHERE user_id=? AND result!= -1
-		GROUP BY fingerprint HAVING wrong>0
+		GROUP BY fingerprint HAVING wrong>0 AND correct*1.0/(correct+wrong) < 0.8
 		ORDER BY wrong DESC, last_ts DESC LIMIT ?`, userID, limit)
 	if err != nil {
 		return nil
@@ -788,7 +788,7 @@ func GetWrongFingerprintsByFP(db *sql.DB, userID string, fps []string, limit int
 		FROM attempts
 		WHERE user_id=? AND result!=-1
 		AND fingerprint IN (`+inClause+`)
-		GROUP BY fingerprint HAVING wrong>0
+		GROUP BY fingerprint HAVING wrong>0 AND correct*1.0/(correct+wrong) < 0.8
 		ORDER BY wrong DESC, last_ts DESC LIMIT ?`, args...)
 	if err != nil {
 		return nil
