@@ -3594,7 +3594,7 @@ async function _fetchServerHistory() {
     const data = await res.json();
     const items = data.items || [];
     // 过滤掉本地已删除的 id（防止并发时已删项被服务端响应覆盖写回）
-    const filtered = items.filter(h => !S.deletedIds?.has(h.id));
+    const filtered = items.filter(h => !S.deletedIds?.has(String(h.id)));
     // 合并：服务端历史作为主数据，用 id 去重本地记录
     const serverIds = new Set(filtered.map(h => h.id));
     const localOnly = S.history.filter(h => h.id && !serverIds.has(h.id));
@@ -3991,30 +3991,27 @@ function openHistoryResult(id, idx) {
 
 /** 删除单条历史记录（由滑动确认或 PC 按钮 confirm 后调用，不再二次确认） */
 async function deleteHistoryItem(id, idx) {
-  // 0. 记录已删 id，防止飞行中的 _fetchServerHistory 把它写回
+  // 0. 持久标记为已删（永不自动移除，防止任何途径复活）
   if (id) {
     if (!S.deletedIds) S.deletedIds = new Set();
-    S.deletedIds.add(id);
+    S.deletedIds.add(String(id));
     localStorage.setItem(deletedIdsKey(), JSON.stringify([...S.deletedIds]));
   }
-  // 1. 从服务端删除（有真实 id，排除 'idx:N' 占位符）
+  // 1. 从 SyncManager IndexedDB 队列移除（防止未同步的会话被重新上传）
+  if (id && typeof SyncManager !== 'undefined' && SyncManager.purgeSession) {
+    try { await SyncManager.purgeSession(String(id)); } catch(e) {}
+  }
+  // 2. 从服务端删除（有真实 id，排除 'idx:N' 占位符）
   if (id && !id.startsWith('idx:')) {
     try {
-      const res = await apiFetch('/api/session/' + encodeURIComponent(id) + '?' + bankQS(), {
+      await apiFetch('/api/session/' + encodeURIComponent(id) + '?' + bankQS(), {
         method: 'DELETE',
       });
-      if (res.ok) {
-        // 服务端删除成功，可以从 deletedIds 中移除（不再需要客户端过滤）
-        if (S.deletedIds) {
-          S.deletedIds.delete(id);
-          localStorage.setItem(deletedIdsKey(), JSON.stringify([...S.deletedIds]));
-        }
-      }
-      // 无论成功失败都从本地列表移除（deletedIds 兜底过滤）
-      if (S.serverHistory) {
-        S.serverHistory = S.serverHistory.filter(h => h.id !== id);
-      }
-    } catch (e) { /* 离线时仍删本地，deletedIds 会持久过滤 */ }
+      // 注意：不从 deletedIds 移除！保持作为永久墓碑
+    } catch (e) { /* 离线时仍删本地，deletedIds 持久过滤 */ }
+    if (S.serverHistory) {
+      S.serverHistory = S.serverHistory.filter(h => h.id !== id);
+    }
   }
 
   // 2. 从本地历史删除
