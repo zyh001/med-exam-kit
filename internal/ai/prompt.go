@@ -86,7 +86,7 @@ func BuildSubQuestionPrompt(q *models.Question, sq *models.SubQuestion, needAnsw
 func BuildAIChatPrompt(q *models.Question, sqIdx int, userAnswer string) []ChatMessage {
 	sq := &q.SubQuestions[sqIdx]
 
-	systemPrompt := `你是一位资深的医学考试辅导老师，擅长帮助学生深入理解题目背后的知识点，学生有两次向你提问的机会。
+	systemPrompt := `你是一位资深的医学考试辅导老师，擅长帮助学生深入理解题目背后的知识点，学生有三次向你提问的机会。
 
 你的任务：
 1. 分析题目的关键考点
@@ -98,9 +98,7 @@ func BuildAIChatPrompt(q *models.Question, sqIdx int, userAnswer string) []ChatM
 - 语言简洁清晰，重点突出
 - 使用医学术语要准确
 - 如果学生选错了，要特别指出其思路中可能的误区
-- 回答格式：考点分析 → 选项逐项解析 → 最终结论
-- 使用标准 Markdown 格式输出
-- 不要使用 Markdown 表格，用列表代替（表格在移动端显示效果差）`
+- 回答格式：考点分析 → 选项逐项解析 → 最终结论`
 
 	// Build the context message
 	var b strings.Builder
