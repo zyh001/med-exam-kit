@@ -68,14 +68,9 @@ if (typeof marked !== 'undefined') {
 }
 
 // ── Streaming renderer ─────────────────────────────────────────────
-// Dual-buffer strategy for ultra-smooth "progress bar" text flow:
-//
 // Characters drip from pending → committed via requestAnimationFrame.
-// Between periodic markdown re-renders, new chars are appended to a
-// raw text node at the end of the container — this avoids costly
-// innerHTML rewrites on every frame and produces buttery-smooth output.
-// The full markdown is re-rendered at intervals (RENDER_INTERVAL_MS)
-// or on structural boundaries (newlines) to keep formatting up-to-date.
+// Full markdown is re-rendered on every drip frame so text always
+// appears in its final formatted position — no layout jumps.
 
 /**
  * Create a streaming renderer attached to a container + cursor.
@@ -83,17 +78,12 @@ if (typeof marked !== 'undefined') {
  * - flush():    final render of all remaining text
  */
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let committed = '';           // text fed into renderer so far
-  let pending = '';             // text waiting to drip in
+  let committed = '';
+  let pending = '';
   let rafId = null;
-  let lastRenderLen = 0;        // committed.length at last full markdown render
-  let lastRenderTime = 0;       // timestamp of last full render
-  let tailNode = null;          // text node for fast inter-render appends
+  const CHARS_PER_FRAME = 4;
 
-  const CHARS_PER_FRAME = 3;
-  const RENDER_INTERVAL_MS = 80; // re-render markdown at most every 80ms
-
-  function fullRender(withCursor) {
+  function render(withCursor) {
     let html;
     if (typeof marked !== 'undefined' && marked.parse) {
       try { html = marked.parse(committed, { async: false }); } catch (e) { html = esc(committed); }
@@ -101,60 +91,34 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
       html = '<pre>' + esc(committed) + '</pre>';
     }
     container.innerHTML = html;
-    tailNode = null;
-    lastRenderLen = committed.length;
-    lastRenderTime = performance.now();
     if (withCursor && cursor) container.appendChild(cursor);
   }
 
   function drip() {
     if (pending.length === 0) { rafId = null; return; }
-
     const slice = pending.slice(0, CHARS_PER_FRAME);
     pending = pending.slice(CHARS_PER_FRAME);
     committed += slice;
-
-    const now = performance.now();
-    const elapsed = now - lastRenderTime;
-    const delta = committed.length - lastRenderLen;
-
-    // Full markdown re-render on structural boundaries or timer
-    if (elapsed > RENDER_INTERVAL_MS || slice.includes('\n') || delta > 60) {
-      fullRender(true);
-    } else {
-      // Fast path: append raw text to avoid full DOM rebuild
-      if (!tailNode) {
-        tailNode = document.createTextNode('');
-        if (cursor && cursor.parentNode === container) {
-          container.insertBefore(tailNode, cursor);
-        } else {
-          container.appendChild(tailNode);
-          if (cursor) container.appendChild(cursor);
-        }
-      }
-      tailNode.textContent += slice;
-    }
-
+    render(true);
     if (scrollTarget) scrollMessages(scrollTarget);
     rafId = requestAnimationFrame(drip);
   }
 
-  // Public: push raw text chunk from SSE stream
   function push(text) {
     pending += text;
     if (!rafId) rafId = requestAnimationFrame(drip);
   }
 
-  // Public: final flush — render everything immediately without cursor
   function flush() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     committed += pending;
     pending = '';
-    fullRender(false);
+    render(false);
   }
 
   return { push, flush };
 }
+
 
 /**
  * Create and insert the AI Q&A section into a container.

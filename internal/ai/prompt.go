@@ -99,10 +99,7 @@ func BuildAIChatPrompt(q *models.Question, sqIdx int, userAnswer string) []ChatM
 - 使用医学术语要准确
 - 如果学生选错了，要特别指出其思路中可能的误区
 - 回答格式：考点分析 → 选项逐项解析 → 最终结论
-
-排版规则（严格遵守）：
-- 加粗和斜体标记的前后必须各有一个空格，例如写 "这是 **加粗** 文字" 而不是 "这是**加粗**文字"。英文括号同理：写 "**Error (A)** 类型" 而不是 "**Error（A）**类型"。
-- 列表项使用 "- " 开头（减号加空格），不要用 "*" 作为列表标记`
+- 使用标准 Markdown 格式输出，加粗标记前后留空格`
 
 	// Build the context message
 	var b strings.Builder
