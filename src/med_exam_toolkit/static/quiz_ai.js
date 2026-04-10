@@ -58,7 +58,7 @@ const inlineMathExt = {
   }
 };
 
-// Configure marked for medical content + LaTeX math
+// Configure marked for medical content + LaTeX math (used for restoring cached messages)
 if (typeof marked !== 'undefined') {
   marked.use({
     breaks: true,
@@ -68,38 +68,50 @@ if (typeof marked !== 'undefined') {
 }
 
 // ── Streaming renderer ─────────────────────────────────────────────
-// Characters drip from pending → committed via requestAnimationFrame.
-// Full markdown is re-rendered on every drip frame so text always
-// appears in its final formatted position — no layout jumps.
+// Uses streaming-markdown (smd) for incremental DOM rendering.
+// smd only appends to the DOM — never rewrites — so text always
+// appears at its final position with zero layout jumps.
+// Characters are drip-fed via requestAnimationFrame for smooth flow.
 
 /**
  * Create a streaming renderer attached to a container + cursor.
  * - push(chunk): accumulate text, schedule drip animation
- * - flush():    final render of all remaining text
+ * - flush():    finalize stream, do a final marked render for polish
  */
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let committed = '';
   let pending = '';
+  let fullText = '';
   let rafId = null;
+  let smdParser = null;
   const CHARS_PER_FRAME = 4;
 
-  function render(withCursor) {
-    let html;
-    if (typeof marked !== 'undefined' && marked.parse) {
-      try { html = marked.parse(committed, { async: false }); } catch (e) { html = esc(committed); }
-    } else {
-      html = '<pre>' + esc(committed) + '</pre>';
+  // Initialize smd parser
+  if (typeof smd !== 'undefined' && smd.default_renderer && smd.parser) {
+    const renderer = smd.default_renderer(container);
+    smdParser = smd.parser(renderer);
+  }
+
+  function placeCursor() {
+    if (cursor) {
+      // Always keep cursor at the very end of container
+      container.appendChild(cursor);
     }
-    container.innerHTML = html;
-    if (withCursor && cursor) container.appendChild(cursor);
   }
 
   function drip() {
     if (pending.length === 0) { rafId = null; return; }
     const slice = pending.slice(0, CHARS_PER_FRAME);
     pending = pending.slice(CHARS_PER_FRAME);
-    committed += slice;
-    render(true);
+    fullText += slice;
+
+    if (smdParser) {
+      smd.parser_write(smdParser, slice);
+    } else {
+      // Fallback: plain text append
+      container.appendChild(document.createTextNode(slice));
+    }
+
+    placeCursor();
     if (scrollTarget) scrollMessages(scrollTarget);
     rafId = requestAnimationFrame(drip);
   }
@@ -111,9 +123,25 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
 
   function flush() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    committed += pending;
-    pending = '';
-    render(false);
+    // Drain remaining pending text
+    if (pending.length > 0) {
+      fullText += pending;
+      if (smdParser) {
+        smd.parser_write(smdParser, pending);
+      }
+      pending = '';
+    }
+    // End smd stream
+    if (smdParser) {
+      smd.parser_end(smdParser);
+      smdParser = null;
+    }
+    // Final polish: re-render with marked for full GFM + LaTeX support
+    if (typeof marked !== 'undefined' && marked.parse && fullText) {
+      try {
+        container.innerHTML = marked.parse(fullText, { async: false });
+      } catch (e) { /* keep smd output */ }
+    }
   }
 
   return { push, flush };
