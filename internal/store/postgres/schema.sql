@@ -138,3 +138,18 @@ FROM  (
 ) sub
 WHERE  ses.bank_id = 0
   AND  ses.id = sub.session_id;
+
+-- ── Share Tokens（试卷分享持久化，仅 PG 模式）──────────────────────
+-- 在 SQLite / 内存模式下 share token 仅存内存，重启失效；
+-- PG 模式下写入此表，重启后可恢复，有效期 7 天。
+CREATE TABLE IF NOT EXISTS share_tokens (
+    token      TEXT      PRIMARY KEY,
+    bank_idx   INTEGER   NOT NULL DEFAULT 0,
+    mode       TEXT      NOT NULL DEFAULT 'exam',
+    time_limit INTEGER   NOT NULL DEFAULT 5400,   -- seconds
+    fps        JSONB     NOT NULL DEFAULT '[]',   -- fingerprint list
+    created_at BIGINT    NOT NULL,                -- unix timestamp
+    expires_at BIGINT    NOT NULL                 -- unix timestamp
+);
+CREATE INDEX IF NOT EXISTS idx_share_expires ON share_tokens(expires_at);
+

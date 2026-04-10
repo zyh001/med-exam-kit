@@ -107,13 +107,26 @@ func addColumnIfMissing(db *sql.DB, table, col, def string) error {
 
 // ── Write operations ──────────────────────────────────────────────────
 
+// clientDateOrToday returns the client-supplied date from session["date"] if it's a
+// valid YYYY-MM-DD string, otherwise falls back to today's server date.
+// This fixes a timezone bug: the server runs in UTC but users may be in UTC+8; using
+// the client's local date ensures SM-2 next_due is computed relative to the user's day.
+func clientDateOrToday(session map[string]any) string {
+	if d := strVal(session, "date", ""); d != "" {
+		if _, err := time.Parse("2006-01-02", d); err == nil {
+			return d
+		}
+	}
+	return time.Now().Format("2006-01-02")
+}
+
 // RecordSession writes a full answer session with SM-2 updates.
 func RecordSession(db *sql.DB, session map[string]any, userID string) error {
 	if userID == "" {
 		userID = LegacyUser
 	}
 	now := time.Now().UnixMilli()
-	today := time.Now().Format("2006-01-02")
+	today := clientDateOrToday(session)
 
 	sid, _ := session["id"].(string)
 	if sid == "" {
@@ -217,10 +230,10 @@ func RecordSessionsBatch(db *sql.DB, sessions []map[string]any, userID string) (
 	if userID == "" {
 		userID = LegacyUser
 	}
-	today := time.Now().Format("2006-01-02")
 	now := time.Now().UnixMilli()
 
 	for _, session := range sessions {
+		today := clientDateOrToday(session) // use client's local date per-session
 		sid, _ := session["id"].(string)
 		if sid == "" {
 			continue
@@ -621,7 +634,8 @@ func MigrateUserData(db *sql.DB, fromUID, toUID string) (map[string]int, error) 
 
 // GetOverallStatsByFP returns stats filtered to a specific set of fingerprints.
 // Used in SQLite mode to isolate stats per bank (SQLite has no bank_id column).
-func GetOverallStatsByFP(db *sql.DB, userID string, fps []string) OverallStats {
+// clientDate is the caller's local date (YYYY-MM-DD); pass "" to use server date.
+func GetOverallStatsByFP(db *sql.DB, userID string, fps []string, clientDate string) OverallStats {
 	if userID == "" {
 		userID = LegacyUser
 	}
@@ -629,7 +643,10 @@ func GetOverallStatsByFP(db *sql.DB, userID string, fps []string) OverallStats {
 	if len(fps) == 0 {
 		return s
 	}
-	today := time.Now().Format("2006-01-02")
+	today := clientDate
+	if today == "" || len(today) != 10 {
+		today = time.Now().Format("2006-01-02")
+	}
 	placeholders := make([]string, len(fps))
 	args := make([]any, 0, len(fps)*2+2)
 	args = append(args, userID)
@@ -808,14 +825,18 @@ func GetWrongFingerprintsByFP(db *sql.DB, userID string, fps []string, limit int
 }
 
 // GetDueFingerprintsByFP returns SM-2 due fingerprints filtered to a set.
-func GetDueFingerprintsByFP(db *sql.DB, userID string, fps []string) []string {
+// clientDate is the caller's local date (YYYY-MM-DD); pass "" to use server date.
+func GetDueFingerprintsByFP(db *sql.DB, userID string, fps []string, clientDate string) []string {
 	if userID == "" {
 		userID = LegacyUser
 	}
 	if len(fps) == 0 {
 		return nil
 	}
-	today := time.Now().Format("2006-01-02")
+	today := clientDate
+	if today == "" || len(today) != 10 {
+		today = time.Now().Format("2006-01-02")
+	}
 	placeholders := make([]string, len(fps))
 	args := make([]any, 0, len(fps)+2)
 	args = append(args, userID, today)

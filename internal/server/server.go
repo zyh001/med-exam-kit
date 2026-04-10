@@ -44,7 +44,15 @@ type BankEntry struct {
 	RecordEnabled bool
 }
 
-// pgStorer is a minimal interface for the PostgreSQL progress store,
+// shareStorer is an optional interface that pgStorer implementations may satisfy
+// to persist share tokens across server restarts (PG mode only).
+// JSON []byte is used to bridge the type without creating an import cycle.
+type shareStorer interface {
+	SaveShareTokenJSON(ctx context.Context, token string, data []byte) error
+	LoadShareTokenJSON(ctx context.Context, token string) []byte
+	DeleteShareToken(ctx context.Context, token string)
+	CleanExpiredShareTokens(ctx context.Context)
+}
 // allowing server.go to stay decoupled from the concrete pgstore type.
 type pgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
@@ -124,7 +132,9 @@ type shareConfig struct {
 	Fingerprints []string `json:"fingerprints"`
 	Mode         string   `json:"mode"`
 	BankIdx      int      `json:"bank_idx"`
+	TimeLimit    int      `json:"time_limit"` // seconds; 0 means use default (90*60)
 	Ts           int64    `json:"ts"`
+	ExpiresAt    int64    `json:"expires_at"` // unix timestamp; 0 means use Ts+7days
 }
 
 const (
@@ -1196,8 +1206,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 	bankFPs := make([]string, 0, len(b.Questions))
 	for i := range b.Questions { bankFPs = append(bankFPs, b.Questions[i].Fingerprint) }
+	clientDate := r.URL.Query().Get("date")
 	jsonOK(w, map[string]any{
-		"overall": progress.GetOverallStatsByFP(b.DB, uid, bankFPs),
+		"overall": progress.GetOverallStatsByFP(b.DB, uid, bankFPs, clientDate),
 		"history": progress.GetHistoryByFP(b.DB, uid, bankFPs, 30),
 		"units":   progress.GetUnitStatsByFP(b.DB, uid, bankFPs),
 	})
@@ -1210,6 +1221,9 @@ func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	uid := getUserID(r)
+	// Accept client's local date (YYYY-MM-DD) to avoid timezone mismatch.
+	// e.g. users in UTC+8 would see no due items until 8AM if server uses UTC.
+	clientDate := r.URL.Query().Get("date")
 	if b.PgStore != nil {
 		jsonOK(w, map[string]any{"fingerprints": b.PgStore.GetDueFingerprints(r.Context(), uid, b.BankID)})
 		return
@@ -1220,7 +1234,7 @@ func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
 	}
 	bankFPs2 := make([]string, 0, len(b.Questions))
 	for i := range b.Questions { bankFPs2 = append(bankFPs2, b.Questions[i].Fingerprint) }
-	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprintsByFP(b.DB, uid, bankFPs2)})
+	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprintsByFP(b.DB, uid, bankFPs2, clientDate)})
 }
 
 func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
@@ -1395,27 +1409,68 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Fingerprints []string `json:"fingerprints"`
 		Mode         string   `json:"mode"`
+		TimeLimit    int      `json:"time_limit"` // seconds from client; 0 = default
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Fingerprints) == 0 {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
+	timeLimit := body.TimeLimit
+	if timeLimit <= 0 {
+		timeLimit = 90 * 60 // default 90 minutes
+	}
+
 	tok := make([]byte, 8)
 	rand.Read(tok)
 	token := hex.EncodeToString(tok)
-	s.shareMu.Lock()
-	// 清理超过 72h 的旧分享
+
 	now := time.Now().Unix()
-	for k, v := range s.shareTokens {
-		if now-v.Ts > 72*3600 { delete(s.shareTokens, k) }
-	}
-	s.shareTokens[token] = &shareConfig{
+	expiresAt := now + int64(7*24*3600) // 7 days
+
+	cfg := &shareConfig{
 		Fingerprints: body.Fingerprints,
 		Mode:         body.Mode,
 		BankIdx:      bankIdx,
+		TimeLimit:    timeLimit,
 		Ts:           now,
+		ExpiresAt:    expiresAt,
+	}
+
+	// Try to persist to PostgreSQL if available (golang-version + PG mode).
+	// Falls back to in-memory storage otherwise.
+	pgPersisted := false
+	if bankIdx < len(s.cfg.Banks) {
+		if b := &s.cfg.Banks[bankIdx]; b.PgStore != nil {
+			if ps, ok2 := b.PgStore.(shareStorer); ok2 {
+				if data, err := json.Marshal(cfg); err == nil {
+					if err2 := ps.SaveShareTokenJSON(r.Context(), token, data); err2 == nil {
+						pgPersisted = true
+					}
+				}
+			}
+		}
+	}
+	_ = pgPersisted
+
+	s.shareMu.Lock()
+	// Clean up expired in-memory tokens (7-day window)
+	for k, v := range s.shareTokens {
+		exp := v.ExpiresAt
+		if exp == 0 {
+			exp = v.Ts + int64(7*24*3600)
+		}
+		if now > exp {
+			delete(s.shareTokens, k)
+		}
+	}
+	if !pgPersisted {
+		s.shareTokens[token] = cfg
+	} else {
+		// Keep a lightweight in-memory copy so same-process lookups are fast.
+		s.shareTokens[token] = cfg
 	}
 	s.shareMu.Unlock()
+
 	jsonOK(w, map[string]any{"ok": true, "token": token})
 }
 
@@ -1426,13 +1481,41 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "缺少 token", http.StatusBadRequest)
 		return
 	}
+
 	s.shareMu.Lock()
 	cfg, ok := s.shareTokens[token]
 	s.shareMu.Unlock()
+
+	// 内存中未命中 → 尝试从 PG 加载（服务重启后恢复）
 	if !ok {
+		cfg = s.loadShareFromPG(r.Context(), token)
+		if cfg != nil {
+			s.shareMu.Lock()
+			s.shareTokens[token] = cfg
+			s.shareMu.Unlock()
+		}
+	}
+
+	if cfg == nil {
 		jsonError(w, "分享链接已过期或无效", http.StatusNotFound)
 		return
 	}
+
+	// 校验 7 天有效期
+	now := time.Now().Unix()
+	expiresAt := cfg.ExpiresAt
+	if expiresAt == 0 {
+		expiresAt = cfg.Ts + int64(7*24*3600)
+	}
+	if now > expiresAt {
+		s.shareMu.Lock()
+		delete(s.shareTokens, token)
+		s.shareMu.Unlock()
+		s.deleteShareFromPG(r.Context(), token)
+		jsonError(w, "分享链接已过期（7天有效期）", http.StatusNotFound)
+		return
+	}
+
 	if cfg.BankIdx < 0 || cfg.BankIdx >= len(s.cfg.Banks) {
 		jsonError(w, "题库不存在", http.StatusNotFound)
 		return
@@ -1442,7 +1525,8 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 	for _, fp := range cfg.Fingerprints { fpSet[fp] = struct{}{} }
 	rows, _ := selectQuestions(b.Questions, selectOpts{fpSet: fpSet})
 	if rows == nil { rows = []sqFlat{} }
-	// sealed 模式：剥离答案
+
+	// sealed 模式：剥离答案，服务端暂存
 	var eid string
 	if cfg.Mode == "exam" && len(rows) > 0 {
 		eidBytes := make([]byte, 16); rand.Read(eidBytes)
@@ -1454,17 +1538,56 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 			rows[i].Discuss = ""
 		}
 		s.examMu.Lock()
-		now := time.Now().Unix()
 		for k, v := range s.examSessions {
 			if now-v.ts > 86400 { delete(s.examSessions, k) }
 		}
 		s.examSessions[eid] = &examSession{answers: answers, ts: now}
 		s.examMu.Unlock()
 	}
+
+	timeLimit := cfg.TimeLimit
+	if timeLimit <= 0 {
+		timeLimit = 90 * 60
+	}
+
 	jsonOK(w, map[string]any{
 		"items": rows, "total": len(rows), "mode": cfg.Mode,
-		"exam_id": eid, "time_limit": 3600,
+		"exam_id": eid, "time_limit": timeLimit,
+		"bank_idx": cfg.BankIdx,
 	})
+}
+
+// loadShareFromPG 尝试从 PostgreSQL 读取 share token（服务重启后恢复）。
+func (s *Server) loadShareFromPG(ctx context.Context, token string) *shareConfig {
+	for i := range s.cfg.Banks {
+		if b := &s.cfg.Banks[i]; b.PgStore != nil {
+			if ps, ok := b.PgStore.(shareStorer); ok {
+				data := ps.LoadShareTokenJSON(ctx, token)
+				if data == nil {
+					return nil
+				}
+				var cfg shareConfig
+				if err := json.Unmarshal(data, &cfg); err != nil {
+					return nil
+				}
+				return &cfg
+			}
+			break
+		}
+	}
+	return nil
+}
+
+// deleteShareFromPG 从 PostgreSQL 删除已过期的 share token。
+func (s *Server) deleteShareFromPG(ctx context.Context, token string) {
+	for i := range s.cfg.Banks {
+		if b := &s.cfg.Banks[i]; b.PgStore != nil {
+			if ps, ok := b.PgStore.(shareStorer); ok {
+				ps.DeleteShareToken(ctx, token)
+			}
+			break
+		}
+	}
 }
 
 // ── Icon handlers ─────────────────────────────────────────────────────
