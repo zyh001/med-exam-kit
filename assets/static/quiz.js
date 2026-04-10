@@ -2255,10 +2255,6 @@ async function submitExam() {
   clearExamSession();
   calculateResults(origMode);
   showScreen('s-results');
-  // 分享锁定模式：结果页展示 2 秒后进入终端锁定页
-  if (S.sharedLocked) {
-    setTimeout(() => { _showSharedLockEndScreen(); }, 2500);
-  }
 }
 function retryQuiz() {
   // 如果题目还在内存，直接重置状态重新做一遍
@@ -3321,11 +3317,12 @@ async function _checkShareToken() {
     if (S.mode === 'exam' || S.mode === 'exam_done') {
       S.mode = 'exam';
       S.examLimit = d.time_limit || 90 * 60;
+      CFG.examTime       = Math.round(S.examLimit / 60);
       // 恢复分享者的计分配置，让接收方体验完全一致
       CFG.scoring        = !!d.scoring;
       CFG.scorePerMode   = d.score_per_mode   || {};
       CFG.multiScoreMode = d.multi_score_mode || 'strict';
-      startQuiz();
+      startQuiz(S.examLimit);
       saveExamSession();
     } else {
       // 练习模式保持默认逻辑，不复制计分配置
@@ -3347,15 +3344,12 @@ function _applySharedLockUI() {
     st = document.createElement('style');
     st.id = 'shared-lock-style';
     st.textContent = `
-      body.shared-locked .back-btn,
       body.shared-locked #brand,
-      body.shared-locked .quiz-header .back-btn,
       body.shared-locked #share-quiz-btn,
       body.shared-locked #s-home,
       body.shared-locked #s-stats,
       body.shared-locked #s-wb,
       body.shared-locked .bottom-nav { display: none !important; }
-      body.shared-locked .quiz-header .back-btn { visibility: hidden !important; }
     `;
     document.head.appendChild(st);
   }
