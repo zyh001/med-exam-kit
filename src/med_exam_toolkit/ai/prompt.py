@@ -61,3 +61,59 @@ def build_subquestion_prompt(
         已知答案: {known_answer or "无"}
         """
     ).strip()
+
+
+def build_ai_chat_prompt(
+    q: Question,
+    sq_idx: int,
+    user_answer: str,
+) -> list[dict[str, str]]:
+    """为 AI 答疑面板构建 system + 初始 user 消息。"""
+    sq = q.sub_questions[sq_idx]
+
+    system_prompt = (
+        "你是一位资深的医学考试辅导老师，擅长帮助学生深入理解题目背后的知识点，"
+        "学生有两次向你提问的机会。\n\n"
+        "你的任务：\n"
+        "1. 分析题目的关键考点\n"
+        "2. 逐项分析每个选项，说明为什么对或错\n"
+        "3. 给出最终结论和推理过程\n\n"
+        "要求：\n"
+        "- 全部使用中文回答，包括思考过程(必要的名词可以使用英文表述)\n"
+        "- 语言简洁清晰，重点突出\n"
+        "- 使用医学术语要准确\n"
+        "- 如果学生选错了，要特别指出其思路中可能的误区\n"
+        "- 回答格式：考点分析 → 选项逐项解析 → 最终结论"
+    )
+
+    parts: list[str] = []
+    mode = q.mode or "未知"
+    parts.append(f"题型: {mode}")
+    if q.stem:
+        parts.append(f"题干: {q.stem}")
+    if sq.text:
+        parts.append(f"小题: {sq.text}")
+
+    eff_opts = sq.options or q.shared_options
+    if eff_opts:
+        parts.append("选项:")
+        parts.append(_format_options(eff_opts))
+
+    correct = sq.eff_answer
+    if correct:
+        parts.append(f"正确答案: {correct}")
+
+    if user_answer:
+        parts.append(f"我的选择: {user_answer}")
+        if correct and user_answer != correct:
+            parts.append("（我选错了）")
+
+    if sq.error_prone:
+        parts.append(f"易错点: {sq.error_prone}")
+    if sq.point:
+        parts.append(f"知识点: {sq.point}")
+
+    return [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": "\n".join(parts)},
+    ]

@@ -107,6 +107,71 @@ def default_model(provider: str) -> str:
     return _PROVIDER_DEFAULT_MODELS.get(provider.lower(), "gpt-4o")
 
 
+def chat_completion_stream(
+    client: Any,
+    model: str,
+    messages: list[dict],
+    temperature: float = 0.7,
+    max_tokens: int = 2048,
+    enable_thinking: bool | None = None,
+    provider: str | None = None,
+):
+    """
+    Generator that yields dicts: {"content": str, "reasoning": str}
+    for each SSE chunk from the OpenAI-compatible streaming API.
+    Yields {"done": True} at the end, or {"error": str} on failure.
+    """
+    import re
+
+    params = build_chat_params(
+        model=model,
+        messages=messages,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        enable_thinking=enable_thinking,
+        provider=provider,
+    )
+    params["stream"] = True
+
+    # extract extra_body if present (openai SDK uses it as a kwarg)
+    extra_body = params.pop("extra_body", None)
+
+    try:
+        stream = client.chat.completions.create(**params, extra_body=extra_body)
+    except Exception as e:
+        yield {"error": str(e)}
+        return
+
+    try:
+        for chunk in stream:
+            if not chunk.choices:
+                continue
+            delta = chunk.choices[0].delta
+            content = getattr(delta, "content", None) or ""
+            reasoning = getattr(delta, "reasoning_content", None) or ""
+
+            # MiniMax: reasoning may come from reasoning_details
+            if not reasoning and hasattr(delta, "reasoning_details") and delta.reasoning_details:
+                for detail in delta.reasoning_details:
+                    if hasattr(detail, "text") and detail.text:
+                        reasoning = detail.text
+                        break
+
+            # MiniMax fallback: extract <think> from content
+            if not reasoning and content:
+                m = re.search(r'<think>(.*?)</think>', content, re.DOTALL)
+                if m:
+                    reasoning = m.group(1)
+                    content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL)
+
+            if content or reasoning:
+                yield {"content": content, "reasoning": reasoning}
+
+        yield {"done": True}
+    except Exception as e:
+        yield {"error": str(e)}
+
+
 def build_chat_params(
     model:          str,
     messages:       list[dict],

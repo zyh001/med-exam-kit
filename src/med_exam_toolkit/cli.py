@@ -641,20 +641,40 @@ def edit(bank, password, port, host, no_browser, no_pin):
 @click.option("--no-record", is_flag=True, default=False, help="不记录做题历史（不创建 .progress.db）")
 @click.option("--no-pin", is_flag=True, default=False, help="禁用访问码验证（仅限受信任的本地网络）")
 @click.option("--pin", default=None, help="自定义访问码（留空则自动生成 8 位随机码）")
-def quiz(banks, password, port, host, no_browser, no_record, no_pin, pin):
+@click.option("--ai-provider", default="", help="AI provider: openai/deepseek/qwen/ollama 等")
+@click.option("--ai-model", default="", help="AI 模型名")
+@click.option("--ai-key", default="", help="AI API Key")
+@click.option("--ai-base-url", default="", help="AI API Base URL（自定义端点）")
+@click.option("--ai-thinking/--ai-no-thinking", default=None, help="混合思考模型的思考开关")
+@click.pass_context
+def quiz(ctx, banks, password, port, host, no_browser, no_record, no_pin, pin,
+         ai_provider, ai_model, ai_key, ai_base_url, ai_thinking):
     """启动医考练习 Web 应用（练习/考试/背题模式，支持多题库）
 
     \b
     启动后在浏览器访问 http://127.0.0.1:5174
     支持三种模式：练习模式、考试模式、背题模式
     多题库示例：med-exam quiz -b 内科.mqb -b 外科.mqb
+    AI 答疑：  med-exam quiz -b x.mqb --ai-provider qwen --ai-key sk-xxx
     按 Ctrl+C 退出
     """
     if not banks:
         raise click.UsageError("请用 -b 指定至少一个题库路径（多题库：-b a.mqb -b b.mqb）")
+
+    # 从 config.yaml 读取 AI 配置（命令行优先）
+    ctx_cfg = (ctx.obj or {}).get("config", {})
+    ai_cfg  = ctx_cfg.get("ai", {})
+    ai_provider = ai_provider or ai_cfg.get("provider", "")
+    ai_model    = ai_model    or ai_cfg.get("model", "")
+    ai_key      = ai_key      or ai_cfg.get("api_key", "")
+    ai_base_url = ai_base_url or ai_cfg.get("base_url", "")
+
     from med_exam_toolkit.quiz import start_quiz
     start_quiz(list(banks), port=port, host=host, no_browser=no_browser,
-               password=password, no_record=no_record, no_pin=no_pin, pin=pin)
+               password=password, no_record=no_record, no_pin=no_pin, pin=pin,
+               ai_provider=ai_provider, ai_model=ai_model,
+               ai_api_key=ai_key, ai_base_url=ai_base_url,
+               ai_thinking=ai_thinking)
 
 
 def main():

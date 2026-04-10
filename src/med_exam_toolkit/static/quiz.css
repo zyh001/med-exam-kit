@@ -1906,3 +1906,148 @@ button,a,[role=button],label{touch-action:manipulation}
 
 /* 2nd mode highlight */
 .ck.sc.is-2nd{background:var(--accent);color:#fff}
+.ai-entry-btn{
+  display:flex;align-items:center;justify-content:center;gap:6px;
+  width:100%;margin-top:10px;padding:10px 0;
+  background:transparent;border:1px dashed var(--border);border-radius:var(--r);
+  color:var(--accent);font-size:14px;cursor:pointer;transition:all .15s;
+}
+.ai-entry-btn:hover{background:var(--accent-bg);border-color:var(--accent)}
+.ai-sparkle{font-size:16px}
+
+.ai-panel{
+  margin-top:10px;background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--r);overflow:hidden;
+}
+.ai-panel-header{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:8px 12px;border-bottom:1px solid var(--border);background:var(--card);
+}
+.ai-panel-title{font-size:13px;font-weight:600;color:var(--text)}
+.ai-round-badge{
+  font-size:11px;padding:2px 8px;border-radius:99px;
+  background:var(--accent-bg);color:var(--accent);font-weight:600;
+}
+
+.ai-messages{
+  height:320px;overflow-y:auto;padding:10px 12px;
+  display:flex;flex-direction:column;gap:8px;
+}
+.ai-msg{font-size:13px;line-height:1.6;word-break:break-word;max-width:95%}
+.ai-msg-user{
+  align-self:flex-end;background:var(--accent);color:#fff;
+  padding:6px 10px;border-radius:12px 12px 2px 12px;
+}
+.ai-msg-assistant{
+  align-self:flex-start;background:var(--card);color:var(--text);
+  padding:8px 10px;border-radius:12px 12px 12px 2px;
+  max-width:100%;
+}
+/* Markdown content inside assistant messages */
+.ai-msg-assistant .ai-content-wrap p{margin:0 0 6px}
+.ai-msg-assistant .ai-content-wrap p:last-child{margin:0}
+.ai-msg-assistant .ai-content-wrap ul,
+.ai-msg-assistant .ai-content-wrap ol{margin:4px 0;padding-left:20px}
+.ai-msg-assistant .ai-content-wrap li{margin:2px 0}
+.ai-msg-assistant .ai-content-wrap strong{font-weight:600}
+.ai-msg-assistant .ai-content-wrap em{font-style:italic}
+.ai-msg-assistant .ai-content-wrap h1,.ai-msg-assistant .ai-content-wrap h2,.ai-msg-assistant .ai-content-wrap h3,
+.ai-msg-assistant .ai-content-wrap h4,.ai-msg-assistant .ai-content-wrap h5,.ai-msg-assistant .ai-content-wrap h6{
+  margin:8px 0 4px;font-weight:700;line-height:1.4;
+}
+.ai-msg-assistant .ai-content-wrap h1{font-size:16px}
+.ai-msg-assistant .ai-content-wrap h2{font-size:15px}
+.ai-msg-assistant .ai-content-wrap h3{font-size:14px}
+.ai-msg-assistant .ai-content-wrap code{
+  background:var(--surface);padding:1px 4px;border-radius:3px;font-size:12px;
+}
+.ai-msg-assistant .ai-content-wrap pre{
+  background:var(--surface);padding:8px;border-radius:6px;overflow-x:auto;margin:6px 0;
+}
+.ai-msg-assistant .ai-content-wrap pre code{background:none;padding:0}
+.ai-msg-assistant .ai-content-wrap blockquote{
+  border-left:3px solid var(--border);margin:6px 0;padding:4px 10px;color:var(--muted);
+}
+.ai-msg-assistant .ai-content-wrap table{border-collapse:collapse;margin:6px 0;font-size:12px}
+.ai-msg-assistant .ai-content-wrap th,.ai-msg-assistant .ai-content-wrap td{
+  border:1px solid var(--border);padding:4px 8px;text-align:left;
+}
+.ai-msg-assistant .ai-content-wrap th{background:var(--surface);font-weight:600}
+/* KaTeX display math in AI panel */
+.ai-msg-assistant .ai-content-wrap .ai-math-display,
+.ai-msg-assistant .ai-thinking-body .ai-math-display{
+  text-align:center;margin:8px 0;overflow-x:auto;
+}
+.ai-msg-assistant .ai-content-wrap .katex-display,
+.ai-msg-assistant .ai-thinking-body .katex-display{
+  margin:4px 0;overflow-x:auto;
+}
+.ai-msg-assistant .ai-content-wrap .katex,
+.ai-msg-assistant .ai-thinking-body .katex{
+  font-size:1em;
+}
+
+/* Thinking section */
+.ai-thinking-wrap{margin-bottom:8px}
+.ai-thinking-header{
+  display:flex;align-items:center;gap:4px;
+  font-size:12px;color:var(--accent);cursor:pointer;
+  padding:4px 0;user-select:none;
+}
+.ai-thinking-header:hover{opacity:.8}
+.ai-thinking-icon{font-size:14px}
+.ai-thinking-label{font-weight:600}
+.ai-thinking-header::after{
+  content:'▸';font-size:10px;margin-left:2px;transition:transform .15s;
+}
+.ai-thinking-expanded::after{transform:rotate(90deg)}
+.ai-thinking-body{
+  font-size:12px;line-height:1.5;color:var(--muted);
+  max-height:120px;overflow-y:auto;padding:6px 8px;
+  background:var(--surface);border-radius:6px;margin-top:4px;
+  word-break:break-word;
+}
+.ai-thinking-body p{margin:0 0 4px}
+.ai-thinking-body p:last-child{margin:0}
+.ai-thinking-body ul,.ai-thinking-body ol{margin:2px 0;padding-left:18px}
+.ai-thinking-body li{margin:1px 0}
+.ai-thinking-body strong{font-weight:600}
+.ai-thinking-body code{background:var(--card);padding:1px 3px;border-radius:3px;font-size:11px}
+.ai-thinking-body pre{background:var(--card);padding:6px;border-radius:4px;overflow-x:auto;margin:4px 0}
+.ai-thinking-body pre code{background:none;padding:0}
+
+.ai-typing .ai-cursor{
+  display:inline-block;color:var(--accent);
+  animation:aiBlink 1s step-end infinite;
+}
+@keyframes aiBlink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes aiFadeIn{
+  from{opacity:0;transform:translateY(4px)}
+  to{opacity:1;transform:none}
+}
+.ai-thinking-fadein{animation:aiFadeIn .3s ease both}
+
+.ai-error{color:var(--danger) !important}
+
+.ai-input-area{
+  display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--border);
+  background:var(--card);
+}
+.ai-input{
+  flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;
+  background:var(--surface);color:var(--text);font-size:13px;outline:none;
+}
+.ai-input:focus{border-color:var(--accent)}
+.ai-input:disabled{opacity:.5;cursor:not-allowed}
+.ai-send-btn{
+  padding:8px 14px;border:none;border-radius:8px;
+  background:var(--accent);color:#fff;font-size:13px;font-weight:600;
+  cursor:pointer;transition:all .1s;
+}
+.ai-send-btn:hover{opacity:.9}
+.ai-send-btn:disabled{opacity:.4;cursor:not-allowed}
+
+.ai-closed{
+  text-align:center;font-size:12px;color:var(--muted);
+  padding:6px 0;margin-top:4px;
+}
