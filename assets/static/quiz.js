@@ -1366,7 +1366,8 @@ function buildModeGroups(questions) {
   questions.forEach((q, i) => {
     const mode = q.mode || '';
     if (groups.length === 0 || groups[groups.length - 1].mode !== mode) {
-      const allowBack = !mode.includes('案例');
+      // A3/A4型题和案例分析均不允许回退
+      const allowBack = !mode.includes('案例') && !mode.includes('A3') && !mode.includes('A4');
       groups.push({ mode, startIdx: i, endIdx: i, allowBack });
     } else {
       groups[groups.length - 1].endIdx = i;
@@ -1801,13 +1802,22 @@ function selectOpt(letter, btn) {
     S.ans[S.cur] = letter;
 
     if (isExam) {
-      // 考试：标记已选，自动跳下一题
+      // 考试：标记已选
       document.querySelectorAll('.opt').forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
       const dot = document.querySelector(`.q-dot[data-idx="${S.cur}"]`);
       if (dot) { dot.classList.add('answered'); }
       saveExamSession();   // 答题后立即保存
-      // 自动前进（短暂延迟让用户看到选中态）
+
+      // A3/A4/案例分析题不自动跳转，需要用户手动点下一题
+      const _curGIdx = getGroupIdxForQ(S.cur);
+      const _curGroup = S.modeGroups[_curGIdx];
+      if (_curGroup && !_curGroup.allowBack) {
+        updateGridDot();
+        return; // 不自动前进
+      }
+
+      // 其他题型：自动前进（短暂延迟让用户看到选中态）
       setTimeout(() => {
         const total = S.questions.length;
         if (S.cur < total - 1) {
@@ -4371,136 +4381,99 @@ document.addEventListener('click', e=>{
 });
 
 // ════════════════════════════════════════════
-// 计算器
+// 计算器（表达式输入模式）
 // ════════════════════════════════════════════
-const _calc = { expr: '', _eval: '', result: '0', mode: 'simple', is2nd: false, isDeg: true, lastWasEval: false };
+var _calc = { input: '', done: false, is2nd: false, isDeg: true };
 
 function toggleCalc() {
-  const m = document.getElementById('calc-modal');
+  var m = document.getElementById('calc-modal');
   m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
 }
 
 function setCalcMode(mode) {
-  _calc.mode = mode;
   document.getElementById('calc-keys-simple').style.display = mode === 'simple' ? '' : 'none';
   document.getElementById('calc-keys-sci').style.display    = mode === 'sci'    ? '' : 'none';
   document.getElementById('calc-mode-simple').classList.toggle('active', mode === 'simple');
   document.getElementById('calc-mode-sci').classList.toggle('active', mode === 'sci');
 }
 
-function _calcUpdate() {
-  document.getElementById('calc-expr').textContent   = _calc.expr;
-  document.getElementById('calc-result').textContent  = _calc.result;
+function _calcRefresh() {
+  document.getElementById('calc-expr').textContent  = '';
+  document.getElementById('calc-result').textContent = _calc.input || '0';
 }
 
 function calcDigit(d) {
-  if (_calc.lastWasEval) { _calc.result = ''; _calc.expr = ''; _calc._eval = ''; _calc.lastWasEval = false; }
-  if (d === '.' && _calc.result.includes('.')) return;
-  if (_calc.result === '0' && d !== '.') _calc.result = d;
-  else _calc.result += d;
-  _calcUpdate();
+  if (_calc.done) { _calc.input = ''; _calc.done = false; }
+  if (d === '.') {
+    var lastSeg = (_calc.input.match(/[\d.]*$/) || [''])[0];
+    if (lastSeg.includes('.')) return;
+  }
+  _calc.input += d;
+  _calcRefresh();
 }
 
 function calcOp(op) {
-  _calc.lastWasEval = false;
-  if (op === '(' || op === ')') {
-    _calc.expr += op; _calc._eval += op; _calcUpdate(); return;
-  }
-  _calc.expr  += _calc.result + ' ' + op + ' ';
-  _calc._eval += _calc.result + ' ' + op + ' ';
-  _calc.result = '0';
-  _calcUpdate();
+  if (_calc.done) _calc.done = false;
+  if (op === '(' || op === ')') { _calc.input += op; _calcRefresh(); return; }
+  _calc.input = _calc.input.replace(/\s*[+\-×÷]\s*$/, '');
+  _calc.input += ' ' + op + ' ';
+  _calcRefresh();
 }
 
 function calcAC() {
-  _calc.expr = ''; _calc._eval = ''; _calc.result = '0'; _calc.lastWasEval = false;
-  _calcUpdate();
+  _calc.input = ''; _calc.done = false;
+  document.getElementById('calc-expr').textContent = '';
+  document.getElementById('calc-result').textContent = '0';
 }
 
 function calcDel() {
-  if (_calc.lastWasEval) return;
-  _calc.result = _calc.result.slice(0, -1) || '0';
-  _calcUpdate();
-}
-
-function _calcSafeEval(exprStr) {
-  let e = exprStr
-    .replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-')
-    .replace(/\^/g, '**')
-    .replace(/%/g, '/100');
-  try {
-    const fn = new Function('return (' + e + ')');
-    const val = fn();
-    if (!isFinite(val)) return val === Infinity ? '∞' : val === -Infinity ? '-∞' : 'Error';
-    return parseFloat(val.toPrecision(12)).toString();
-  } catch { return 'Error'; }
-}
-
-function calcEval() {
-  const fullDisplay = _calc.expr  + _calc.result;
-  const fullEval    = _calc._eval + _calc.result;
-  _calc.expr  = fullDisplay + ' =';
-  _calc._eval = '';
-  _calc.result = _calcSafeEval(fullEval);
-  _calc.lastWasEval = true;
-  _calcUpdate();
+  if (_calc.done) return;
+  _calc.input = _calc.input.replace(/\s+$/, '');
+  var fm = _calc.input.match(/(asin|acos|atan|sin|cos|tan|sqrt|lg|ln|10\^|e\^)\($/);
+  if (fm) _calc.input = _calc.input.slice(0, -fm[0].length);
+  else _calc.input = _calc.input.slice(0, -1);
+  _calcRefresh();
 }
 
 function calcFunc(fn) {
-  const v = parseFloat(_calc.result) || 0;
-  const deg = _calc.isDeg;
-  const toRad = x => x * Math.PI / 180;
-  let r;
-  switch (fn) {
-    case 'sin':   r = _calc.is2nd ? Math.asin(v) * (deg ? 180/Math.PI : 1) : Math.sin(deg ? toRad(v) : v); break;
-    case 'cos':   r = _calc.is2nd ? Math.acos(v) * (deg ? 180/Math.PI : 1) : Math.cos(deg ? toRad(v) : v); break;
-    case 'tan':   r = _calc.is2nd ? Math.atan(v) * (deg ? 180/Math.PI : 1) : Math.tan(deg ? toRad(v) : v); break;
-    case 'lg':    r = _calc.is2nd ? Math.pow(10, v) : Math.log10(v); break;
-    case 'ln':    r = _calc.is2nd ? Math.exp(v) : Math.log(v); break;
-    case '√':     r = _calc.is2nd ? v * v : Math.sqrt(v); break;
-    case '!':     r = _factorial(v); break;
-    case '1/x':   r = 1 / v; break;
-    default:      r = v;
-  }
-  const label2nd = { sin:'asin', cos:'acos', tan:'atan', lg:'10^x', ln:'e^x', '√':'x²' };
-  const label = (_calc.is2nd && label2nd[fn]) ? label2nd[fn] : fn;
-  // 显示函数调用，结果替换当前数值（可继续参与运算）
-  _calc.expr = label + '(' + _calc.result + ')';
-  _calc._eval = ''; // 函数结果已在 result 中，eval track 清空
-  _calc.result = isFinite(r) ? parseFloat(r.toPrecision(12)).toString() : 'Error';
-  _calc.lastWasEval = true;
-  _calcUpdate();
-}
-
-function _factorial(n) {
-  if (n < 0 || n !== Math.floor(n) || n > 170) return NaN;
-  let r = 1; for (let i = 2; i <= n; i++) r *= i; return r;
+  if (_calc.done) { _calc.input = ''; _calc.done = false; }
+  var map2 = { sin:'asin(', cos:'acos(', tan:'atan(', lg:'10^(', ln:'e^(', '√':'(' };
+  var map1 = { sin:'sin(', cos:'cos(', tan:'tan(', lg:'lg(', ln:'ln(', '√':'sqrt(' };
+  if (fn === '!') { _calc.input += '!'; }
+  else if (fn === '1/x') { _calc.input = '1 ÷ (' + _calc.input + ')'; }
+  else { _calc.input += _calc.is2nd ? (map2[fn] || fn + '(') : (map1[fn] || fn + '('); }
+  _calcRefresh();
 }
 
 function calcPow() {
-  _calc.expr += _calc.result + ' ^ ';
-  _calc.result = '0';
-  _calc.lastWasEval = false;
-  _calcUpdate();
+  if (_calc.done) _calc.done = false;
+  _calc.input += '^';
+  _calcRefresh();
 }
 
 function calcConst(c) {
-  _calc.result = c === 'π' ? Math.PI.toString() : Math.E.toString();
-  _calc.lastWasEval = false;
-  _calcUpdate();
+  if (_calc.done) { _calc.input = ''; _calc.done = false; }
+  _calc.input += c;
+  _calcRefresh();
+}
+
+function calcEval() {
+  var expr = _calc.input;
+  if (!expr) return;
+  var val = _calcEvaluate(expr);
+  document.getElementById('calc-expr').textContent   = expr + ' =';
+  document.getElementById('calc-result').textContent  = val;
+  _calc.input = val;
+  _calc.done = true;
 }
 
 function calc2nd() {
   _calc.is2nd = !_calc.is2nd;
   document.getElementById('calc-2nd').classList.toggle('is-2nd', _calc.is2nd);
-  // 更新按钮标签
-  const labels = _calc.is2nd
+  var lbl = _calc.is2nd
     ? { 'calc-sin':'asin', 'calc-cos':'acos', 'calc-tan':'atan', 'calc-lg':'10^x', 'calc-ln':'e^x' }
     : { 'calc-sin':'sin',  'calc-cos':'cos',  'calc-tan':'tan',  'calc-lg':'lg',   'calc-ln':'ln' };
-  for (const [id, txt] of Object.entries(labels)) {
-    const el = document.getElementById(id);
-    if (el) el.textContent = txt;
-  }
+  for (var id in lbl) { var el = document.getElementById(id); if (el) el.textContent = lbl[id]; }
 }
 
 function calcToggleDeg() {
@@ -4509,12 +4482,79 @@ function calcToggleDeg() {
 }
 
 function calcCopyResult() {
-  navigator.clipboard.writeText(_calc.result).then(() => toast('已复制')).catch(() => {});
+  var t = document.getElementById('calc-result').textContent;
+  if (navigator.clipboard) navigator.clipboard.writeText(t).then(function(){ toast('已复制'); });
 }
 
-// 考试模式下显示计算器按钮
+/* ── 递归下降表达式解析器 ── */
+function _calcEvaluate(raw) {
+  try {
+    var e = raw.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/π/g,'(3.141592653589793)').replace(/%/g,'/100');
+    // 独立的 e 常量（不跟 ^ 且不在函数名中）
+    e = e.replace(/(?<![a-zA-Z])e(?!\^)(?![a-zA-Z])/g, '(2.718281828459045)');
+    var isDeg = _calc.isDeg;
+    var pos = 0;
+    function ws() { while (pos < e.length && e[pos] === ' ') pos++; }
+    function tryMatch(s) { ws(); if (e.substr(pos, s.length) === s) { pos += s.length; return true; } return false; }
+    function parseAtom() {
+      ws();
+      var fns = ['asin','acos','atan','sqrt','sin','cos','tan','lg','ln'];
+      for (var i = 0; i < fns.length; i++) {
+        if (e.substr(pos, fns[i].length) === fns[i] && e[pos + fns[i].length] === '(') {
+          pos += fns[i].length + 1;
+          var a = parseExpr();
+          if (e[pos] === ')') pos++;
+          var tr = function(x){ return x * 3.141592653589793 / 180; };
+          switch(fns[i]) {
+            case 'sin':  return Math.sin(isDeg ? tr(a) : a);
+            case 'cos':  return Math.cos(isDeg ? tr(a) : a);
+            case 'tan':  return Math.tan(isDeg ? tr(a) : a);
+            case 'asin': return Math.asin(a) * (isDeg ? 180/3.141592653589793 : 1);
+            case 'acos': return Math.acos(a) * (isDeg ? 180/3.141592653589793 : 1);
+            case 'atan': return Math.atan(a) * (isDeg ? 180/3.141592653589793 : 1);
+            case 'sqrt': return Math.sqrt(a);
+            case 'lg':   return Math.log10(a);
+            case 'ln':   return Math.log(a);
+          }
+        }
+      }
+      if (e.substr(pos,3) === '10^') { pos+=3; return Math.pow(10, parseUnary()); }
+      if (e.substr(pos,2) === 'e^')  { pos+=2; return Math.exp(parseUnary()); }
+      if (e[pos] === '(') { pos++; var v = parseExpr(); if (e[pos]===')') pos++; return v; }
+      var start = pos;
+      if (e[pos]==='-'||e[pos]==='+') pos++;
+      while (pos<e.length && ((e[pos]>='0'&&e[pos]<='9')||e[pos]==='.')) pos++;
+      if (pos<e.length && (e[pos]==='e'||e[pos]==='E')) { pos++; if(e[pos]==='+'||e[pos]==='-') pos++; while(pos<e.length&&e[pos]>='0'&&e[pos]<='9') pos++; }
+      var n = parseFloat(e.substring(start, pos));
+      if (isNaN(n)) throw new Error('bad');
+      return n;
+    }
+    function parsePostfix() { var v=parseAtom(); ws(); while(pos<e.length&&e[pos]==='!'){pos++;v=_factorial(v);} return v; }
+    function parseUnary() { ws(); if(e[pos]==='-'){pos++;return -parsePostfix();} if(e[pos]==='+')pos++; return parsePostfix(); }
+    function parsePow() { var b=parseUnary(); ws(); if(e[pos]==='^'){pos++;b=Math.pow(b,parsePow());} else if(pos+1<e.length&&e[pos]==='*'&&e[pos+1]==='*'){pos+=2;b=Math.pow(b,parsePow());} return b; }
+    function parseMulDiv() {
+      var v=parsePow();
+      while(true){ ws(); if(e[pos]==='*'&&(pos+1>=e.length||e[pos+1]!=='*')){pos++;v*=parsePow();} else if(e[pos]==='/'){pos++;v/=parsePow();} else break; }
+      return v;
+    }
+    function parseExpr() {
+      var v=parseMulDiv();
+      while(true){ ws(); if(e[pos]==='+'){pos++;v+=parseMulDiv();} else if(e[pos]==='-'){pos++;v-=parseMulDiv();} else break; }
+      return v;
+    }
+    var val = parseExpr();
+    if (!isFinite(val)) return val === Infinity ? '∞' : val === -Infinity ? '-∞' : 'Error';
+    return parseFloat(val.toPrecision(12)).toString();
+  } catch(err) { return 'Error'; }
+}
+
+function _factorial(n) {
+  if (n < 0 || n !== Math.floor(n) || n > 170) return NaN;
+  var r = 1; for (var i = 2; i <= n; i++) r *= i; return r;
+}
+
 function _showCalcBtn(show) {
-  const btn = document.getElementById('calc-toggle-btn');
+  var btn = document.getElementById('calc-toggle-btn');
   if (btn) btn.style.display = show ? '' : 'none';
 }
 

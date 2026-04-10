@@ -1817,12 +1817,16 @@ button,a,[role=button],label{touch-action:manipulation}
 /* ════════════════════════════════════════════
    Calculator
 ════════════════════════════════════════════ */
-.calc-toggle-btn{
-  background:none;color:var(--text);font-size:18px;
-  padding:4px 6px;border-radius:8px;margin-left:2px;
-  transition:background .15s;
+.calc-fab{
+  position:absolute;right:14px;bottom:72px;z-index:20;
+  width:44px;height:44px;border-radius:50%;
+  background:var(--accent);color:#fff;font-size:20px;
+  display:flex;align-items:center;justify-content:center;
+  box-shadow:0 4px 14px rgba(0,0,0,.3);
+  border:none;cursor:pointer;transition:transform .15s;
+  -webkit-tap-highlight-color:transparent;
 }
-.calc-toggle-btn:active{background:var(--surface)}
+.calc-fab:active{transform:scale(.9)}
 
 /* Modal */
 .calc-box{
