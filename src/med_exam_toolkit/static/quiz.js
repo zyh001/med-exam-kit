@@ -519,11 +519,25 @@ async function selectBankAndEnter(idx) {
   loadHistory();
 
   try {
+    // 分享链接进入：未验证用户需要锁定在考试页面
+    // 逻辑：任何不含 #share= 的正常访问都视为"已验证"
+    // 首次通过分享链接进入的用户会被锁定；已经访问过（已验证）的用户正常
+    const isShareEntry = /share=[a-f0-9]+/.test(location.hash);
+    if (!isShareEntry) {
+      try { localStorage.setItem('med_exam_verified', '1'); } catch(_) {}
+      S.sharedLocked = false;
+    } else {
+      let alreadyVerified = false;
+      try { alreadyVerified = localStorage.getItem('med_exam_verified') === '1'; } catch(_) {}
+      S.sharedLocked = !alreadyVerified;
+    }
+
     await loadBankAndRenderHome();
     showScreen('s-home');
 
     // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
-    checkResumeSession();
+    // 锁定模式下跳过：防止分享接收者看到与他无关的历史存档
+    if (!S.sharedLocked) checkResumeSession();
 
     // 检查 URL hash 是否包含分享试卷令牌
     _checkShareToken();
@@ -2231,6 +2245,10 @@ async function submitExam() {
   clearExamSession();
   calculateResults(origMode);
   showScreen('s-results');
+  // 分享锁定模式：结果页展示 2 秒后进入终端锁定页
+  if (S.sharedLocked) {
+    setTimeout(() => { _showSharedLockEndScreen(); }, 2500);
+  }
 }
 function retryQuiz() {
   // 如果题目还在内存，直接重置状态重新做一遍
@@ -2579,6 +2597,7 @@ function calculateResults(origMode) {
     mode: effectiveMode,
     total: qs.length, correct, wrong, skip,
     timeSec: Math.floor((Date.now() - S.examStart) / 1000),
+    timeLimit: S.examLimit || 0,
     byUnit,
     qs, ans,
     scoring: false,
@@ -2656,6 +2675,7 @@ function calculateResults(origMode) {
     skip,
     timeSec: S.results.timeSec,
     time_sec: S.results.timeSec,
+    time_limit: S.examLimit || 0,
     date: _localDate(),
     units: [...new Set(qs.map(q => q.unit).filter(Boolean))].slice(0,2).join('、'),
   };
@@ -3201,13 +3221,14 @@ async function shareExam() {
   try {
     // exam_done 是前端内部状态，分享时统一用 'exam'（练习模式用 'practice'）
     const shareMode = (R.mode === 'exam' || R.mode === 'exam_done') ? 'exam' : (R.mode || 'exam');
+    const shareTimeLimit = R.timeLimit || S.examLimit || CFG.examTime * 60;
     const res = await apiFetch('/api/exam/share?' + bankQS(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         fingerprints:     fps,
         mode:             shareMode,
-        time_limit:       S.examLimit || CFG.examTime * 60,
+        time_limit:       shareTimeLimit,
         scoring:          CFG.scoring,
         score_per_mode:   CFG.scorePerMode,
         multi_score_mode: CFG.multiScoreMode,
@@ -3273,7 +3294,64 @@ async function _checkShareToken() {
       CFG.multiScoreMode = 'strict';
       startQuiz();
     }
+    // 锁定模式：隐藏返回/退出相关控件，一次性 token
+    if (S.sharedLocked) _applySharedLockUI();
   } catch(e) { toast('加载分享试卷失败', true); }
+}
+
+/** 未验证的分享接收者：锁定在考试页面，屏蔽所有退出入口 */
+function _applySharedLockUI() {
+  // 用一个全局 style 标签统一控制，刷新 DOM 不会丢失
+  let st = document.getElementById('shared-lock-style');
+  if (!st) {
+    st = document.createElement('style');
+    st.id = 'shared-lock-style';
+    st.textContent = `
+      body.shared-locked .back-btn,
+      body.shared-locked #brand,
+      body.shared-locked .quiz-header .back-btn,
+      body.shared-locked #s-home,
+      body.shared-locked #s-stats,
+      body.shared-locked #s-wb,
+      body.shared-locked .bottom-nav { display: none !important; }
+      body.shared-locked .quiz-header .back-btn { visibility: hidden !important; }
+    `;
+    document.head.appendChild(st);
+  }
+  document.body.classList.add('shared-locked');
+  // 拦截 history 返回（避免用户按返回键回到主页）
+  try {
+    history.pushState({sharedLock: true}, '', location.pathname);
+    window.addEventListener('popstate', function _blockBack() {
+      if (document.body.classList.contains('shared-locked')) {
+        history.pushState({sharedLock: true}, '', location.pathname);
+        toast('分享试卷不可退出，请完成后关闭页面');
+      }
+    });
+  } catch(_) {}
+}
+
+/** 提交分享试卷后的终端页面：禁止回退、禁止再次进入 */
+function _showSharedLockEndScreen() {
+  // 交卷后即标记 token 为"已使用"：用一个 localStorage 键阻止刷新后再进
+  try { localStorage.setItem('med_exam_share_done_' + Date.now(), '1'); } catch(_) {}
+  // 构造一个遮盖层
+  let el = document.getElementById('shared-lock-end');
+  if (!el) {
+    el = document.createElement('div');
+    el.id = 'shared-lock-end';
+    el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:var(--bg,#fff);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px;text-align:center;gap:16px';
+    el.innerHTML = `
+      <div style="font-size:48px">✅</div>
+      <div style="font-size:20px;font-weight:600">试卷已提交</div>
+      <div style="color:var(--muted,#888);max-width:420px;line-height:1.6">
+        分享试卷为一次性有效，已答完后无法重新进入。<br>
+        如需查看完整解析或继续练习，请联系分享者或使用您自己的账户访问。
+      </div>
+      <button onclick="window.close()" style="margin-top:12px;padding:10px 24px;border:none;border-radius:8px;background:var(--accent,#3b82f6);color:#fff;font-size:15px;cursor:pointer">关闭页面</button>
+    `;
+    document.body.appendChild(el);
+  }
 }
 
 /** 打开统计页面 */
@@ -4015,19 +4093,31 @@ function _fmtAgo(ts) {
 
 /** 点击已完成记录 → 查看结果摘要页 */
 function openHistoryResult(id, idx) {
-  const allH = (S.serverHistory && S.serverHistory.length)
-    ? [...(S.localOnlyHistory||[]), ...S.serverHistory]
-    : S.history;
-  const h = id && !id.startsWith('idx:')
-    ? allH.find(x => x.id === String(id)) || allH[idx]
-    : allH[idx] || S.history[idx];
-  if (!h) return;
+  // 用与 renderHistorySection 完全一致的数据源和排序，避免 idx 错位
+  const serverH    = S.serverHistory    || [];
+  const localOnlyH = S.localOnlyHistory || [];
+  const baseHistory = serverH.length ? [...localOnlyH, ...serverH] : (S.history || []);
+  const pinned = (typeof _getPinned === 'function') ? _getPinned() : new Set();
+  const sorted = [...baseHistory].sort((a, b) => {
+    const pa = pinned.has(a.id) ? 1 : 0;
+    const pb = pinned.has(b.id) ? 1 : 0;
+    return pb - pa;
+  });
+  let h = null;
+  // 优先用 id 精确匹配
+  if (id && !String(id).startsWith('idx:')) {
+    h = sorted.find(x => String(x.id) === String(id))
+     || baseHistory.find(x => String(x.id) === String(id));
+  }
+  // 再用 idx 兜底
+  if (!h) h = sorted[idx] || baseHistory[idx] || (S.history && S.history[idx]);
+  if (!h) { toast('记录不存在或已删除', true); return; }
 
-  // 尝试从复盘缓存恢复题目和答案
+  // 尝试从复盘缓存恢复题目和答案（按真实 id 查找）
   let cachedQs = null, cachedAns = null;
   try {
     const cache = JSON.parse(localStorage.getItem(_reviewCacheKey()) || '[]');
-    const entry = cache.find(e => e.id === String(id));
+    const entry = cache.find(e => String(e.id) === String(h.id));
     if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; }
   } catch (e) { /* 缓存读取失败静默忽略 */ }
 
@@ -4037,6 +4127,10 @@ function openHistoryResult(id, idx) {
     S.mode      = h.mode || S.mode;
   }
 
+  // 恢复时间限制（供"分享试卷"使用原始时限）
+  const restoredLimit = h.time_limit || h.timeLimit || 0;
+  if (restoredLimit > 0) S.examLimit = restoredLimit;
+
   S.results = {
     mode:    h.mode,
     total:   h.total,
@@ -4044,6 +4138,7 @@ function openHistoryResult(id, idx) {
     wrong:   h.wrong ?? (h.total - h.correct - (h.skip || 0)),
     skip:    h.skip || 0,
     timeSec: h.time_sec || h.timeSec || 0,
+    timeLimit: restoredLimit || (S.examLimit || 0),
     byUnit:  null,
     qs:      cachedQs,
     ans:     cachedAns,
@@ -4484,11 +4579,14 @@ async function calcEval() {
 function _calcRenderHistory() {
   var el = document.getElementById('calc-history');
   if (!el) return;
-  el.innerHTML = _calc.history.map(function(h) {
+  // 渲染时剔除最后一条（最后一条是"当前计算"，已在 calc-expr/calc-result 显示）
+  var items = _calc.history.slice(0, -1);
+  el.innerHTML = items.map(function(h) {
     return '<div class="calc-history-item"><span class="ch-expr">' +
       _escHtml(h.expr) + ' =</span><span class="ch-val">' + _escHtml(h.val) + '</span></div>';
   }).join('');
-  // scroll display to bottom
+  // 保持滚动到底部（紧贴当前计算）
+  el.scrollTop = el.scrollHeight;
   var display = el.closest('.calc-display');
   if (display) display.scrollTop = display.scrollHeight;
 }
