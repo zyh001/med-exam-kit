@@ -129,12 +129,15 @@ type examSession struct {
 }
 
 type shareConfig struct {
-	Fingerprints []string `json:"fingerprints"`
-	Mode         string   `json:"mode"`
-	BankIdx      int      `json:"bank_idx"`
-	TimeLimit    int      `json:"time_limit"` // seconds; 0 means use default (90*60)
-	Ts           int64    `json:"ts"`
-	ExpiresAt    int64    `json:"expires_at"` // unix timestamp; 0 means use Ts+7days
+	Fingerprints   []string               `json:"fingerprints"`
+	Mode           string                 `json:"mode"`
+	BankIdx        int                    `json:"bank_idx"`
+	TimeLimit      int                    `json:"time_limit"`    // seconds
+	Scoring        bool                   `json:"scoring"`       // 是否启用计分
+	ScorePerMode   map[string]float64     `json:"score_per_mode"` // 各题型每小题分值
+	MultiScoreMode string                 `json:"multi_score_mode"` // strict|loose
+	Ts             int64                  `json:"ts"`
+	ExpiresAt      int64                  `json:"expires_at"`
 }
 
 const (
@@ -1407,9 +1410,12 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Fingerprints []string `json:"fingerprints"`
-		Mode         string   `json:"mode"`
-		TimeLimit    int      `json:"time_limit"` // seconds from client; 0 = default
+		Fingerprints   []string               `json:"fingerprints"`
+		Mode           string                 `json:"mode"`
+		TimeLimit      int                    `json:"time_limit"`
+		Scoring        bool                   `json:"scoring"`
+		ScorePerMode   map[string]float64     `json:"score_per_mode"`
+		MultiScoreMode string                 `json:"multi_score_mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Fingerprints) == 0 {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -1417,7 +1423,10 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 	}
 	timeLimit := body.TimeLimit
 	if timeLimit <= 0 {
-		timeLimit = 90 * 60 // default 90 minutes
+		timeLimit = 90 * 60
+	}
+	if body.MultiScoreMode == "" {
+		body.MultiScoreMode = "strict"
 	}
 
 	tok := make([]byte, 8)
@@ -1425,15 +1434,18 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 	token := hex.EncodeToString(tok)
 
 	now := time.Now().Unix()
-	expiresAt := now + int64(7*24*3600) // 7 days
+	expiresAt := now + int64(7*24*3600)
 
 	cfg := &shareConfig{
-		Fingerprints: body.Fingerprints,
-		Mode:         body.Mode,
-		BankIdx:      bankIdx,
-		TimeLimit:    timeLimit,
-		Ts:           now,
-		ExpiresAt:    expiresAt,
+		Fingerprints:   body.Fingerprints,
+		Mode:           body.Mode,
+		BankIdx:        bankIdx,
+		TimeLimit:      timeLimit,
+		Scoring:        body.Scoring,
+		ScorePerMode:   body.ScorePerMode,
+		MultiScoreMode: body.MultiScoreMode,
+		Ts:             now,
+		ExpiresAt:      expiresAt,
 	}
 
 	// Try to persist to PostgreSQL if available (golang-version + PG mode).
@@ -1526,9 +1538,12 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 	rows, _ := selectQuestions(b.Questions, selectOpts{fpSet: fpSet})
 	if rows == nil { rows = []sqFlat{} }
 
-	// sealed 模式：剥离答案，服务端暂存
+	// sealed 模式：剥离答案，服务端暂存。
+	// exam_done 是前端交卷后的内部状态，功能上等同于 exam，同样需要密封答案。
+	// 返回给客户端时统一使用 "exam"，让接收方直接进入考试模式。
 	var eid string
-	if cfg.Mode == "exam" && len(rows) > 0 {
+	isExamMode := cfg.Mode == "exam" || cfg.Mode == "exam_done"
+	if isExamMode && len(rows) > 0 {
 		eidBytes := make([]byte, 16); rand.Read(eidBytes)
 		eid = hex.EncodeToString(eidBytes)
 		answers := make(map[string]examAnswer, len(rows))
@@ -1550,10 +1565,19 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 		timeLimit = 90 * 60
 	}
 
+	// 返回给客户端的 mode 统一规范：exam/exam_done → "exam"，其他保持原值
+	outMode := cfg.Mode
+	if isExamMode {
+		outMode = "exam"
+	}
+
 	jsonOK(w, map[string]any{
-		"items": rows, "total": len(rows), "mode": cfg.Mode,
+		"items": rows, "total": len(rows), "mode": outMode,
 		"exam_id": eid, "time_limit": timeLimit,
-		"bank_idx": cfg.BankIdx,
+		"bank_idx":         cfg.BankIdx,
+		"scoring":          cfg.Scoring,
+		"score_per_mode":   cfg.ScorePerMode,
+		"multi_score_mode": cfg.MultiScoreMode,
 	})
 }
 
