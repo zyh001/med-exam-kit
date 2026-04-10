@@ -58,56 +58,32 @@ const inlineMathExt = {
   }
 };
 
-// ── CJK-aware emphasis extensions ────────────────────────────────
-// CommonMark's "flanking delimiter" rules require closing ** followed
-// by non-whitespace non-punctuation (e.g. CJK chars) to also be
-// left-flanking, which fails when ** is preceded by punctuation like
-// full-width parens ）. These extensions handle it explicitly.
+// ── CJK emphasis preprocessing ───────────────────────────────────
+// CommonMark's right-flanking rules reject closing ** when preceded
+// by Unicode punctuation (e.g. ）) and followed by non-punctuation
+// non-whitespace (e.g. CJK chars). Pre-render these to <strong>/<em>
+// before passing to marked, which passes through inline HTML cleanly.
+//
+// Example: **错误（A Error）**类型
+//   Closing ** preceded by ）(punct) + followed by 类(CJK) → NOT
+//   right-flanking → marked leaves it raw. Fix: pre-convert to HTML.
 
-const cjkStrongExt = {
-  name: 'cjkStrong',
-  level: 'inline',
-  start(src) { return src.indexOf('**'); },
-  tokenizer(src) {
-    // Match **...** that the built-in tokenizer might miss with CJK
-    const m = src.match(/^\*\*((?:[^*]|\*(?!\*))+)\*\*/);
-    if (m) return { type: 'cjkStrong', raw: m[0], text: m[1] };
-  },
-  renderer(token) {
-    if (this.parser && this.parser.parseInline) {
-      return '<strong>' + this.parser.parseInline(token.text) + '</strong>';
-    }
-    return '<strong>' + token.text + '</strong>';
-  }
-};
+const _CJK_RANGE = '\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef';
+const _CJK_STRONG_RE = new RegExp('\\*\\*(.+?)\\*\\*(?=[' + _CJK_RANGE + '])', 'g');
+const _CJK_EM_RE     = new RegExp('(?<!\\*)\\*([^*]+?)\\*(?!\\*)(?=[' + _CJK_RANGE + '])', 'g');
 
-const cjkEmExt = {
-  name: 'cjkEm',
-  level: 'inline',
-  start(src) {
-    // Only match single * not preceded by another *
-    const idx = src.indexOf('*');
-    if (idx >= 0 && src[idx + 1] !== '*' && (idx === 0 || src[idx - 1] !== '*')) return idx;
-    return -1;
-  },
-  tokenizer(src) {
-    const m = src.match(/^\*([^*]+?)\*/);
-    if (m) return { type: 'cjkEm', raw: m[0], text: m[1] };
-  },
-  renderer(token) {
-    if (this.parser && this.parser.parseInline) {
-      return '<em>' + this.parser.parseInline(token.text) + '</em>';
-    }
-    return '<em>' + token.text + '</em>';
-  }
-};
+function preprocessCJKEmphasis(text) {
+  text = text.replace(_CJK_STRONG_RE, '<strong>$1</strong>');
+  text = text.replace(_CJK_EM_RE,     '<em>$1</em>');
+  return text;
+}
 
-// Configure marked for medical content + LaTeX math + CJK emphasis
+// Configure marked for medical content + LaTeX math
 if (typeof marked !== 'undefined') {
   marked.use({
     breaks: true,
     gfm: true,
-    extensions: [blockMathExt, inlineMathExt, cjkStrongExt, cjkEmExt],
+    extensions: [blockMathExt, inlineMathExt],
   });
 }
 
@@ -140,7 +116,7 @@ function makeStreamingRenderer(container, cursor) {
   function fullRender(withCursor) {
     let html;
     if (typeof marked !== 'undefined' && marked.parse) {
-      try { html = marked.parse(committed, { async: false }); } catch (e) { html = esc(committed); }
+      try { html = marked.parse(preprocessCJKEmphasis(committed), { async: false }); } catch (e) { html = esc(committed); }
     } else {
       html = '<pre>' + esc(committed) + '</pre>';
     }
@@ -581,7 +557,7 @@ function sendAIMessage(key) {
  */
 function renderContent(container, text, cursor) {
   if (typeof marked !== 'undefined' && marked.parse) {
-    container.innerHTML = marked.parse(text);
+    container.innerHTML = marked.parse(preprocessCJKEmphasis(text));
   } else {
     // Fallback: escape and add line breaks
     container.textContent = text;
