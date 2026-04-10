@@ -123,7 +123,6 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
 
   function flush() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    // Drain remaining pending text
     if (pending.length > 0) {
       fullText += pending;
       if (smdParser) {
@@ -131,22 +130,21 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
       }
       pending = '';
     }
-    // End smd stream — finalize DOM
     if (smdParser) {
       smd.parser_end(smdParser);
       smdParser = null;
     }
-    // Re-render with marked for LaTeX/GFM polish, but keep smd output
-    // if marked fails to render tables (raw pipes still visible).
+    // Re-render with marked for LaTeX/GFM polish
     if (typeof marked !== 'undefined' && marked.parse && fullText) {
       try {
-        const smdBackup = container.innerHTML;
-        const markedHTML = marked.parse(fullText, { async: false });
-        container.innerHTML = markedHTML;
-        // If marked left raw table separators unrendered, restore smd
-        if (/\|\s*:?---/.test(container.textContent)) {
-          container.innerHTML = smdBackup;
-        }
+        // Fix malformed table separators: | : | or | :- | → | :--- |
+        const fixed = fullText.replace(
+          /^(\|[\s:\-|]*\|)$/gm,
+          function(row) {
+            return row.replace(/(?<=\|)\s*:?-{0,2}\s*(?=\|)/g, ' :--- ');
+          }
+        );
+        container.innerHTML = marked.parse(fixed, { async: false });
       } catch (e) { /* keep smd output */ }
     }
   }
