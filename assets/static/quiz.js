@@ -26,6 +26,7 @@ const S = {
   memoFlipped: false,
   examStart: null,
   examLimit: 90 * 60,
+  examSubmitted: false,
   timerInterval: null,
   bankInfo: null,
   results: null,
@@ -214,7 +215,7 @@ function _deserializeAns(raw) {
 
 /** 保存当前考试状态到 localStorage */
 function saveExamSession() {
-  if (S.mode !== 'exam' || !S.questions.length) return;
+  if (S.mode !== 'exam' || !S.questions.length || S.examSubmitted) return;
   const elapsedSec = Math.floor((Date.now() - S.examStart) / 1000);
   const remaining  = Math.max(0, S.examLimit - elapsedSec);
   const session = {
@@ -272,6 +273,16 @@ function _fmtSavedAt(ts) {
 function checkResumeSession() {
   const s = _loadRawSession();
   if (!s) return false;
+
+  // 基础字段校验：必须有 remaining 和 savedAt
+  if (typeof s.remaining !== 'number' || typeof s.savedAt !== 'number') {
+    clearExamSession(); return false;
+  }
+
+  // 超过 24 小时的存档直接丢弃
+  if (Date.now() - s.savedAt > 24 * 3600 * 1000) {
+    clearExamSession(); return false;
+  }
 
   // 若剩余时间已耗尽（超时超过 10 秒缓冲），丢弃
   const elapsed = Math.floor((Date.now() - s.savedAt) / 1000);
@@ -1482,6 +1493,7 @@ async function startSession() {
   S.marked = new Set();
   S.revealed = new Set();
   S.examStart = Date.now();
+  S.examSubmitted = false;
   S.streak = 0;
   S.modeGroups       = buildModeGroups(S.questions);
   S.currentGroupIdx  = 0;
@@ -1519,6 +1531,7 @@ function startQuiz(remainingSeconds) {
     fill.className = 'progress-fill exam-fill';
     startTimer(remainingSeconds);
     buildGrid();
+    _showCalcBtn(true);
   } else {
     timer.style.display = 'none';
     // 练习模式也显示题目列表按钮
@@ -1526,6 +1539,7 @@ function startQuiz(remainingSeconds) {
     fill.className = 'progress-fill';
     document.getElementById('q-grid-panel').classList.remove('open');
     buildGrid();
+    _showCalcBtn(false);
   }
 
   showScreen('s-quiz');
@@ -2172,6 +2186,8 @@ document.addEventListener('click', e => {
 async function submitExam() {
   clearInterval(S.timerInterval);
   clearExamSession();   // 正常交卷，清除存档
+  S.examSubmitted = true; // 防止任何路径重新保存
+  const origMode = S.mode; // 保存原始模式用于 calculateResults
   S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
 
   // sealed 模式：从服务端获取答案后再评分
@@ -2201,12 +2217,17 @@ async function submitExam() {
     }
   }
 
-  calculateResults();
+  // 再次确保清除（防止 await 期间被重新保存）
+  clearExamSession();
+  calculateResults(origMode);
   showScreen('s-results');
 }
 function retryQuiz() {
   // 如果题目还在内存，直接重置状态重新做一遍
   if (S.questions && S.questions.length) {
+    // 恢复原始模式（submitExam 将 mode 设为 'exam_done'）
+    if (S.mode === 'exam_done' && S.results) S.mode = S.results.mode || 'exam';
+    S.examSubmitted = false; // 重置提交标记
     S.cur = 0;
     S.ans = {};
     S.revealed = new Set();
@@ -2503,7 +2524,9 @@ async function _recordMemoSession() {
 // ════════════════════════════════════════════
 // Results
 // ════════════════════════════════════════════
-function calculateResults() {
+function calculateResults(origMode) {
+  // origMode: 传入原始模式（submitExam 中 S.mode 已被改为 'exam_done'）
+  const effectiveMode = origMode || S.mode;
   // 深拷贝题目数据，防止后续修改影响结果页面
   const qs = JSON.parse(JSON.stringify(S.questions));
   // 深拷贝答案数据
@@ -2543,7 +2566,7 @@ function calculateResults() {
   });
 
   S.results = {
-    mode: S.mode,
+    mode: effectiveMode,
     total: qs.length, correct, wrong, skip,
     timeSec: Math.floor((Date.now() - S.examStart) / 1000),
     byUnit,
@@ -2552,7 +2575,7 @@ function calculateResults() {
   };
 
   // ── 计分 ──────────────────────────────────────────────────────────
-  if (CFG.scoring && S.mode === 'exam') {
+  if (CFG.scoring && effectiveMode === 'exam') {
     S.results.scoring      = true;
     S.results.scorePerMode = { ...CFG.scorePerMode };
     S.results.multiScoreMode = CFG.multiScoreMode;
@@ -2618,7 +2641,7 @@ function calculateResults() {
   // Save to history
   const record = {
     id:      sessionId,
-    mode: S.mode, total: qs.length, correct,
+    mode: effectiveMode, total: qs.length, correct,
     pct: Math.round(correct / qs.length * 100),
     skip,
     timeSec: S.results.timeSec,
@@ -2683,7 +2706,10 @@ function renderResults() {
 
   // Unit breakdown
   const bk = document.getElementById('unit-breakdown');
-  if (R.byUnit && Object.keys(R.byUnit).length > 1) {
+  // 考试模式不显示章节分析（防止泄露分组信息）
+  if (R.mode === 'exam') {
+    bk.style.display = 'none';
+  } else if (R.byUnit && Object.keys(R.byUnit).length > 1) {
     const entries = Object.entries(R.byUnit).sort((a,b) => b[1].total - a[1].total).slice(0, 8);
     bk.innerHTML = '<h3>章节分析</h3>' + entries.map(([unit, d]) => {
       const p = Math.round(d.correct / d.total * 100);
@@ -4344,6 +4370,154 @@ document.addEventListener('click', e=>{
   if(e.target.closest('.memo-card')) memoReveal();
 });
 
+// ════════════════════════════════════════════
+// 计算器
+// ════════════════════════════════════════════
+const _calc = { expr: '', _eval: '', result: '0', mode: 'simple', is2nd: false, isDeg: true, lastWasEval: false };
+
+function toggleCalc() {
+  const m = document.getElementById('calc-modal');
+  m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+}
+
+function setCalcMode(mode) {
+  _calc.mode = mode;
+  document.getElementById('calc-keys-simple').style.display = mode === 'simple' ? '' : 'none';
+  document.getElementById('calc-keys-sci').style.display    = mode === 'sci'    ? '' : 'none';
+  document.getElementById('calc-mode-simple').classList.toggle('active', mode === 'simple');
+  document.getElementById('calc-mode-sci').classList.toggle('active', mode === 'sci');
+}
+
+function _calcUpdate() {
+  document.getElementById('calc-expr').textContent   = _calc.expr;
+  document.getElementById('calc-result').textContent  = _calc.result;
+}
+
+function calcDigit(d) {
+  if (_calc.lastWasEval) { _calc.result = ''; _calc.expr = ''; _calc._eval = ''; _calc.lastWasEval = false; }
+  if (d === '.' && _calc.result.includes('.')) return;
+  if (_calc.result === '0' && d !== '.') _calc.result = d;
+  else _calc.result += d;
+  _calcUpdate();
+}
+
+function calcOp(op) {
+  _calc.lastWasEval = false;
+  if (op === '(' || op === ')') {
+    _calc.expr += op; _calc._eval += op; _calcUpdate(); return;
+  }
+  _calc.expr  += _calc.result + ' ' + op + ' ';
+  _calc._eval += _calc.result + ' ' + op + ' ';
+  _calc.result = '0';
+  _calcUpdate();
+}
+
+function calcAC() {
+  _calc.expr = ''; _calc._eval = ''; _calc.result = '0'; _calc.lastWasEval = false;
+  _calcUpdate();
+}
+
+function calcDel() {
+  if (_calc.lastWasEval) return;
+  _calc.result = _calc.result.slice(0, -1) || '0';
+  _calcUpdate();
+}
+
+function _calcSafeEval(exprStr) {
+  let e = exprStr
+    .replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-')
+    .replace(/\^/g, '**')
+    .replace(/%/g, '/100');
+  try {
+    const fn = new Function('return (' + e + ')');
+    const val = fn();
+    if (!isFinite(val)) return val === Infinity ? '∞' : val === -Infinity ? '-∞' : 'Error';
+    return parseFloat(val.toPrecision(12)).toString();
+  } catch { return 'Error'; }
+}
+
+function calcEval() {
+  const fullDisplay = _calc.expr  + _calc.result;
+  const fullEval    = _calc._eval + _calc.result;
+  _calc.expr  = fullDisplay + ' =';
+  _calc._eval = '';
+  _calc.result = _calcSafeEval(fullEval);
+  _calc.lastWasEval = true;
+  _calcUpdate();
+}
+
+function calcFunc(fn) {
+  const v = parseFloat(_calc.result) || 0;
+  const deg = _calc.isDeg;
+  const toRad = x => x * Math.PI / 180;
+  let r;
+  switch (fn) {
+    case 'sin':   r = _calc.is2nd ? Math.asin(v) * (deg ? 180/Math.PI : 1) : Math.sin(deg ? toRad(v) : v); break;
+    case 'cos':   r = _calc.is2nd ? Math.acos(v) * (deg ? 180/Math.PI : 1) : Math.cos(deg ? toRad(v) : v); break;
+    case 'tan':   r = _calc.is2nd ? Math.atan(v) * (deg ? 180/Math.PI : 1) : Math.tan(deg ? toRad(v) : v); break;
+    case 'lg':    r = _calc.is2nd ? Math.pow(10, v) : Math.log10(v); break;
+    case 'ln':    r = _calc.is2nd ? Math.exp(v) : Math.log(v); break;
+    case '√':     r = _calc.is2nd ? v * v : Math.sqrt(v); break;
+    case '!':     r = _factorial(v); break;
+    case '1/x':   r = 1 / v; break;
+    default:      r = v;
+  }
+  const label2nd = { sin:'asin', cos:'acos', tan:'atan', lg:'10^x', ln:'e^x', '√':'x²' };
+  const label = (_calc.is2nd && label2nd[fn]) ? label2nd[fn] : fn;
+  // 显示函数调用，结果替换当前数值（可继续参与运算）
+  _calc.expr = label + '(' + _calc.result + ')';
+  _calc._eval = ''; // 函数结果已在 result 中，eval track 清空
+  _calc.result = isFinite(r) ? parseFloat(r.toPrecision(12)).toString() : 'Error';
+  _calc.lastWasEval = true;
+  _calcUpdate();
+}
+
+function _factorial(n) {
+  if (n < 0 || n !== Math.floor(n) || n > 170) return NaN;
+  let r = 1; for (let i = 2; i <= n; i++) r *= i; return r;
+}
+
+function calcPow() {
+  _calc.expr += _calc.result + ' ^ ';
+  _calc.result = '0';
+  _calc.lastWasEval = false;
+  _calcUpdate();
+}
+
+function calcConst(c) {
+  _calc.result = c === 'π' ? Math.PI.toString() : Math.E.toString();
+  _calc.lastWasEval = false;
+  _calcUpdate();
+}
+
+function calc2nd() {
+  _calc.is2nd = !_calc.is2nd;
+  document.getElementById('calc-2nd').classList.toggle('is-2nd', _calc.is2nd);
+  // 更新按钮标签
+  const labels = _calc.is2nd
+    ? { 'calc-sin':'asin', 'calc-cos':'acos', 'calc-tan':'atan', 'calc-lg':'10^x', 'calc-ln':'e^x' }
+    : { 'calc-sin':'sin',  'calc-cos':'cos',  'calc-tan':'tan',  'calc-lg':'lg',   'calc-ln':'ln' };
+  for (const [id, txt] of Object.entries(labels)) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = txt;
+  }
+}
+
+function calcToggleDeg() {
+  _calc.isDeg = !_calc.isDeg;
+  document.getElementById('calc-deg').textContent = _calc.isDeg ? 'deg' : 'rad';
+}
+
+function calcCopyResult() {
+  navigator.clipboard.writeText(_calc.result).then(() => toast('已复制')).catch(() => {});
+}
+
+// 考试模式下显示计算器按钮
+function _showCalcBtn(show) {
+  const btn = document.getElementById('calc-toggle-btn');
+  if (btn) btn.style.display = show ? '' : 'none';
+}
+
 // 页面关闭/刷新时兜底保存
 window.addEventListener('beforeunload', () => {
   saveExamSession();
@@ -4483,7 +4657,7 @@ init();
         // 练习模式：强制保存进度存档，刷新后可从「进行中」继续
         savePracticeSession();
         saveMsg = '练习进度已自动保存，';
-      } else if (S.mode === 'exam' && S.questions.length) {
+      } else if (S.mode === 'exam' && S.questions.length && !S.examSubmitted) {
         // 考试模式：把当前状态写入 examSession key，刷新后 checkResumeSession 会弹恢复提示
         try {
           const key = examSessionKey();

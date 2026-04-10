@@ -72,12 +72,12 @@ type ProgressStore interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
 
 	// SM-2 review
-	GetDueFingerprints(ctx context.Context, userID string, bankID int) []string
+	GetDueFingerprints(ctx context.Context, userID string, bankID int, clientDate string) []string
 	UpdateSM2(ctx context.Context, userID, fingerprint string, quality int) error
 
 	// Queries
 	GetHistory(ctx context.Context, userID string, bankID int, limit int) []HistoryEntry
-	GetOverallStats(ctx context.Context, userID string, bankID int) OverallStats
+	GetOverallStats(ctx context.Context, userID string, bankID int, clientDate string) OverallStats
 	GetUnitStats(ctx context.Context, userID string, bankID int) []UnitStat
 	GetWrongFingerprints(ctx context.Context, userID string, bankID int, limit int) []WrongEntry
 	GetSyncStatus(ctx context.Context, userID string, bankID int) map[string]any

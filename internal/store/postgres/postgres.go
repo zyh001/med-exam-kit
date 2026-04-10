@@ -274,10 +274,9 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 		userID = "_legacy"
 	}
 	unitsRaw, _ := json.Marshal(session["units"])
-	// pgx v5 treats []byte as bytea, NOT jsonb — must pass as string so PostgreSQL
-	// receives it as text and auto-casts to jsonb via input function.
 	unitsStr := string(unitsRaw)
 	bankID := intV(session["bank_id"]) // 0 if not provided (backward compat)
+	clientDate := str(session["date"]) // client's local date for SM-2 next_due
 	_, err := s.pool.Exec(ctx, `
 		INSERT INTO sessions(id,user_id,bank_id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
@@ -285,7 +284,7 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 		fmt.Sprint(session["id"]), userID, bankID,
 		str(session["mode"]), intV(session["total"]), intV(session["correct"]),
 		intV(session["wrong"]), intV(session["skip"]), intV(session["time_sec"]),
-		str(session["date"]), unitsStr, time.Now().UnixMilli())
+		clientDate, unitsStr, time.Now().UnixMilli())
 
 	// Record attempts
 	if items, ok := session["items"].([]any); ok {
@@ -308,11 +307,10 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 				if res == 0 {
 					quality = 1 // wrong → poor recall
 				}
-				// respect explicit quality override from client
 				if qv, ok := item["quality"].(float64); ok {
 					quality = int(math.Max(0, math.Min(5, qv)))
 				}
-				s.updateSM2Tx(ctx, userID, bankID, str(item["fingerprint"]), quality)
+				s.updateSM2Tx(ctx, userID, bankID, str(item["fingerprint"]), quality, clientDate)
 			}
 		}
 	}
@@ -343,11 +341,14 @@ func (s *Store) DeleteSession(ctx context.Context, sessionID, userID string) boo
 	return err == nil && res.RowsAffected() > 0
 }
 
-func (s *Store) GetDueFingerprints(ctx context.Context, userID string, bankID int) []string {
+func (s *Store) GetDueFingerprints(ctx context.Context, userID string, bankID int, clientDate string) []string {
 	if userID == "" {
 		userID = "_legacy"
 	}
-	today := time.Now().Format("2006-01-02")
+	today := clientDate
+	if today == "" || len(today) != 10 {
+		today = time.Now().Format("2006-01-02")
+	}
 	rows, err := s.pool.Query(ctx,
 		`SELECT fingerprint FROM sm2 WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND next_due<=$3 ORDER BY next_due ASC`,
 		userID, int64(bankID), today)
@@ -365,10 +366,10 @@ func (s *Store) GetDueFingerprints(ctx context.Context, userID string, bankID in
 }
 
 func (s *Store) UpdateSM2(ctx context.Context, userID, fingerprint string, quality int) error {
-	return s.updateSM2Tx(ctx, userID, 0, fingerprint, quality)
+	return s.updateSM2Tx(ctx, userID, 0, fingerprint, quality, "")
 }
 
-func (s *Store) updateSM2Tx(ctx context.Context, userID string, bankID int, fingerprint string, quality int) error {
+func (s *Store) updateSM2Tx(ctx context.Context, userID string, bankID int, fingerprint string, quality int, clientDate string) error {
 	var ef float64 = 2.5
 	var interval, reps int
 	s.pool.QueryRow(ctx,
@@ -393,9 +394,18 @@ func (s *Store) updateSM2Tx(ctx context.Context, userID string, bankID int, fing
 	if ef < 1.3 {
 		ef = 1.3
 	}
-	dueDate := time.Now().AddDate(0, 0, interval).Format("2006-01-02")
+	// Use client's local date as the base for next_due calculation to avoid timezone mismatch.
+	today := clientDate
+	if today == "" || len(today) != 10 {
+		today = time.Now().Format("2006-01-02")
+	}
+	base, err := time.Parse("2006-01-02", today)
+	if err != nil {
+		base = time.Now()
+	}
+	dueDate := base.AddDate(0, 0, interval).Format("2006-01-02")
 
-	_, err := s.pool.Exec(ctx, `
+	_, err = s.pool.Exec(ctx, `
 		INSERT INTO sm2(user_id,bank_id,fingerprint,ef,interval,reps,next_due,updated_at)
 		VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 		ON CONFLICT(user_id,bank_id,fingerprint) DO UPDATE
@@ -450,7 +460,7 @@ func (s *Store) GetHistory(ctx context.Context, userID string, bankID int, limit
 	return out
 }
 
-func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int) store.OverallStats {
+func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int, clientDate string) store.OverallStats {
 	if userID == "" {
 		userID = "_legacy"
 	}
@@ -468,7 +478,10 @@ func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int) 
 		&attempts, &correct, &wrong, &skip)
 	st.Attempts, st.Correct, st.Wrong, st.Skip =
 		int(attempts), int(correct), int(wrong), int(skip)
-	today := time.Now().Format("2006-01-02")
+	today := clientDate
+	if today == "" || len(today) != 10 {
+		today = time.Now().Format("2006-01-02")
+	}
 	var due int64
 	s.pool.QueryRow(ctx,
 		`SELECT COUNT(*) FROM sm2 WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND next_due<=$3`, userID, int64(bankID), today).Scan(&due)

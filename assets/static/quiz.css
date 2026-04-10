@@ -1813,3 +1813,79 @@ button,a,[role=button],label{touch-action:manipulation}
   font-weight:600;cursor:pointer;
 }
 .rh-undo-bar button:hover{opacity:.85}
+
+/* ════════════════════════════════════════════
+   Calculator
+════════════════════════════════════════════ */
+.calc-toggle-btn{
+  background:none;color:var(--text);font-size:18px;
+  padding:4px 6px;border-radius:8px;margin-left:2px;
+  transition:background .15s;
+}
+.calc-toggle-btn:active{background:var(--surface)}
+
+/* Modal */
+.calc-box{
+  background:var(--card);border-radius:20px;
+  width:min(340px,92vw);overflow:hidden;
+  box-shadow:0 12px 40px rgba(0,0,0,.35);
+  animation:modalIn .2s ease;
+}
+.calc-header{
+  display:flex;align-items:center;padding:12px 14px 8px;gap:8px;
+}
+.calc-title{font-size:14px;font-weight:600;color:var(--text);margin-right:auto}
+.calc-mode-switch{
+  display:flex;background:var(--surface);border-radius:8px;overflow:hidden;
+}
+.calc-mode-btn{
+  font-size:12px;padding:4px 12px;background:none;color:var(--muted);
+  border:none;font-weight:500;transition:all .15s;
+}
+.calc-mode-btn.active{background:var(--accent);color:#fff;border-radius:6px}
+.calc-close{
+  background:none;color:var(--muted);font-size:16px;padding:4px 6px;
+  border-radius:6px;transition:background .15s;
+}
+.calc-close:hover{background:var(--surface)}
+
+/* Display */
+.calc-display{
+  padding:8px 16px 12px;text-align:right;min-height:72px;
+  display:flex;flex-direction:column;justify-content:flex-end;
+}
+.calc-expr{
+  font-size:13px;color:var(--muted);min-height:18px;
+  overflow-x:auto;white-space:nowrap;
+}
+.calc-result{
+  font-size:36px;font-weight:700;color:var(--text);
+  line-height:1.2;overflow-x:auto;white-space:nowrap;
+  border-right:2px solid var(--accent);padding-right:2px;
+  animation:calcBlink 1s step-end infinite;
+}
+@keyframes calcBlink{0%,100%{border-color:var(--accent)}50%{border-color:transparent}}
+
+/* Keys grid */
+.calc-keys{
+  display:grid;gap:6px;padding:6px 10px 14px;
+}
+.calc-keys.simple{grid-template-columns:repeat(4,1fr)}
+.calc-keys.sci{grid-template-columns:repeat(5,1fr)}
+
+.ck{
+  font-size:18px;font-weight:500;border:none;border-radius:12px;
+  padding:14px 0;background:var(--surface);color:var(--text);
+  cursor:pointer;transition:all .1s;user-select:none;
+  -webkit-tap-highlight-color:transparent;
+}
+.ck:active{transform:scale(.93);opacity:.8}
+.ck.fn{color:var(--accent);font-size:15px;font-weight:600}
+.ck.op{color:var(--accent);font-size:20px;font-weight:600}
+.ck.eq{background:var(--accent);color:#fff;font-size:22px;font-weight:700}
+.ck.eq:active{background:var(--accent-hover)}
+.ck.sc{font-size:13px;padding:10px 0}
+.ck.sc sup{font-size:9px}
+
+/* 2nd mode highlight */
+.ck.sc.is-2nd{background:var(--accent);color:#fff}
