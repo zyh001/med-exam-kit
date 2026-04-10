@@ -3218,27 +3218,37 @@ async function shareExam() {
   if (!R || !R.qs || !R.qs.length) { toast('没有可分享的题目'); return; }
   const fps = R.qs.map(q => q.fingerprint).filter(Boolean);
   if (!fps.length) { toast('题目缺少标识，无法分享'); return; }
+  // 精确到小题级别：fingerprint:si 组合，避免服务端把 A3/案例分析的同一题干下
+  // 所有小题全部还原（导致 220 → 221 多出一题）
+  const subIds = R.qs
+    .filter(q => q.fingerprint != null)
+    .map(q => q.fingerprint + ':' + (q.si != null ? q.si : 0));
   try {
     // exam_done 是前端内部状态，分享时统一用 'exam'（练习模式用 'practice'）
     const shareMode = (R.mode === 'exam' || R.mode === 'exam_done') ? 'exam' : (R.mode || 'exam');
     const shareTimeLimit = R.timeLimit || S.examLimit || CFG.examTime * 60;
+    // 计分配置优先从 R（考试结果）读取，从历史记录打开也能正确分享
+    const shareScoring        = (R.scoring != null) ? R.scoring : CFG.scoring;
+    const shareScorePerMode   = R.scorePerMode   || CFG.scorePerMode   || {};
+    const shareMultiScoreMode = R.multiScoreMode || CFG.multiScoreMode || 'strict';
     const res = await apiFetch('/api/exam/share?' + bankQS(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         fingerprints:     fps,
+        sub_ids:          subIds,
         mode:             shareMode,
         time_limit:       shareTimeLimit,
-        scoring:          CFG.scoring,
-        score_per_mode:   CFG.scorePerMode,
-        multi_score_mode: CFG.multiScoreMode,
+        scoring:          shareScoring,
+        score_per_mode:   shareScorePerMode,
+        multi_score_mode: shareMultiScoreMode,
       }),
     });
     const d = await res.json();
     if (!d.token) { toast('分享失败', true); return; }
     const url = location.origin + location.pathname + '#share=' + d.token;
     if (navigator.share) {
-      navigator.share({ title: '医考练习 - 试卷分享', text: `共 ${fps.length} 题`, url }).catch(()=>{});
+      navigator.share({ title: '医考练习 - 试卷分享', text: `共 ${R.qs.length} 题`, url }).catch(()=>{});
     } else if (navigator.clipboard) {
       await navigator.clipboard.writeText(url);
       toast('✅ 分享链接已复制到剪贴板');
