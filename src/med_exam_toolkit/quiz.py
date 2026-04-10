@@ -629,6 +629,7 @@ def api_exam_share():
     scoring          = bool(body.get("scoring", False))
     score_per_mode   = body.get("score_per_mode") or {}
     multi_score_mode = body.get("multi_score_mode") or "strict"
+    sub_ids          = body.get("sub_ids") or []
 
     _, bank_idx, ok = _get_bank_with_idx()
     if not ok:
@@ -640,6 +641,7 @@ def api_exam_share():
 
     cfg = {
         "fingerprints":     fps,
+        "sub_ids":          sub_ids,
         "mode":             mode,
         "bank_idx":         bank_idx,
         "time_limit":       time_limit,
@@ -689,6 +691,17 @@ def api_exam_join():
 
     # 从该题库按 fingerprint 过滤题目并展开为 flat 列表
     rows = _select_questions_by_fp(b.questions, fp_set)
+
+    # 精确到小题级别：若分享时提供了 sub_ids（"fingerprint:si" 对），
+    # 只保留接收端明确指定的那些小题，防止服务端自动把同一题干下所有小题
+    # 全部还原（导致 220 → 221 等多出题目的情况）。
+    sub_ids = cfg.get("sub_ids") or []
+    if sub_ids:
+        allowed = set(sub_ids)
+        rows = [
+            r for r in rows
+            if f"{r.get('fingerprint','')}:{r.get('si',0)}" in allowed
+        ]
 
     # exam / exam_done 模式：剥离答案，服务端暂存密封
     # 返回给客户端统一使用 'exam'，让接收方直接进入考试模式
