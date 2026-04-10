@@ -3166,7 +3166,16 @@ async function shareExam() {
     const res = await apiFetch('/api/exam/share?' + bankQS(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fingerprints: fps, mode: R.mode || 'exam', time_limit: S.examLimit || CFG.examTime * 60 }),
+      // exam_done 是前端内部状态，分享时统一用 'exam'（练习模式用 'practice'）
+      const shareMode = (R.mode === 'exam' || R.mode === 'exam_done') ? 'exam' : (R.mode || 'exam');
+      body: JSON.stringify({
+        fingerprints:     fps,
+        mode:             shareMode,
+        time_limit:       S.examLimit || CFG.examTime * 60,
+        scoring:          CFG.scoring,
+        score_per_mode:   CFG.scorePerMode,
+        multi_score_mode: CFG.multiScoreMode,
+      }),
     });
     const d = await res.json();
     if (!d.token) { toast('分享失败', true); return; }
@@ -3215,9 +3224,17 @@ async function _checkShareToken() {
     if (S.mode === 'exam' || S.mode === 'exam_done') {
       S.mode = 'exam';
       S.examLimit = d.time_limit || 90 * 60;
+      // 恢复分享者的计分配置，让接收方体验完全一致
+      CFG.scoring        = !!d.scoring;
+      CFG.scorePerMode   = d.score_per_mode   || {};
+      CFG.multiScoreMode = d.multi_score_mode || 'strict';
       startQuiz();
       saveExamSession();
     } else {
+      // 练习模式保持默认逻辑，不复制计分配置
+      CFG.scoring        = false;
+      CFG.scorePerMode   = {};
+      CFG.multiScoreMode = 'strict';
       startQuiz();
     }
   } catch(e) { toast('加载分享试卷失败', true); }
