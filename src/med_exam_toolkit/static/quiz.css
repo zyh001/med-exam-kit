@@ -423,8 +423,9 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   display:flex;align-items:center;gap:10px;
   padding:max(env(safe-area-inset-top),14px) 14px 12px;
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
+  position:relative;
 }
-.quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:5px}
+.quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 .quiz-progress-text{display:flex;justify-content:space-between;align-items:baseline}
 .quiz-progress-cur{font-size:15px;font-weight:700}
 .quiz-progress-total{
@@ -432,6 +433,10 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
 }
 .progress-bar{height:3px;border-radius:2px;background:var(--border);overflow:hidden}
+.progress-bar.header-progress{
+  position:absolute;bottom:0;left:0;right:0;
+  height:2.5px;border-radius:0;background:transparent;
+}
 .progress-fill{height:100%;background:var(--accent);border-radius:2px;transition:width .3s ease}
 .progress-fill.exam-fill{background:var(--warning)}
 .progress-fill.memo-fill{background:var(--success)}
@@ -449,6 +454,8 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;
 }
 .flag-btn.active{background:var(--warn-bg);border-color:var(--warning);color:var(--warning)}
+.flag-btn.calc-btn{background:var(--accent);border-color:var(--accent);color:#fff}
+.flag-btn.calc-btn:active{opacity:.8}
 
 /* Question body */
 .quiz-body{
