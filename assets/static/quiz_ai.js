@@ -136,6 +136,19 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
       smd.parser_end(smdParser);
       smdParser = null;
     }
+    // Re-render with marked for LaTeX/GFM polish, but keep smd output
+    // if marked fails to render tables (raw pipes still visible).
+    if (typeof marked !== 'undefined' && marked.parse && fullText) {
+      try {
+        const smdBackup = container.innerHTML;
+        const markedHTML = marked.parse(fullText, { async: false });
+        container.innerHTML = markedHTML;
+        // If marked left raw table separators unrendered, restore smd
+        if (/\|\s*:?---/.test(container.textContent)) {
+          container.innerHTML = smdBackup;
+        }
+      } catch (e) { /* keep smd output */ }
+    }
   }
 
   return { push, flush };
