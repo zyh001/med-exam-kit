@@ -766,3 +766,64 @@ func (s *Store) ExecRaw(ctx context.Context, sql string, args ...any) (int64, er
 func (s *Store) LoadBankQuestions(ctx context.Context, bankID int64) ([]*models.Question, error) {
 	return s.GetBank(ctx, bankID)
 }
+
+// ── shareStorer implementation ─────────────────────────────────────────────
+// These methods implement the server.shareStorer interface for persisting
+// share tokens across server restarts (PG mode only).
+// We use []byte (JSON) to avoid an import cycle with the server package.
+
+// shareConfigMirror mirrors server.shareConfig JSON fields.
+type shareConfigMirror struct {
+	Fingerprints []string `json:"fingerprints"`
+	Mode         string   `json:"mode"`
+	BankIdx      int      `json:"bank_idx"`
+	TimeLimit    int      `json:"time_limit"`
+	Ts           int64    `json:"ts"`
+	ExpiresAt    int64    `json:"expires_at"`
+}
+
+// SaveShareTokenJSON persists a JSON-encoded shareConfig to the share_tokens table.
+func (s *Store) SaveShareTokenJSON(ctx context.Context, token string, data []byte) error {
+	var sf shareConfigMirror
+	if err := json.Unmarshal(data, &sf); err != nil {
+		return err
+	}
+	fpsJSON, _ := json.Marshal(sf.Fingerprints)
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO share_tokens (token, bank_idx, mode, time_limit, fps, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		ON CONFLICT (token) DO UPDATE
+		  SET bank_idx=$2, mode=$3, time_limit=$4, fps=$5, created_at=$6, expires_at=$7`,
+		token, sf.BankIdx, sf.Mode, sf.TimeLimit, string(fpsJSON), sf.Ts, sf.ExpiresAt,
+	)
+	return err
+}
+
+// LoadShareTokenJSON loads a share token from the database and returns it as JSON bytes.
+// Returns nil if not found.
+func (s *Store) LoadShareTokenJSON(ctx context.Context, token string) []byte {
+	var sf shareConfigMirror
+	var fpsJSON string
+	err := s.pool.QueryRow(ctx, `
+		SELECT bank_idx, mode, time_limit, fps, created_at, expires_at
+		FROM share_tokens WHERE token=$1`, token).
+		Scan(&sf.BankIdx, &sf.Mode, &sf.TimeLimit, &fpsJSON, &sf.Ts, &sf.ExpiresAt)
+	if err != nil {
+		return nil
+	}
+	if err := json.Unmarshal([]byte(fpsJSON), &sf.Fingerprints); err != nil {
+		return nil
+	}
+	b, _ := json.Marshal(sf)
+	return b
+}
+
+// DeleteShareToken removes a token from the database.
+func (s *Store) DeleteShareToken(ctx context.Context, token string) {
+	s.pool.Exec(ctx, `DELETE FROM share_tokens WHERE token=$1`, token) //nolint:errcheck
+}
+
+// CleanExpiredShareTokens removes all expired tokens from the database.
+func (s *Store) CleanExpiredShareTokens(ctx context.Context) {
+	s.pool.Exec(ctx, `DELETE FROM share_tokens WHERE expires_at < $1`, time.Now().Unix()) //nolint:errcheck
+}
