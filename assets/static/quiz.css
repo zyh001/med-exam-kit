@@ -454,8 +454,6 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;
 }
 .flag-btn.active{background:var(--warn-bg);border-color:var(--warning);color:var(--warning)}
-.flag-btn.calc-btn{background:var(--accent);border-color:var(--accent);color:#fff}
-.flag-btn.calc-btn:active{opacity:.8}
 
 /* Question body */
 .quiz-body{
@@ -1852,18 +1850,19 @@ button,a,[role=button],label{touch-action:manipulation}
 /* Display */
 .calc-display{
   padding:0 16px 8px;text-align:right;
-  max-height:180px;overflow-y:auto;
   display:flex;flex-direction:column;
-  -webkit-overflow-scrolling:touch;
 }
 .calc-history{
   display:flex;flex-direction:column;gap:4px;
   padding-top:8px;
+  max-height:42px;overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
 }
 .calc-history-item{
   display:flex;flex-direction:column;align-items:flex-end;
   padding:2px 0;border-bottom:1px solid var(--border);
   opacity:.6;font-size:13px;color:var(--muted);
+  flex-shrink:0;
 }
 .calc-history-item .ch-expr{font-size:12px}
 .calc-history-item .ch-val{font-size:16px;font-weight:600;color:var(--text);opacity:.7}
