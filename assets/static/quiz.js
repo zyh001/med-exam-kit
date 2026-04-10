@@ -4383,7 +4383,7 @@ document.addEventListener('click', e=>{
 // ════════════════════════════════════════════
 // 计算器（表达式输入模式）
 // ════════════════════════════════════════════
-var _calc = { input: '', done: false, is2nd: false, isDeg: true };
+var _calc = { input: '', done: false, is2nd: false, isDeg: true, history: [] };
 
 function toggleCalc() {
   var m = document.getElementById('calc-modal');
@@ -4424,6 +4424,9 @@ function calcAC() {
   _calc.input = ''; _calc.done = false;
   document.getElementById('calc-expr').textContent = '';
   document.getElementById('calc-result').textContent = '0';
+  _calc.history = [];
+  var hEl = document.getElementById('calc-history');
+  if (hEl) hEl.innerHTML = '';
 }
 
 function calcDel() {
@@ -4467,12 +4470,31 @@ async function calcEval() {
     var res = await resp.json();
     var val = res.result || 'Error';
     document.getElementById('calc-result').textContent = val;
+    // push to history
+    _calc.history.push({ expr: expr, val: val });
+    _calcRenderHistory();
     _calc.input = val === 'Error' ? '' : val;
   } catch (e) {
     document.getElementById('calc-result').textContent = 'Error';
     _calc.input = '';
   }
   _calc.done = true;
+}
+
+function _calcRenderHistory() {
+  var el = document.getElementById('calc-history');
+  if (!el) return;
+  el.innerHTML = _calc.history.map(function(h) {
+    return '<div class="calc-history-item"><span class="ch-expr">' +
+      _escHtml(h.expr) + ' =</span><span class="ch-val">' + _escHtml(h.val) + '</span></div>';
+  }).join('');
+  // scroll display to bottom
+  var display = el.closest('.calc-display');
+  if (display) display.scrollTop = display.scrollHeight;
+}
+
+function _escHtml(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 }
 
 function calc2nd() {
