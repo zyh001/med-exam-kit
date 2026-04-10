@@ -1540,6 +1540,7 @@ async function startSession() {
 function startQuiz(remainingSeconds) {
   const isExam = S.mode === 'exam';
   clearInterval(S.timerInterval);
+  if (typeof clearAICache === 'function') clearAICache();
 
   const timer = document.getElementById('quiz-timer');
   const gridToggle = document.getElementById('grid-toggle');
@@ -2011,6 +2012,9 @@ function buildExplain(q, selected) {
     body.innerHTML = '<span style="color:var(--muted)">暂无解析</span>';
   }
   inner.appendChild(body);
+  // AI Q&A panel (practice mode)
+  const userAns = isMulti ? (selected instanceof Set ? [...selected].sort().join('') : '') : (selected || '');
+  initAIPanel(inner, q, q.si || 0, userAns);
   panel.appendChild(inner);
   return panel;
 }
@@ -2081,6 +2085,7 @@ function toggleFlag() {
 
 function quitQuiz() {
   clearInterval(S.timerInterval);
+  if (typeof clearAICache === 'function') clearAICache();
   if (S.mode === 'exam') {
     if (!confirm('确认退出考试？本次记录不会保存')) {
       const elapsed = Math.floor((Date.now() - S.examStart) / 1000);
@@ -3018,6 +3023,10 @@ function filterReview(type, tabEl) {
           </div>
         </div>
       </div>`;
+
+    // AI Q&A panel (review mode)
+    const aiSlot = item.querySelector('.review-expand-inner');
+    if (aiSlot) initAIPanel(aiSlot, q, q.si || 0, ansDisplay);
 
     item.querySelector('.review-item-head').onclick = () => {
       const el = document.getElementById(`rexp-${i}`);

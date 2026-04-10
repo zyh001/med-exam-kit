@@ -81,3 +81,75 @@ func BuildSubQuestionPrompt(q *models.Question, sq *models.SubQuestion, needAnsw
 %s
 已知答案: %s`, task, outputSchema, answerRule, mode, unit, stem, text, optionsText, known)
 }
+
+// BuildAIChatPrompt creates the system prompt and initial user message for AI Q&A.
+func BuildAIChatPrompt(q *models.Question, sqIdx int, userAnswer string) []ChatMessage {
+	sq := &q.SubQuestions[sqIdx]
+
+	systemPrompt := `你是一位资深的医学考试辅导老师，擅长帮助学生深入理解题目背后的知识点，学生有两次向你提问的机会。
+
+你的任务：
+1. 分析题目的关键考点
+2. 逐项分析每个选项，说明为什么对或错
+3. 给出最终结论和推理过程
+
+要求：
+- 全部使用中文回答，包括思考过程(必要的名词可以使用英文表述)
+- 语言简洁清晰，重点突出
+- 使用医学术语要准确
+- 如果学生选错了，要特别指出其思路中可能的误区
+- 回答格式：考点分析 → 选项逐项解析 → 最终结论`
+
+	// Build the context message
+	var b strings.Builder
+	mode := q.Mode
+	if mode == "" {
+		mode = "未知"
+	}
+	b.WriteString(fmt.Sprintf("题型: %s\n", mode))
+
+	if q.Stem != "" {
+		b.WriteString(fmt.Sprintf("题干: %s\n", q.Stem))
+	}
+	if sq.Text != "" {
+		b.WriteString(fmt.Sprintf("小题: %s\n", sq.Text))
+	}
+
+	// Options
+	effOpts := sq.Options
+	if len(effOpts) == 0 {
+		effOpts = q.SharedOptions
+	}
+	if len(effOpts) > 0 {
+		b.WriteString("选项:\n")
+		b.WriteString(formatOptions(effOpts))
+		b.WriteString("\n")
+	}
+
+	// Correct answer
+	correctAnswer := sq.EffAnswer()
+	if correctAnswer != "" {
+		b.WriteString(fmt.Sprintf("正确答案: %s\n", correctAnswer))
+	}
+
+	// User's answer
+	if userAnswer != "" {
+		b.WriteString(fmt.Sprintf("我的选择: %s\n", userAnswer))
+		if correctAnswer != "" && userAnswer != correctAnswer {
+			b.WriteString("（我选错了）\n")
+		}
+	}
+
+	// Additional context
+	if sq.ErrorProne != "" {
+		b.WriteString(fmt.Sprintf("易错点: %s\n", sq.ErrorProne))
+	}
+	if sq.Point != "" {
+		b.WriteString(fmt.Sprintf("知识点: %s\n", sq.Point))
+	}
+
+	return []ChatMessage{
+		{Role: "system", Content: systemPrompt},
+		{Role: "user", Content: b.String()},
+	}
+}

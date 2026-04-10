@@ -1,7 +1,9 @@
 package ai
 
 import (
+	"bufio"
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -41,6 +43,7 @@ var pureReasoningKeywords = []string{
 }
 
 var hybridThinkingKeywords = []string{
+	"qwen3.6-plus", "qwen3.6-flash", "qwen3.6",
 	"qwen3.5-plus", "qwen3.5-flash", "qwen3.5",
 	"qwen-max", "qwen-plus", "qwen3",
 	"kimi-k2.5",
@@ -73,15 +76,17 @@ func IsHybridThinkingModel(model string) bool {
 
 // Client wraps an OpenAI-compatible API endpoint.
 type Client struct {
-	BaseURL    string
-	APIKey     string
-	Model      string
-	Provider   string
-	HTTPClient *http.Client
+	BaseURL           string
+	APIKey            string
+	Model             string
+	Provider          string
+	HTTPClient        *http.Client
+	StreamHTTPClient  *http.Client // no Timeout; uses context instead
+	EnableThinking    *bool        // nil=auto, true=force on, false=force off
 }
 
 // NewClient creates an API client.
-func NewClient(provider, apiKey, baseURL, model string, timeout float64) *Client {
+func NewClient(provider, apiKey, baseURL, model string, timeout float64, enableThinking *bool) *Client {
 	provider = strings.ToLower(strings.TrimSpace(provider))
 
 	resolvedURL := baseURL
@@ -102,13 +107,13 @@ func NewClient(provider, apiKey, baseURL, model string, timeout float64) *Client
 	}
 
 	return &Client{
-		BaseURL:  resolvedURL,
-		APIKey:   resolvedKey,
-		Model:    resolvedModel,
-		Provider: provider,
-		HTTPClient: &http.Client{
-			Timeout: time.Duration(timeout * float64(time.Second)),
-		},
+		BaseURL:          resolvedURL,
+		APIKey:           resolvedKey,
+		Model:            resolvedModel,
+		Provider:         provider,
+		HTTPClient:       &http.Client{Timeout: time.Duration(timeout * float64(time.Second))},
+		StreamHTTPClient: &http.Client{}, // no Timeout for SSE; relies on context
+		EnableThinking:   enableThinking,
 	}
 }
 
@@ -150,11 +155,20 @@ func (c *Client) ChatCompletion(messages []ChatMessage, temperature float64, max
 	m := strings.ToLower(c.Model)
 	pureR := IsReasoningModel(c.Model)
 	hybrid := IsHybridThinkingModel(c.Model)
+
+	// Determine thinking mode: config override > param > auto-detect
 	useThinking := false
-	if hybrid && enableThinking != nil && *enableThinking {
+	if pureR {
 		useThinking = true
-	} else if pureR {
-		useThinking = true
+	} else if hybrid {
+		// Priority: c.EnableThinking (config) > enableThinking (param) > auto (true for hybrid)
+		if c.EnableThinking != nil {
+			useThinking = *c.EnableThinking
+		} else if enableThinking != nil {
+			useThinking = *enableThinking
+		} else {
+			useThinking = true
+		}
 	}
 
 	// Adapt messages for reasoning models (o1/o3 don't support system role)
@@ -267,6 +281,153 @@ func adaptMessagesForReasoning(messages []ChatMessage) []ChatMessage {
 		userMsgs[0].Content = prefix + "\n\n" + userMsgs[0].Content
 	}
 	return userMsgs
+}
+
+// StreamChunk represents a single chunk of streamed output.
+type StreamChunk struct {
+	Content          string
+	ReasoningContent string
+	Done             bool
+	Err              error
+}
+
+// ChatCompletionStream sends a chat completion request with streaming enabled.
+// It returns a channel that receives chunks as they arrive. The channel is
+// closed when the stream ends (either successfully or on error).
+func (c *Client) ChatCompletionStream(ctx context.Context, messages []ChatMessage, temperature float64, maxTokens int) (<-chan StreamChunk, error) {
+	// Build request body
+	body := map[string]any{
+		"model":    c.Model,
+		"messages": messages,
+		"stream":   true,
+	}
+
+	pureR := IsReasoningModel(c.Model)
+	hybrid := IsHybridThinkingModel(c.Model)
+
+	// Determine thinking mode: config override > auto-detect
+	useThinking := false
+	if pureR {
+		useThinking = true
+	} else if hybrid {
+		if c.EnableThinking != nil {
+			useThinking = *c.EnableThinking
+		} else {
+			useThinking = true
+		}
+	}
+
+	if pureR {
+		body["max_tokens"] = maxTokens
+	} else if hybrid && useThinking {
+		body["temperature"] = 1
+		body["max_tokens"] = maxTokens
+		switch c.Provider {
+		case "kimi":
+			body["thinking"] = map[string]string{"type": "enabled"}
+		case "minimax":
+			body["reasoning_split"] = true
+		default:
+			body["enable_thinking"] = true
+		}
+	} else {
+		body["temperature"] = temperature
+		body["max_tokens"] = maxTokens
+		if hybrid {
+			switch c.Provider {
+			case "kimi":
+				body["thinking"] = map[string]string{"type": "disabled"}
+			case "minimax":
+				body["reasoning_split"] = false
+			default:
+				body["enable_thinking"] = false
+			}
+		}
+	}
+
+	// stream_options for providers that support it (qwen/dashscope)
+	if hybrid && useThinking && c.Provider == "qwen" {
+		body["stream_options"] = map[string]any{"include_usage": true}
+	}
+
+	jsonBody, err := json.Marshal(body)
+	if err != nil {
+		return nil, fmt.Errorf("marshal request: %w", err)
+	}
+
+	url := strings.TrimRight(c.BaseURL, "/") + "/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", "Bearer "+c.APIKey)
+
+	resp, err := c.StreamHTTPClient.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("http request: %w", err)
+	}
+
+	if resp.StatusCode != 200 {
+		respBody, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		return nil, fmt.Errorf("API error %d: %s", resp.StatusCode, truncStr(string(respBody), 300))
+	}
+
+	ch := make(chan StreamChunk, 64)
+
+	go func() {
+		defer close(ch)
+		defer resp.Body.Close()
+
+		scanner := bufio.NewScanner(resp.Body)
+		// Increase scanner buffer for long lines
+		scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+		for scanner.Scan() {
+			line := scanner.Text()
+			// SSE lines start with "data: "
+			if !strings.HasPrefix(line, "data: ") {
+				continue
+			}
+			data := strings.TrimPrefix(line, "data: ")
+			if data == "[DONE]" {
+				ch <- StreamChunk{Done: true}
+				return
+			}
+
+			var sse struct {
+				Choices []struct {
+					Delta struct {
+						Content          string `json:"content"`
+						ReasoningContent string `json:"reasoning_content"`
+					} `json:"delta"`
+				} `json:"choices"`
+			}
+			if err := json.Unmarshal([]byte(data), &sse); err != nil {
+				continue // skip malformed chunks
+			}
+			if len(sse.Choices) > 0 {
+				delta := sse.Choices[0].Delta
+				if delta.Content != "" || delta.ReasoningContent != "" {
+					select {
+					case ch <- StreamChunk{Content: delta.Content, ReasoningContent: delta.ReasoningContent}:
+					case <-ctx.Done():
+						ch <- StreamChunk{Done: true}
+						return
+					}
+				}
+			}
+		}
+
+		if err := scanner.Err(); err != nil && ctx.Err() == nil {
+			ch <- StreamChunk{Err: err}
+		} else {
+			ch <- StreamChunk{Done: true}
+		}
+	}()
+
+	return ch, nil
 }
 
 func truncStr(s string, n int) string {

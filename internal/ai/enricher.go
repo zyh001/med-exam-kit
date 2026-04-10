@@ -287,7 +287,7 @@ func taskID(q *models.Question, qi, si int) string {
 // ── Process ──
 
 func (e *BankEnricher) process(pending []Task, questions []*models.Question) {
-	client := NewClient(e.cfg.Provider, e.cfg.APIKey, e.cfg.BaseURL, e.cfg.Model, e.cfg.Timeout)
+	client := NewClient(e.cfg.Provider, e.cfg.APIKey, e.cfg.BaseURL, e.cfg.Model, e.cfg.Timeout, nil)
 
 	total := len(pending)
 	var success, failed int64
