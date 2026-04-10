@@ -230,6 +230,10 @@ function saveExamSession() {
     modeGroups:    S.modeGroups,
     currentGroupIdx: S.currentGroupIdx,
     caseMaxReached:  S.caseMaxReached,
+    // 保存计分配置，确保刷新恢复后的分享也能带上正确的配置
+    scoring:        !!CFG.scoring,
+    scorePerMode:   CFG.scorePerMode   || {},
+    multiScoreMode: CFG.multiScoreMode || 'strict',
   };
   try {
     localStorage.setItem(examSessionKey(), JSON.stringify(session));
@@ -325,6 +329,12 @@ function restoreSession() {
   S.examLimit        = s.examLimit;
   S.revealed         = new Set();
   S.cur              = s.cur ?? 0;
+  // 恢复计分配置（如果 session 内存的话）
+  if (s.scoring != null)      CFG.scoring        = !!s.scoring;
+  if (s.scorePerMode)         CFG.scorePerMode   = s.scorePerMode;
+  if (s.multiScoreMode)       CFG.multiScoreMode = s.multiScoreMode;
+  // 同步 CFG.examTime，使后续"重新考"的默认时间也一致
+  if (S.examLimit) CFG.examTime = Math.round(S.examLimit / 60);
   // examStart 反推，让计时器正确
   S.examStart        = Date.now() - (S.examLimit - remaining) * 1000;
 
@@ -3214,20 +3224,33 @@ function practiceSessionWrong() {
 
 /** 分享试卷（生成分享链接） */
 async function shareExam() {
-  return _doShareExam(S.results && S.results.qs ? S.results.qs : null);
+  // 结果页入口：从 S.results 读取（历史记录打开也走这里）
+  const R = S.results;
+  if (!R || !R.qs || !R.qs.length) { toast('没有可分享的题目'); return; }
+  return _doShareExam(R.qs, {
+    mode:           R.mode,
+    timeLimit:      R.timeLimit || S.examLimit || CFG.examTime * 60,
+    scoring:        (R.scoring != null) ? R.scoring : CFG.scoring,
+    scorePerMode:   R.scorePerMode   || CFG.scorePerMode   || {},
+    multiScoreMode: R.multiScoreMode || CFG.multiScoreMode || 'strict',
+  });
 }
 
 /** 从考试/练习进行中分享当前试卷（顶部按钮） */
 async function shareCurrentQuiz() {
-  // 优先用 S.questions（正在做题），否则 fallback 到 S.results.qs
-  const qs = (S.questions && S.questions.length) ? S.questions
-           : (S.results && S.results.qs) ? S.results.qs : null;
-  return _doShareExam(qs);
+  // 进行中入口：只读取实时状态，绝不回退到 S.results（可能是上一场考试的残留）
+  if (!S.questions || !S.questions.length) { toast('没有可分享的题目'); return; }
+  return _doShareExam(S.questions, {
+    mode:           S.mode,
+    timeLimit:      S.examLimit || CFG.examTime * 60,
+    scoring:        !!CFG.scoring,
+    scorePerMode:   CFG.scorePerMode   || {},
+    multiScoreMode: CFG.multiScoreMode || 'strict',
+  });
 }
 
-async function _doShareExam(qs) {
+async function _doShareExam(qs, opts) {
   if (!qs || !qs.length) { toast('没有可分享的题目'); return; }
-  const R = S.results || {};
   const fps = qs.map(q => q.fingerprint).filter(Boolean);
   if (!fps.length) { toast('题目缺少标识，无法分享'); return; }
   // 精确到小题级别：fingerprint:si 组合，避免服务端把 A3/案例分析的同一题干下
@@ -3236,14 +3259,8 @@ async function _doShareExam(qs) {
     .filter(q => q.fingerprint != null)
     .map(q => q.fingerprint + ':' + (q.si != null ? q.si : 0));
   try {
-    // 根据当前模式判断分享模式
-    const curMode = S.mode || R.mode || 'exam';
+    const curMode = opts.mode || 'exam';
     const shareMode = (curMode === 'exam' || curMode === 'exam_done') ? 'exam' : (curMode || 'exam');
-    const shareTimeLimit = R.timeLimit || S.examLimit || CFG.examTime * 60;
-    // 计分配置优先从 R（考试结果）读取，从历史记录打开也能正确分享
-    const shareScoring        = (R.scoring != null) ? R.scoring : CFG.scoring;
-    const shareScorePerMode   = R.scorePerMode   || CFG.scorePerMode   || {};
-    const shareMultiScoreMode = R.multiScoreMode || CFG.multiScoreMode || 'strict';
     const res = await apiFetch('/api/exam/share?' + bankQS(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -3251,10 +3268,10 @@ async function _doShareExam(qs) {
         fingerprints:     fps,
         sub_ids:          subIds,
         mode:             shareMode,
-        time_limit:       shareTimeLimit,
-        scoring:          shareScoring,
-        score_per_mode:   shareScorePerMode,
-        multi_score_mode: shareMultiScoreMode,
+        time_limit:       opts.timeLimit,
+        scoring:          opts.scoring,
+        score_per_mode:   opts.scorePerMode,
+        multi_score_mode: opts.multiScoreMode,
       }),
     });
     const d = await res.json();
