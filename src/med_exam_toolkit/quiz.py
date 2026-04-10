@@ -1,5 +1,6 @@
 from __future__ import annotations
 import json as _json
+import math
 import random
 import secrets
 import socket
@@ -1083,6 +1084,173 @@ def api_push_test():
             failed += 1
 
     return jsonify({"ok": True, "sent": sent, "failed": failed, "removed": removed})
+
+
+@app.post("/api/calculate")
+def api_calculate():
+    """服务端科学计算器 — 递归下降表达式解析器。"""
+    data = request.get_json(silent=True) or {}
+    expr = data.get("expr", "")
+    deg = data.get("deg", True)
+    result = _calc_evaluate(expr, deg)
+    return jsonify({"result": result})
+
+
+# ── 递归下降表达式解析器 ──────────────────────────────────────────────
+
+class _CalcParser:
+    def __init__(self, src: str, deg: bool):
+        self.src = src
+        self.pos = 0
+        self.deg = deg
+
+    def ws(self):
+        while self.pos < len(self.src) and self.src[self.pos] == ' ':
+            self.pos += 1
+
+    def try_match(self, s: str) -> bool:
+        self.ws()
+        if self.src[self.pos:self.pos + len(s)] == s:
+            self.pos += len(s)
+            return True
+        return False
+
+    def peek(self) -> str:
+        self.ws()
+        return self.src[self.pos] if self.pos < len(self.src) else ''
+
+    def parse_expr(self) -> float:
+        v = self.parse_mul_div()
+        while True:
+            self.ws()
+            if self.pos >= len(self.src):
+                break
+            if self.src[self.pos] == '+':
+                self.pos += 1; v += self.parse_mul_div()
+            elif self.src[self.pos] == '-':
+                self.pos += 1; v -= self.parse_mul_div()
+            else:
+                break
+        return v
+
+    def parse_mul_div(self) -> float:
+        v = self.parse_pow()
+        while True:
+            self.ws()
+            if self.pos >= len(self.src):
+                break
+            if self.src[self.pos] == '*' and (self.pos + 1 >= len(self.src) or self.src[self.pos + 1] != '*'):
+                self.pos += 1; v *= self.parse_pow()
+            elif self.src[self.pos] == '/':
+                self.pos += 1; v /= self.parse_pow()
+            else:
+                break
+        return v
+
+    def parse_pow(self) -> float:
+        b = self.parse_unary()
+        self.ws()
+        if self.pos < len(self.src) and self.src[self.pos] == '^':
+            self.pos += 1
+            b = math.pow(b, self.parse_pow())
+        elif self.pos + 1 < len(self.src) and self.src[self.pos:self.pos + 2] == '**':
+            self.pos += 2
+            b = math.pow(b, self.parse_pow())
+        return b
+
+    def parse_unary(self) -> float:
+        self.ws()
+        if self.pos < len(self.src) and self.src[self.pos] == '-':
+            self.pos += 1; return -self.parse_postfix()
+        if self.pos < len(self.src) and self.src[self.pos] == '+':
+            self.pos += 1
+        return self.parse_postfix()
+
+    def parse_postfix(self) -> float:
+        v = self.parse_atom()
+        self.ws()
+        while self.pos < len(self.src) and self.src[self.pos] == '!':
+            self.pos += 1
+            v = _factorial(v)
+        return v
+
+    def parse_atom(self) -> float:
+        self.ws()
+        for fn in ('asin', 'acos', 'atan', 'sqrt', 'sin', 'cos', 'tan', 'lg', 'ln'):
+            if self.try_match(fn + '('):
+                a = self.parse_expr()
+                if self.pos < len(self.src) and self.src[self.pos] == ')':
+                    self.pos += 1
+                return self._apply_func(fn, a)
+        if self.try_match('10^'):
+            return math.pow(10, self.parse_unary())
+        if self.try_match('e^'):
+            return math.exp(self.parse_unary())
+        if self.peek() == '(':
+            self.pos += 1
+            v = self.parse_expr()
+            if self.pos < len(self.src) and self.src[self.pos] == ')':
+                self.pos += 1
+            return v
+        # number
+        start = self.pos
+        if self.pos < len(self.src) and self.src[self.pos] in '-+':
+            self.pos += 1
+        while self.pos < len(self.src) and (self.src[self.pos].isdigit() or self.src[self.pos] == '.'):
+            self.pos += 1
+        # scientific notation
+        if self.pos < len(self.src) and self.src[self.pos] in 'eE':
+            self.pos += 1
+            if self.pos < len(self.src) and self.src[self.pos] in '+-':
+                self.pos += 1
+            while self.pos < len(self.src) and self.src[self.pos].isdigit():
+                self.pos += 1
+        if self.pos == start:
+            raise ValueError('unexpected token')
+        return float(self.src[start:self.pos])
+
+    def _apply_func(self, fn: str, a: float) -> float:
+        to_rad = lambda x: math.radians(x) if self.deg else x
+        from_rad = lambda x: math.degrees(x) if self.deg else x
+        funcs = {
+            'sin': lambda: math.sin(to_rad(a)),
+            'cos': lambda: math.cos(to_rad(a)),
+            'tan': lambda: math.tan(to_rad(a)),
+            'asin': lambda: from_rad(math.asin(a)),
+            'acos': lambda: from_rad(math.acos(a)),
+            'atan': lambda: from_rad(math.atan(a)),
+            'sqrt': lambda: math.sqrt(a),
+            'lg': lambda: math.log10(a),
+            'ln': lambda: math.log(a),
+        }
+        return funcs.get(fn, lambda: float('nan'))()
+
+
+def _factorial(n: float) -> float:
+    if n < 0 or n != math.floor(n) or n > 170:
+        return float('nan')
+    r = 1.0
+    for i in range(2, int(n) + 1):
+        r *= i
+    return r
+
+
+def _calc_evaluate(raw: str, deg: bool) -> str:
+    try:
+        import re
+        s = raw.replace('×', '*').replace('÷', '/').replace('−', '-')
+        s = s.replace('π', f'({math.pi})').replace('%', '/100')
+        # standalone e constant
+        s = re.sub(r'(?<![a-zA-Z])e(?!\^)(?![a-zA-Z])', f'({math.e})', s)
+        p = _CalcParser(s, deg)
+        val = p.parse_expr()
+        if math.isinf(val):
+            return '∞' if val > 0 else '-∞'
+        if math.isnan(val):
+            return 'Error'
+        return f'{val:.12g}'
+    except Exception:
+        return 'Error'
 
 
 @app.get("/sw.js")

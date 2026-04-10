@@ -396,10 +396,15 @@
         <div class="config-section">
           <div class="config-section-label">考试时长（分钟）</div>
           <div class="chip-wrap" id="time-chips">
+            <button class="chip exam-chip" data-val="30"  onclick="selectTime(this,30)">30分钟</button>
+            <button class="chip exam-chip" data-val="45"  onclick="selectTime(this,45)">45分钟</button>
             <button class="chip exam-chip" data-val="60"  onclick="selectTime(this,60)">60分钟</button>
             <button class="chip exam-chip active" data-val="90" onclick="selectTime(this,90)">90分钟</button>
             <button class="chip exam-chip" data-val="120" onclick="selectTime(this,120)">120分钟</button>
             <button class="chip exam-chip" data-val="150" onclick="selectTime(this,150)">150分钟</button>
+            <button class="chip exam-chip" data-val="180" onclick="selectTime(this,180)">180分钟</button>
+            <button class="chip exam-chip" data-val="210" onclick="selectTime(this,210)">210分钟</button>
+            <button class="chip exam-chip" data-val="240" onclick="selectTime(this,240)">240分钟</button>
           </div>
         </div>
       </div>
@@ -470,6 +475,8 @@
         </div>
       </div>
     </div>
+    <!-- 考试模式浮动计算器按钮 -->
+    <button class="calc-fab" id="calc-toggle-btn" onclick="toggleCalc()" title="计算器" style="display:none">🧮</button>
     <div class="quiz-footer" id="quiz-footer">
       <button class="nav-btn" id="btn-prev" onclick="prevQ()">← 上题</button>
       <button class="nav-btn primary" id="btn-next" onclick="nextOrSubmit()">下一题 →</button>
@@ -650,6 +657,84 @@
       <div class="gtm-btns">
         <button class="gtm-btn cancel" onclick="dismissGroupModal()">暂不切换</button>
         <button class="gtm-btn confirm" onclick="confirmGroupModal()">确认进入 →</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 计算器弹窗 ═══ -->
+  <div class="modal-backdrop" id="calc-modal" style="display:none"
+       onclick="if(event.target===this)toggleCalc()">
+    <div class="calc-box">
+      <div class="calc-header">
+        <span class="calc-title">计算器</span>
+        <div class="calc-mode-switch">
+          <button class="calc-mode-btn active" id="calc-mode-simple" onclick="setCalcMode('simple')">简易</button>
+          <button class="calc-mode-btn" id="calc-mode-sci" onclick="setCalcMode('sci')">科学</button>
+        </div>
+        <button class="calc-close" onclick="toggleCalc()">✕</button>
+      </div>
+      <div class="calc-display">
+        <div class="calc-expr" id="calc-expr"></div>
+        <div class="calc-result" id="calc-result">0</div>
+      </div>
+      <div class="calc-keys simple" id="calc-keys-simple">
+        <button class="ck fn" onclick="calcAC()">AC</button>
+        <button class="ck fn" onclick="calcDel()">⌫</button>
+        <button class="ck fn" onclick="calcOp('%')">%</button>
+        <button class="ck op" onclick="calcOp('÷')">÷</button>
+        <button class="ck" onclick="calcDigit('7')">7</button>
+        <button class="ck" onclick="calcDigit('8')">8</button>
+        <button class="ck" onclick="calcDigit('9')">9</button>
+        <button class="ck op" onclick="calcOp('×')">×</button>
+        <button class="ck" onclick="calcDigit('4')">4</button>
+        <button class="ck" onclick="calcDigit('5')">5</button>
+        <button class="ck" onclick="calcDigit('6')">6</button>
+        <button class="ck op" onclick="calcOp('-')">−</button>
+        <button class="ck" onclick="calcDigit('1')">1</button>
+        <button class="ck" onclick="calcDigit('2')">2</button>
+        <button class="ck" onclick="calcDigit('3')">3</button>
+        <button class="ck op" onclick="calcOp('+')">+</button>
+        <button class="ck fn" onclick="calcCopyResult()">📋</button>
+        <button class="ck" onclick="calcDigit('0')">0</button>
+        <button class="ck" onclick="calcDigit('.')">.</button>
+        <button class="ck eq" onclick="calcEval()">=</button>
+      </div>
+      <div class="calc-keys sci" id="calc-keys-sci" style="display:none">
+        <button class="ck fn sc" id="calc-2nd" onclick="calc2nd()">2nd</button>
+        <button class="ck fn sc" id="calc-deg" onclick="calcToggleDeg()">deg</button>
+        <button class="ck fn sc" id="calc-sin" onclick="calcFunc('sin')">sin</button>
+        <button class="ck fn sc" id="calc-cos" onclick="calcFunc('cos')">cos</button>
+        <button class="ck fn sc" id="calc-tan" onclick="calcFunc('tan')">tan</button>
+        <button class="ck fn sc" onclick="calcPow()">x<sup>y</sup></button>
+        <button class="ck fn sc" id="calc-lg" onclick="calcFunc('lg')">lg</button>
+        <button class="ck fn sc" id="calc-ln" onclick="calcFunc('ln')">ln</button>
+        <button class="ck fn sc" onclick="calcOp('(')">(</button>
+        <button class="ck fn sc" onclick="calcOp(')')">)</button>
+        <button class="ck fn sc" onclick="calcFunc('√')">√x</button>
+        <button class="ck fn" onclick="calcAC()">AC</button>
+        <button class="ck fn" onclick="calcDel()">⌫</button>
+        <button class="ck fn" onclick="calcOp('%')">%</button>
+        <button class="ck op" onclick="calcOp('÷')">÷</button>
+        <button class="ck fn sc" onclick="calcFunc('!')">x!</button>
+        <button class="ck" onclick="calcDigit('7')">7</button>
+        <button class="ck" onclick="calcDigit('8')">8</button>
+        <button class="ck" onclick="calcDigit('9')">9</button>
+        <button class="ck op" onclick="calcOp('×')">×</button>
+        <button class="ck fn sc" onclick="calcFunc('1/x')">1/x</button>
+        <button class="ck" onclick="calcDigit('4')">4</button>
+        <button class="ck" onclick="calcDigit('5')">5</button>
+        <button class="ck" onclick="calcDigit('6')">6</button>
+        <button class="ck op" onclick="calcOp('-')">−</button>
+        <button class="ck fn sc" onclick="calcConst('π')">π</button>
+        <button class="ck" onclick="calcDigit('1')">1</button>
+        <button class="ck" onclick="calcDigit('2')">2</button>
+        <button class="ck" onclick="calcDigit('3')">3</button>
+        <button class="ck op" onclick="calcOp('+')">+</button>
+        <button class="ck fn sc" onclick="calcConst('e')">e</button>
+        <button class="ck fn sc" onclick="calcCopyResult()">📋</button>
+        <button class="ck" onclick="calcDigit('0')">0</button>
+        <button class="ck" onclick="calcDigit('.')">.</button>
+        <button class="ck eq" onclick="calcEval()">=</button>
       </div>
     </div>
   </div>
