@@ -3189,11 +3189,11 @@ async function shareExam() {
   const fps = R.qs.map(q => q.fingerprint).filter(Boolean);
   if (!fps.length) { toast('题目缺少标识，无法分享'); return; }
   try {
+    // exam_done 是前端内部状态，分享时统一用 'exam'（练习模式用 'practice'）
+    const shareMode = (R.mode === 'exam' || R.mode === 'exam_done') ? 'exam' : (R.mode || 'exam');
     const res = await apiFetch('/api/exam/share?' + bankQS(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      // exam_done 是前端内部状态，分享时统一用 'exam'（练习模式用 'practice'）
-      const shareMode = (R.mode === 'exam' || R.mode === 'exam_done') ? 'exam' : (R.mode || 'exam');
       body: JSON.stringify({
         fingerprints:     fps,
         mode:             shareMode,
