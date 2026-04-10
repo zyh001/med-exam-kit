@@ -130,6 +130,7 @@ type examSession struct {
 
 type shareConfig struct {
 	Fingerprints   []string               `json:"fingerprints"`
+	SubIds         []string               `json:"sub_ids"`        // "fingerprint:si" pairs for sub-question precision
 	Mode           string                 `json:"mode"`
 	BankIdx        int                    `json:"bank_idx"`
 	TimeLimit      int                    `json:"time_limit"`    // seconds
@@ -1414,6 +1415,7 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 	}
 	var body struct {
 		Fingerprints   []string               `json:"fingerprints"`
+		SubIds         []string               `json:"sub_ids"`
 		Mode           string                 `json:"mode"`
 		TimeLimit      int                    `json:"time_limit"`
 		Scoring        bool                   `json:"scoring"`
@@ -1441,6 +1443,7 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 
 	cfg := &shareConfig{
 		Fingerprints:   body.Fingerprints,
+		SubIds:         body.SubIds,
 		Mode:           body.Mode,
 		BankIdx:        bankIdx,
 		TimeLimit:      timeLimit,
@@ -1540,6 +1543,24 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 	for _, fp := range cfg.Fingerprints { fpSet[fp] = struct{}{} }
 	rows, _ := selectQuestions(b.Questions, selectOpts{fpSet: fpSet})
 	if rows == nil { rows = []sqFlat{} }
+
+	// 精确过滤到小题级别：若分享时提供了 sub_ids（"fingerprint:si" 对），
+	// 只保留接收端明确指定的那些小题，防止服务端自动把同一题干下所有小题
+	// 全部还原（导致 220 → 221 等多出题目的情况）。
+	if len(cfg.SubIds) > 0 {
+		allowed := make(map[string]struct{}, len(cfg.SubIds))
+		for _, id := range cfg.SubIds {
+			allowed[id] = struct{}{}
+		}
+		filtered := make([]sqFlat, 0, len(rows))
+		for _, row := range rows {
+			key := row.Fingerprint + ":" + strconv.Itoa(row.SI)
+			if _, ok := allowed[key]; ok {
+				filtered = append(filtered, row)
+			}
+		}
+		rows = filtered
+	}
 
 	// sealed 模式：剥离答案，服务端暂存。
 	// exam_done 是前端交卷后的内部状态，功能上等同于 exam，同样需要密封答案。
