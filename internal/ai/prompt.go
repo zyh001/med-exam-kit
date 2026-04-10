@@ -99,7 +99,8 @@ func BuildAIChatPrompt(q *models.Question, sqIdx int, userAnswer string) []ChatM
 - 使用医学术语要准确
 - 如果学生选错了，要特别指出其思路中可能的误区
 - 回答格式：考点分析 → 选项逐项解析 → 最终结论
-- 使用标准 Markdown 格式输出`
+- 使用标准 Markdown 格式输出
+- 不要使用 Markdown 表格，用列表代替（表格在移动端显示效果差）`
 
 	// Build the context message
 	var b strings.Builder
