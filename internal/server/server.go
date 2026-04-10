@@ -57,10 +57,10 @@ type shareStorer interface {
 type pgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
 	RecordSessionsBatch(ctx context.Context, sessions []map[string]any, userID string) (processed, skipped []string)
-	GetOverallStats(ctx context.Context, userID string, bankID int) store.OverallStats
+	GetOverallStats(ctx context.Context, userID string, bankID int, clientDate string) store.OverallStats
 	GetUnitStats(ctx context.Context, userID string, bankID int) []store.UnitStat
 	GetWrongFingerprints(ctx context.Context, userID string, bankID int, limit int) []store.WrongEntry
-	GetDueFingerprints(ctx context.Context, userID string, bankID int) []string
+	GetDueFingerprints(ctx context.Context, userID string, bankID int, clientDate string) []string
 	GetHistory(ctx context.Context, userID string, bankID int, limit int) []store.HistoryEntry
 	GetSyncStatus(ctx context.Context, userID string, bankID int) map[string]any
 	ClearUserData(ctx context.Context, userID string, bankID int) map[string]int
@@ -640,6 +640,7 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 			answers[rows[i].Fingerprint] = examAnswer{Answer: rows[i].Answer, Discuss: rows[i].Discuss}
 			rows[i].Answer = ""
 			rows[i].Discuss = ""
+			rows[i].Unit = "" // 考试模式隐藏章节信息，防止泄露提示
 		}
 		s.examMu.Lock()
 		// 清理超过 24h 的旧 session（简单 LRU）
@@ -1187,7 +1188,8 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 	uid := getUserID(r)
 	ctx := r.Context()
 	if b.PgStore != nil {
-		ov := b.PgStore.GetOverallStats(ctx, uid, b.BankID)
+		clientDate := r.URL.Query().Get("date")
+		ov := b.PgStore.GetOverallStats(ctx, uid, b.BankID, clientDate)
 		accuracy := 0
 		if ov.Attempts > 0 { accuracy = int(math.Round(float64(ov.Correct)/float64(ov.Attempts)*100)) }
 		wrongTopics := len(b.PgStore.GetWrongFingerprints(ctx, uid, b.BankID, 10000))
@@ -1228,7 +1230,7 @@ func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
 	// e.g. users in UTC+8 would see no due items until 8AM if server uses UTC.
 	clientDate := r.URL.Query().Get("date")
 	if b.PgStore != nil {
-		jsonOK(w, map[string]any{"fingerprints": b.PgStore.GetDueFingerprints(r.Context(), uid, b.BankID)})
+		jsonOK(w, map[string]any{"fingerprints": b.PgStore.GetDueFingerprints(r.Context(), uid, b.BankID, clientDate)})
 		return
 	}
 	if b.DB == nil {
@@ -2425,7 +2427,7 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 			QuestionCount: len(b.Questions),
 		}
 		if b.PgStore != nil {
-			ov := b.PgStore.GetOverallStats(ctx, uid, b.BankID)
+			ov := b.PgStore.GetOverallStats(ctx, uid, b.BankID, "")
 			info.Sessions      = ov.Sessions
 			info.Attempts      = ov.Attempts
 			info.WrongAttempts = ov.Wrong
