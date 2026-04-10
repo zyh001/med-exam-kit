@@ -58,55 +58,127 @@ const inlineMathExt = {
   }
 };
 
-// Configure marked for medical content + LaTeX math
+// ── CJK-aware emphasis extensions ────────────────────────────────
+// CommonMark's "flanking delimiter" rules require closing ** followed
+// by non-whitespace non-punctuation (e.g. CJK chars) to also be
+// left-flanking, which fails when ** is preceded by punctuation like
+// full-width parens ）. These extensions handle it explicitly.
+
+const cjkStrongExt = {
+  name: 'cjkStrong',
+  level: 'inline',
+  start(src) { return src.indexOf('**'); },
+  tokenizer(src) {
+    // Match **...** that the built-in tokenizer might miss with CJK
+    const m = src.match(/^\*\*((?:[^*]|\*(?!\*))+)\*\*/);
+    if (m) return { type: 'cjkStrong', raw: m[0], text: m[1] };
+  },
+  renderer(token) {
+    if (this.parser && this.parser.parseInline) {
+      return '<strong>' + this.parser.parseInline(token.text) + '</strong>';
+    }
+    return '<strong>' + token.text + '</strong>';
+  }
+};
+
+const cjkEmExt = {
+  name: 'cjkEm',
+  level: 'inline',
+  start(src) {
+    // Only match single * not preceded by another *
+    const idx = src.indexOf('*');
+    if (idx >= 0 && src[idx + 1] !== '*' && (idx === 0 || src[idx - 1] !== '*')) return idx;
+    return -1;
+  },
+  tokenizer(src) {
+    const m = src.match(/^\*([^*]+?)\*/);
+    if (m) return { type: 'cjkEm', raw: m[0], text: m[1] };
+  },
+  renderer(token) {
+    if (this.parser && this.parser.parseInline) {
+      return '<em>' + this.parser.parseInline(token.text) + '</em>';
+    }
+    return '<em>' + token.text + '</em>';
+  }
+};
+
+// Configure marked for medical content + LaTeX math + CJK emphasis
 if (typeof marked !== 'undefined') {
   marked.use({
     breaks: true,
     gfm: true,
-    extensions: [blockMathExt, inlineMathExt],
+    extensions: [blockMathExt, inlineMathExt, cjkStrongExt, cjkEmExt],
   });
 }
 
 // ── Streaming renderer ─────────────────────────────────────────────
-// Strategy: re-render full markdown on each chunk so the user sees
-// formatted content in real-time. A blinking cursor is re-attached
-// after each render to indicate streaming is still in progress.
+// Dual-buffer strategy for ultra-smooth "progress bar" text flow:
+//
+// Characters drip from pending → committed via requestAnimationFrame.
+// Between periodic markdown re-renders, new chars are appended to a
+// raw text node at the end of the container — this avoids costly
+// innerHTML rewrites on every frame and produces buttery-smooth output.
+// The full markdown is re-rendered at intervals (RENDER_INTERVAL_MS)
+// or on structural boundaries (newlines) to keep formatting up-to-date.
 
 /**
  * Create a streaming renderer attached to a container + cursor.
- * - push(chunk): accumulate text, re-render markdown, attach cursor
- * - flush():    final render without cursor
+ * - push(chunk): accumulate text, schedule drip animation
+ * - flush():    final render of all remaining text
  */
 function makeStreamingRenderer(container, cursor) {
-  let committed = '';   // text already rendered
-  let pending = '';     // text waiting to be dripped in
+  let committed = '';           // text fed into renderer so far
+  let pending = '';             // text waiting to drip in
   let rafId = null;
-  // Characters to release per animation frame (~60fps).
-  // 3 chars/frame ≈ 180 chars/sec — fast enough to keep up with most
-  // streaming speeds while still looking smooth and "flowy".
-  const CHARS_PER_FRAME = 3;
+  let lastRenderLen = 0;        // committed.length at last full markdown render
+  let lastRenderTime = 0;       // timestamp of last full render
+  let tailNode = null;          // text node for fast inter-render appends
 
-  function renderMarkdown(text, withCursor) {
+  const CHARS_PER_FRAME = 3;
+  const RENDER_INTERVAL_MS = 80; // re-render markdown at most every 80ms
+
+  function fullRender(withCursor) {
     let html;
     if (typeof marked !== 'undefined' && marked.parse) {
-      try { html = marked.parse(text, { async: false }); } catch (e) { html = esc(text); }
+      try { html = marked.parse(committed, { async: false }); } catch (e) { html = esc(committed); }
     } else {
-      html = '<pre>' + esc(text) + '</pre>';
+      html = '<pre>' + esc(committed) + '</pre>';
     }
     container.innerHTML = html;
+    tailNode = null;
+    lastRenderLen = committed.length;
+    lastRenderTime = performance.now();
     if (withCursor && cursor) container.appendChild(cursor);
   }
 
   function drip() {
-    if (pending.length === 0) {
-      rafId = null;
-      return;
-    }
-    // Move a small slice from pending → committed
+    if (pending.length === 0) { rafId = null; return; }
+
     const slice = pending.slice(0, CHARS_PER_FRAME);
     pending = pending.slice(CHARS_PER_FRAME);
     committed += slice;
-    renderMarkdown(committed, true);
+
+    const now = performance.now();
+    const elapsed = now - lastRenderTime;
+    const delta = committed.length - lastRenderLen;
+
+    // Full markdown re-render on structural boundaries or timer
+    if (elapsed > RENDER_INTERVAL_MS || slice.includes('\n') || delta > 60) {
+      fullRender(true);
+    } else {
+      // Fast path: append raw text to avoid full DOM rebuild
+      if (!tailNode) {
+        tailNode = document.createTextNode('');
+        if (cursor && cursor.parentNode === container) {
+          container.insertBefore(tailNode, cursor);
+        } else {
+          container.appendChild(tailNode);
+          if (cursor) container.appendChild(cursor);
+        }
+      }
+      tailNode.textContent += slice;
+    }
+
     scrollMessages(container.parentElement || container);
     rafId = requestAnimationFrame(drip);
   }
@@ -122,7 +194,7 @@ function makeStreamingRenderer(container, cursor) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     committed += pending;
     pending = '';
-    renderMarkdown(committed, false);
+    fullRender(false);
   }
 
   return { push, flush };
