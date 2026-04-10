@@ -48,6 +48,12 @@ _cookie_secret: str  = ""
 _pin_enabled:   bool = True
 _pin_len:       int  = 8
 
+# ── AI 答疑 ──
+_ai_client:   "object | None" = None
+_ai_model:    str  = ""
+_ai_provider: str  = ""
+_ai_enable_thinking: "bool | None" = None
+
 # ── 速率限制 ──
 _RATE_LIMIT  = 120
 _RATE_WINDOW = 60
@@ -768,6 +774,7 @@ def api_info():
         "unit_counts":    dict(uc),
         "unit_sq":        unit_sq,
         "unit_mode_sq":   unit_mode_sq,
+        "ai_enabled":     _ai_client is not None,
     })
 
 
@@ -1317,6 +1324,68 @@ def auth():
 
 
 # ════════════════════════════════════════════
+# API — AI 答疑（流式）
+# ════════════════════════════════════════════
+
+@app.post("/api/ai/chat")
+def api_ai_chat():
+    if _ai_client is None:
+        return jsonify({"error": "AI 功能未配置"}), 503
+
+    data = request.get_json(silent=True) or {}
+    fingerprint = data.get("fingerprint", "")
+    sq_index    = int(data.get("sq_index", 0))
+    bank_idx    = int(data.get("bank", 0))
+    user_answer = data.get("user_answer", "")
+    history     = data.get("history", [])
+
+    # Look up question
+    if bank_idx < 0 or bank_idx >= len(_banks):
+        bank_idx = 0
+    question = None
+    for b in _banks:
+        for q in b.questions:
+            if q.fingerprint == fingerprint:
+                question = q
+                break
+        if question:
+            break
+    if question is None:
+        return jsonify({"error": "题目未找到"}), 404
+    if sq_index < 0 or sq_index >= len(question.sub_questions):
+        return jsonify({"error": "小题索引无效"}), 400
+
+    from med_exam_toolkit.ai.prompt import build_ai_chat_prompt
+    from med_exam_toolkit.ai.client import chat_completion_stream
+
+    messages = build_ai_chat_prompt(question, sq_index, user_answer)
+    if history:
+        messages.extend(history)
+
+    def generate():
+        for chunk in chat_completion_stream(
+            client=_ai_client,
+            model=_ai_model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=2048,
+            enable_thinking=_ai_enable_thinking,
+            provider=_ai_provider,
+        ):
+            if chunk.get("done"):
+                yield "data: [DONE]\n\n"
+                return
+            if chunk.get("error"):
+                yield f"data: {_json.dumps({'error': chunk['error']})}\n\n"
+                return
+            yield f"data: {_json.dumps({'content': chunk.get('content', ''), 'reasoning': chunk.get('reasoning', '')})}\n\n"
+
+    from flask import Response
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+# ════════════════════════════════════════════
 # 启动函数
 # ════════════════════════════════════════════
 
@@ -1329,6 +1398,11 @@ def start_quiz(
     no_record:  bool = False,
     no_pin:     bool = False,
     pin:        str | None = None,
+    ai_provider: str = "",
+    ai_model:    str = "",
+    ai_api_key:  str = "",
+    ai_base_url: str = "",
+    ai_thinking: bool | None = None,
 ) -> None:
     """启动医考练习 Web 应用（支持多题库）。
 
@@ -1341,7 +1415,8 @@ def start_quiz(
 
     global _banks, _session_token, _asset_ver, \
            _server_port, _server_host, \
-           _access_code, _cookie_secret, _pin_enabled, _pin_len
+           _access_code, _cookie_secret, _pin_enabled, _pin_len, \
+           _ai_client, _ai_model, _ai_provider, _ai_enable_thinking
 
     # 兼容旧的单路径传参
     if isinstance(bank_paths, (str, Path)):
@@ -1352,6 +1427,27 @@ def start_quiz(
     _session_token  = secrets.token_hex(32)
     _asset_ver      = secrets.token_hex(8)
     _pin_enabled    = not no_pin or bool(pin)
+
+    # ── AI 答疑初始化 ──
+    _ai_client = None
+    _ai_model  = ""
+    _ai_provider = ""
+    _ai_enable_thinking = ai_thinking
+    if ai_provider and ai_api_key:
+        try:
+            from med_exam_toolkit.ai.client import make_client, default_model
+            _ai_provider = ai_provider
+            _ai_model    = ai_model or default_model(ai_provider)
+            _ai_client   = make_client(
+                provider=ai_provider,
+                api_key=ai_api_key,
+                base_url=ai_base_url,
+                model=_ai_model,
+            )
+            print(f"[INFO] AI 答疑已启用: provider={ai_provider}  model={_ai_model}")
+        except Exception as e:
+            print(f"[WARN] AI 答疑初始化失败: {e}")
+            _ai_client = None
 
     from med_exam_toolkit.auth import generate_access_code, derive_secret
     if pin:

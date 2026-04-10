@@ -2011,6 +2011,9 @@ function buildExplain(q, selected) {
     body.innerHTML = '<span style="color:var(--muted)">暂无解析</span>';
   }
   inner.appendChild(body);
+  // AI Q&A panel (practice mode)
+  const userAns = isMulti ? (selected instanceof Set ? [...selected].sort().join('') : '') : (selected || '');
+  initAIPanel(inner, q, q.si || 0, userAns);
   panel.appendChild(inner);
   return panel;
 }
@@ -3022,6 +3025,10 @@ function filterReview(type, tabEl) {
           </div>
         </div>
       </div>`;
+
+    // AI Q&A panel (review mode)
+    const aiSlot = item.querySelector('.review-expand-inner');
+    if (aiSlot) initAIPanel(aiSlot, q, q.si || 0, ansDisplay);
 
     item.querySelector('.review-item-head').onclick = () => {
       const el = document.getElementById(`rexp-${i}`);
