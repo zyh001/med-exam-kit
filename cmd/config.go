@@ -21,6 +21,12 @@ type AppConfig struct {
 	Password string   `yaml:"password"`
 	DB       string   `yaml:"db"`
 	BankIDs  []int64  `yaml:"bank_ids"`
+	// AI Q&A
+	AIProvider      string `yaml:"ai_provider"`
+	AIModel         string `yaml:"ai_model"`
+	AIAPIKey        string `yaml:"ai_api_key"`
+	AIBaseURL       string `yaml:"ai_base_url"`
+	AIEnableThinking *bool `yaml:"ai_thinking"`
 }
 
 // defaultConfig returns a zero-value config with sensible defaults.
@@ -109,6 +115,20 @@ func loadConfig(path string) (AppConfig, error) {
 			cfg.Password = val
 		case "db":
 			cfg.DB = val
+		case "ai_provider":
+			cfg.AIProvider = val
+		case "ai_model":
+			cfg.AIModel = val
+		case "ai_api_key":
+			cfg.AIAPIKey = val
+		case "ai_base_url":
+			cfg.AIBaseURL = val
+		case "ai_thinking":
+			if val == "true" {
+				cfg.AIEnableThinking = boolPtr(true)
+			} else if val == "false" {
+				cfg.AIEnableThinking = boolPtr(false)
+			}
 		case "banks":
 			// inline single value: banks: exam.mqb
 			bankList = append(bankList, val)
@@ -171,6 +191,13 @@ bank_ids:
 # 3. 迁移记录:   med-exam-kit db migrate-progress --dsn <DSN> --progress exam.progress.db
 # 4. 在配置文件中填写 db 和 bank_ids，然后启动:
 #               med-exam-kit quiz --config med-exam-kit.yaml
+
+# --- AI 答疑（可选，配置后可对每道题进行 AI 深度解析）---------
+ai_provider: deepseek  # openai / deepseek / ollama / qwen / kimi / minimax
+ai_model:              # 留空使用 provider 默认模型
+ai_api_key:            # API 密钥（必填，ollama 留空即可）
+ai_base_url:           # 自定义 API 地址（留空使用 provider 默认地址）
+ai_thinking:           # true=强制开启思考 / false=强制关闭 / 留空=自动检测
 `
 
 var configCmd = &cobra.Command{
@@ -204,3 +231,5 @@ func init() {
 	configCmd.AddCommand(configInitCmd)
 	rootCmd.AddCommand(configCmd)
 }
+
+func boolPtr(v bool) *bool { return &v }

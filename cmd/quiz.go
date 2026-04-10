@@ -211,6 +211,11 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		AccessCode:   accessCode,
 		CookieSecret: cookieSecret,
 		PinLen:       pinLen,
+		AIProvider:      fileCfg.AIProvider,
+		AIModel:         fileCfg.AIModel,
+		AIAPIKey:        fileCfg.AIAPIKey,
+		AIBaseURL:       fileCfg.AIBaseURL,
+		AIEnableThinking: fileCfg.AIEnableThinking,
 	}
 	cfg.Assets = Assets
 

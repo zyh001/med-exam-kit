@@ -25,6 +25,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/zyh001/med-exam-kit/internal/ai"
 	"github.com/zyh001/med-exam-kit/internal/auth"
 	"github.com/zyh001/med-exam-kit/internal/bank"
 	"github.com/zyh001/med-exam-kit/internal/models"
@@ -35,12 +36,12 @@ import (
 // BankEntry holds one loaded question bank and its associated state.
 type BankEntry struct {
 	Path          string
-	Name          string             // display name; overrides Path-derived name
-	BankID        int                // PG bank_id (0 for SQLite/legacy)
+	Name          string // display name; overrides Path-derived name
+	BankID        int    // PG bank_id (0 for SQLite/legacy)
 	Password      string
 	Questions     []*models.Question
-	DB            *sql.DB             // SQLite progress DB (nil when using PgStore)
-	PgStore       pgStorer            // PostgreSQL store (nil when using SQLite)
+	DB            *sql.DB  // SQLite progress DB (nil when using PgStore)
+	PgStore       pgStorer // PostgreSQL store (nil when using SQLite)
 	RecordEnabled bool
 }
 
@@ -53,6 +54,7 @@ type shareStorer interface {
 	DeleteShareToken(ctx context.Context, token string)
 	CleanExpiredShareTokens(ctx context.Context)
 }
+
 // allowing server.go to stay decoupled from the concrete pgstore type.
 type pgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
@@ -70,7 +72,9 @@ type pgStorer interface {
 
 // bankName derives a display name from the file path (or Name if set).
 func (b *BankEntry) bankName() string {
-	if b.Name != "" { return b.Name }
+	if b.Name != "" {
+		return b.Name
+	}
 	base := filepath.Base(b.Path)
 	ext := filepath.Ext(base)
 	return strings.TrimSuffix(base, ext)
@@ -84,6 +88,12 @@ type Config struct {
 	AccessCode   string
 	CookieSecret string
 	PinLen       int
+	// AI Q&A
+	AIProvider      string
+	AIModel         string
+	AIAPIKey        string
+	AIBaseURL       string
+	AIEnableThinking *bool
 
 	// Legacy single-bank fields kept for editor command compatibility.
 	// When Banks is set, these are ignored.
@@ -96,6 +106,7 @@ type Config struct {
 
 type Server struct {
 	cfg          Config
+	aiClient     *ai.Client
 	sessionToken string
 	assetVer     string
 	mux          *http.ServeMux
@@ -103,13 +114,13 @@ type Server struct {
 	rateBuckets  map[string][]time.Time
 	httpServer   *http.Server
 	// 图标 PNG 缓存（启动时按需生成一次，避免每次请求重复编码）
-	iconOnce   sync.Once
-	icon192    []byte
-	icon512    []byte
+	iconOnce sync.Once
+	icon192  []byte
+	icon512  []byte
 	// Web Push
-	vapidKeys      *VAPIDKeys
-	pushStores     map[string]*pushStore // bankPath → store
-	pushTestMu     sync.Mutex
+	vapidKeys       *VAPIDKeys
+	pushStores      map[string]*pushStore // bankPath → store
+	pushTestMu      sync.Mutex
 	pushTestBuckets map[string][]time.Time // ip → timestamps for push/test rate limit
 	// 考试防作弊：sealed 模式下答案存服务端，提交后才下发
 	examMu       sync.Mutex
@@ -129,16 +140,16 @@ type examSession struct {
 }
 
 type shareConfig struct {
-	Fingerprints   []string               `json:"fingerprints"`
-	SubIds         []string               `json:"sub_ids"`        // "fingerprint:si" pairs for sub-question precision
-	Mode           string                 `json:"mode"`
-	BankIdx        int                    `json:"bank_idx"`
-	TimeLimit      int                    `json:"time_limit"`    // seconds
-	Scoring        bool                   `json:"scoring"`       // 是否启用计分
-	ScorePerMode   map[string]float64     `json:"score_per_mode"` // 各题型每小题分值
-	MultiScoreMode string                 `json:"multi_score_mode"` // strict|loose
-	Ts             int64                  `json:"ts"`
-	ExpiresAt      int64                  `json:"expires_at"`
+	Fingerprints   []string           `json:"fingerprints"`
+	SubIds         []string           `json:"sub_ids"` // "fingerprint:si" pairs for sub-question precision
+	Mode           string             `json:"mode"`
+	BankIdx        int                `json:"bank_idx"`
+	TimeLimit      int                `json:"time_limit"`       // seconds
+	Scoring        bool               `json:"scoring"`          // 是否启用计分
+	ScorePerMode   map[string]float64 `json:"score_per_mode"`   // 各题型每小题分值
+	MultiScoreMode string             `json:"multi_score_mode"` // strict|loose
+	Ts             int64              `json:"ts"`
+	ExpiresAt      int64              `json:"expires_at"`
 }
 
 const (
@@ -169,19 +180,25 @@ func New(cfg Config) *Server {
 		rateBuckets:  map[string][]time.Time{},
 	}
 	// 初始化 Web Push
-	pushStores     := map[string]*pushStore{}
+	pushStores := map[string]*pushStore{}
 	pushTestBuckets := map[string][]time.Time{}
 	for _, b := range cfg.Banks {
 		pushStores[b.Path] = newPushStore()
 	}
-	s.pushStores     = pushStores
+	s.pushStores = pushStores
 	s.pushTestBuckets = pushTestBuckets
-	s.examSessions    = map[string]*examSession{}
-	s.shareTokens     = map[string]*shareConfig{}
+	s.examSessions = map[string]*examSession{}
+	s.shareTokens = map[string]*shareConfig{}
 	if keys, err := generateVAPIDKeys(); err == nil {
 		s.vapidKeys = keys
 	} else {
 		log.Printf("[push] VAPID 密钥生成失败: %v", err)
+	}
+
+	// Initialize AI client if API key is configured
+	if cfg.AIAPIKey != "" || cfg.AIProvider == "ollama" {
+		s.aiClient = ai.NewClient(cfg.AIProvider, cfg.AIAPIKey, cfg.AIBaseURL, cfg.AIModel, 120, cfg.AIEnableThinking)
+		log.Printf("[ai] AI 答疑已启用: provider=%s model=%s", cfg.AIProvider, s.aiClient.Model)
 	}
 
 	s.registerRoutes()
@@ -195,7 +212,7 @@ func (s *Server) ListenAndServe() error {
 		Addr:         addr,
 		Handler:      s,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 30 * time.Second,
+		WriteTimeout: 0, // disabled — SSE streams are long-lived; nginx enforces upstream timeouts
 		IdleTimeout:  120 * time.Second,
 	}
 
@@ -367,11 +384,11 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/history", s.handleHistory)
 	m.HandleFunc("DELETE /api/session/", s.handleDeleteSession)
 	m.HandleFunc("POST /api/calculate", s.handleCalculate)
-		// Web Push
-		m.HandleFunc("GET /api/push/vapid-key", s.handleVapidKey)
-		m.HandleFunc("POST /api/push/subscribe", s.handlePushSubscribe)
-		m.HandleFunc("DELETE /api/push/subscribe", s.handlePushUnsubscribe)
-		m.HandleFunc("POST /api/push/test", s.handlePushTest)
+	// Web Push
+	m.HandleFunc("GET /api/push/vapid-key", s.handleVapidKey)
+	m.HandleFunc("POST /api/push/subscribe", s.handlePushSubscribe)
+	m.HandleFunc("DELETE /api/push/subscribe", s.handlePushUnsubscribe)
+	m.HandleFunc("POST /api/push/test", s.handlePushTest)
 	m.HandleFunc("GET /api/stats", s.handleStats)
 	m.HandleFunc("GET /api/review/due", s.handleReviewDue)
 	m.HandleFunc("GET /api/wrongbook", s.handleWrongbook)
@@ -381,6 +398,8 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/exam/reveal", s.handleExamReveal)
 	m.HandleFunc("POST /api/exam/share", s.handleExamShare)
 	m.HandleFunc("GET /api/exam/join", s.handleExamJoin)
+	// AI Q&A
+	m.HandleFunc("POST /api/ai/chat", s.handleAIChat)
 }
 
 // ── Bank selection ────────────────────────────────────────────────────
@@ -453,11 +472,11 @@ func (s *Server) handleEditor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	code := strings.TrimSpace(strings.ToUpper(r.FormValue("code")))
-	ip   := remoteIP(r)
+	ip := remoteIP(r)
 
 	// 如果需要验证码，先校验
 	if auth.NeedsCaptcha(ip) {
-		token  := r.FormValue("captcha_token")
+		token := r.FormValue("captcha_token")
 		answer := r.FormValue("captcha_answer")
 		if !auth.VerifyCaptcha(token, answer, ip) {
 			// 验证码错误：重新生成并展示，不计入访问码失败次数
@@ -581,6 +600,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"session_token":  s.sessionToken,
 		"asset_ver":      s.assetVer,
 		"record_enabled": b.RecordEnabled,
+			"ai_enabled":     s.aiClient != nil,
 	})
 }
 
@@ -648,7 +668,9 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 		// 清理超过 24h 的旧 session（简单 LRU）
 		now := time.Now().Unix()
 		for k, v := range s.examSessions {
-			if now-v.ts > 86400 { delete(s.examSessions, k) }
+			if now-v.ts > 86400 {
+				delete(s.examSessions, k)
+			}
 		}
 		s.examSessions[eid] = &examSession{answers: answers, ts: now}
 		s.examMu.Unlock()
@@ -1175,7 +1197,7 @@ func (s *Server) handleRecordClear(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if b.DB == nil {
-		jsonOK(w, map[string]any{"ok": true, "deleted": map[string]int{"attempts":0,"sessions":0,"sm2_cards":0}})
+		jsonOK(w, map[string]any{"ok": true, "deleted": map[string]int{"attempts": 0, "sessions": 0, "sm2_cards": 0}})
 		return
 	}
 	jsonOK(w, map[string]any{"ok": true, "deleted": progress.ClearUserData(b.DB, uid)})
@@ -1193,7 +1215,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		clientDate := r.URL.Query().Get("date")
 		ov := b.PgStore.GetOverallStats(ctx, uid, b.BankID, clientDate)
 		accuracy := 0
-		if ov.Attempts > 0 { accuracy = int(math.Round(float64(ov.Correct)/float64(ov.Attempts)*100)) }
+		if ov.Attempts > 0 {
+			accuracy = int(math.Round(float64(ov.Correct) / float64(ov.Attempts) * 100))
+		}
 		wrongTopics := len(b.PgStore.GetWrongFingerprints(ctx, uid, b.BankID, 10000))
 		jsonOK(w, map[string]any{
 			"overall": map[string]any{
@@ -1212,7 +1236,9 @@ func (s *Server) handleStats(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bankFPs := make([]string, 0, len(b.Questions))
-	for i := range b.Questions { bankFPs = append(bankFPs, b.Questions[i].Fingerprint) }
+	for i := range b.Questions {
+		bankFPs = append(bankFPs, b.Questions[i].Fingerprint)
+	}
 	clientDate := r.URL.Query().Get("date")
 	jsonOK(w, map[string]any{
 		"overall": progress.GetOverallStatsByFP(b.DB, uid, bankFPs, clientDate),
@@ -1240,7 +1266,9 @@ func (s *Server) handleReviewDue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	bankFPs2 := make([]string, 0, len(b.Questions))
-	for i := range b.Questions { bankFPs2 = append(bankFPs2, b.Questions[i].Fingerprint) }
+	for i := range b.Questions {
+		bankFPs2 = append(bankFPs2, b.Questions[i].Fingerprint)
+	}
 	jsonOK(w, map[string]any{"fingerprints": progress.GetDueFingerprintsByFP(b.DB, uid, bankFPs2, clientDate)})
 }
 
@@ -1264,7 +1292,9 @@ func (s *Server) handleWrongbook(w http.ResponseWriter, r *http.Request) {
 		return
 	} else {
 		wbFPs := make([]string, 0, len(b.Questions))
-		for i := range b.Questions { wbFPs = append(wbFPs, b.Questions[i].Fingerprint) }
+		for i := range b.Questions {
+			wbFPs = append(wbFPs, b.Questions[i].Fingerprint)
+		}
 		entries = progress.GetWrongFingerprintsByFP(b.DB, uid, wbFPs, 300)
 	}
 
@@ -1324,8 +1354,12 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// sessions 中既不在 processed 也不在 skipped 的 → 写入失败，让客户端重试
 	computeFailed := func(sessions []map[string]any, done, skipped []string) []map[string]any {
 		okSet := make(map[string]bool, len(done)+len(skipped))
-		for _, id := range done    { okSet[id] = true }
-		for _, id := range skipped { okSet[id] = true }
+		for _, id := range done {
+			okSet[id] = true
+		}
+		for _, id := range skipped {
+			okSet[id] = true
+		}
 		var failed []map[string]any
 		for _, sess := range sessions {
 			sid := fmt.Sprint(sess["id"])
@@ -1339,7 +1373,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	// PostgreSQL 模式
 	if b.PgStore != nil {
 		for i := range payload.Sessions {
-			if payload.Sessions[i] == nil { payload.Sessions[i] = map[string]any{} }
+			if payload.Sessions[i] == nil {
+				payload.Sessions[i] = map[string]any{}
+			}
 			payload.Sessions[i]["bank_id"] = b.BankID
 		}
 		done, skipped := b.PgStore.RecordSessionsBatch(r.Context(), payload.Sessions, uid)
@@ -1358,7 +1394,9 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	for i := range payload.Sessions {
-		if payload.Sessions[i] == nil { payload.Sessions[i] = map[string]any{} }
+		if payload.Sessions[i] == nil {
+			payload.Sessions[i] = map[string]any{}
+		}
 		payload.Sessions[i]["bank_id"] = b.BankID
 	}
 	log.Printf("[sync] uid=%s bank=%d sessions=%d", uid, b.BankID, len(payload.Sessions))
@@ -1414,13 +1452,13 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body struct {
-		Fingerprints   []string               `json:"fingerprints"`
-		SubIds         []string               `json:"sub_ids"`
-		Mode           string                 `json:"mode"`
-		TimeLimit      int                    `json:"time_limit"`
-		Scoring        bool                   `json:"scoring"`
-		ScorePerMode   map[string]float64     `json:"score_per_mode"`
-		MultiScoreMode string                 `json:"multi_score_mode"`
+		Fingerprints   []string           `json:"fingerprints"`
+		SubIds         []string           `json:"sub_ids"`
+		Mode           string             `json:"mode"`
+		TimeLimit      int                `json:"time_limit"`
+		Scoring        bool               `json:"scoring"`
+		ScorePerMode   map[string]float64 `json:"score_per_mode"`
+		MultiScoreMode string             `json:"multi_score_mode"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Fingerprints) == 0 {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -1540,9 +1578,13 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 	}
 	b := &s.cfg.Banks[cfg.BankIdx]
 	fpSet := map[string]struct{}{}
-	for _, fp := range cfg.Fingerprints { fpSet[fp] = struct{}{} }
+	for _, fp := range cfg.Fingerprints {
+		fpSet[fp] = struct{}{}
+	}
 	rows, _ := selectQuestions(b.Questions, selectOpts{fpSet: fpSet})
-	if rows == nil { rows = []sqFlat{} }
+	if rows == nil {
+		rows = []sqFlat{}
+	}
 
 	// 精确过滤到小题级别：若分享时提供了 sub_ids（"fingerprint:si" 对），
 	// 只保留接收端明确指定的那些小题，防止服务端自动把同一题干下所有小题
@@ -1568,7 +1610,8 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 	var eid string
 	isExamMode := cfg.Mode == "exam" || cfg.Mode == "exam_done"
 	if isExamMode && len(rows) > 0 {
-		eidBytes := make([]byte, 16); rand.Read(eidBytes)
+		eidBytes := make([]byte, 16)
+		rand.Read(eidBytes)
 		eid = hex.EncodeToString(eidBytes)
 		answers := make(map[string]examAnswer, len(rows))
 		for i := range rows {
@@ -1578,7 +1621,9 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 		}
 		s.examMu.Lock()
 		for k, v := range s.examSessions {
-			if now-v.ts > 86400 { delete(s.examSessions, k) }
+			if now-v.ts > 86400 {
+				delete(s.examSessions, k)
+			}
 		}
 		s.examSessions[eid] = &examSession{answers: answers, ts: now}
 		s.examMu.Unlock()
@@ -1603,6 +1648,115 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 		"score_per_mode":   cfg.ScorePerMode,
 		"multi_score_mode": cfg.MultiScoreMode,
 	})
+}
+
+// ── AI Q&A ────────────────────────────────────────────────────────────────
+
+// POST /api/ai/chat — streaming AI Q&A endpoint
+func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
+	if s.aiClient == nil {
+		jsonError(w, "AI 功能未配置", http.StatusServiceUnavailable)
+		return
+	}
+
+	var body struct {
+		Fingerprint string           `json:"fingerprint"`
+		SQIndex     int              `json:"sq_index"`
+		UserAnswer  string           `json:"user_answer"`
+		Bank        int              `json:"bank"`
+		History     []ai.ChatMessage `json:"history"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	// Look up question by fingerprint across all banks
+	var question *models.Question
+	bankIdx := body.Bank
+	if bankIdx < 0 || bankIdx >= len(s.cfg.Banks) {
+		bankIdx = 0
+	}
+	for _, b := range s.cfg.Banks {
+		for _, q := range b.Questions {
+			if q.Fingerprint == body.Fingerprint {
+				question = q
+				break
+			}
+		}
+		if question != nil {
+			break
+		}
+	}
+	if question == nil {
+		jsonError(w, "题目未找到", http.StatusNotFound)
+		return
+	}
+	if body.SQIndex < 0 || body.SQIndex >= len(question.SubQuestions) {
+		jsonError(w, "小题索引无效", http.StatusBadRequest)
+		return
+	}
+
+	// Build messages: system prompt + conversation history
+	messages := ai.BuildAIChatPrompt(question, body.SQIndex, body.UserAnswer)
+
+	// If this is a follow-up (history has prior messages), append them
+	if len(body.History) > 0 {
+		messages = append(messages, body.History...)
+	}
+
+	// Start streaming
+	ch, err := s.aiClient.ChatCompletionStream(r.Context(), messages, 0.7, 2048)
+	if err != nil {
+		jsonError(w, fmt.Sprintf("AI 请求失败: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// SSE response
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		jsonError(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(200)
+	flusher.Flush()
+
+	// Heartbeat: send SSE comment every 15s to keep connection alive
+	// (prevents nginx proxy_read_timeout from closing the connection)
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+
+	for {
+		select {
+		case <-heartbeat.C:
+			fmt.Fprintf(w, ": heartbeat\n\n")
+			flusher.Flush()
+		case chunk, ok := <-ch:
+			if !ok {
+				return // channel closed
+			}
+			if chunk.Err != nil {
+				data, _ := json.Marshal(map[string]string{"error": chunk.Err.Error()})
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+				return
+			}
+			if chunk.Done {
+				fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+			data, _ := json.Marshal(map[string]string{"content": chunk.Content, "reasoning": chunk.ReasoningContent})
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
 }
 
 // loadShareFromPG 尝试从 PostgreSQL 读取 share token（服务重启后恢复）。
@@ -2074,7 +2228,6 @@ func distributeByRatio(total int, weights map[string]int) map[string]int {
 	return result
 }
 
-
 // ── Rate limiter ───────────────────────────────────────────────────────
 
 func (s *Server) checkRate(ip string) bool {
@@ -2206,6 +2359,12 @@ func (w *responseWriterWrapper) Write(b []byte) (int, error) {
 	return w.ResponseWriter.Write(b)
 }
 
+func (w *responseWriterWrapper) Flush() {
+	if f, ok := w.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
 func logRequest(r *http.Request, status int, duration time.Duration) {
 	ip := remoteIP(r)
 	method := r.Method
@@ -2261,7 +2420,9 @@ func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "bank not found", http.StatusNotFound)
 		return
 	}
-	var body struct{ Endpoint string `json:"endpoint"` }
+	var body struct {
+		Endpoint string `json:"endpoint"`
+	}
 	json.NewDecoder(r.Body).Decode(&body)
 	if store := s.pushStores[b.Path]; store != nil && body.Endpoint != "" {
 		store.remove(body.Endpoint)
@@ -2270,19 +2431,20 @@ func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
 
-
 // POST /api/push/test — 立即发送测试推送
 // 支持两种模式：
-//   ?uid=<用户ID>  → 只推给该用户
-//   （无参数）     → 推给所有订阅者
+//
+//	?uid=<用户ID>  → 只推给该用户
+//	（无参数）     → 推给所有订阅者
+//
 // 每个 IP 限流：5次/小时，防止滥用。
 func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 	// 严格限流：每 IP 每小时最多 5 次
 	ip := remoteIP(r)
 	s.pushTestMu.Lock()
-	now    := time.Now()
+	now := time.Now()
 	cutoff := now.Add(-time.Hour)
-	fresh  := s.pushTestBuckets[ip][:0]
+	fresh := s.pushTestBuckets[ip][:0]
 	for _, t := range s.pushTestBuckets[ip] {
 		if t.After(cutoff) {
 			fresh = append(fresh, t)
@@ -2386,7 +2548,9 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		// SQLite: filter history to sessions from this bank's fingerprints
 		"items": progress.GetHistoryByFP(b.DB, uid, func() []string {
 			fs := make([]string, 0, len(b.Questions))
-			for i := range b.Questions { fs = append(fs, b.Questions[i].Fingerprint) }
+			for i := range b.Questions {
+				fs = append(fs, b.Questions[i].Fingerprint)
+			}
 			return fs
 		}(), limit),
 	})
@@ -2450,17 +2614,17 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 		}
 		if b.PgStore != nil {
 			ov := b.PgStore.GetOverallStats(ctx, uid, b.BankID, "")
-			info.Sessions      = ov.Sessions
-			info.Attempts      = ov.Attempts
+			info.Sessions = ov.Sessions
+			info.Attempts = ov.Attempts
 			info.WrongAttempts = ov.Wrong
-			info.WrongTopics   = len(b.PgStore.GetWrongFingerprints(ctx, uid, b.BankID, 10000))
+			info.WrongTopics = len(b.PgStore.GetWrongFingerprints(ctx, uid, b.BankID, 10000))
 			banks[i] = info
 			// Detailed diagnostic for first bank
 			if i == 0 {
 				jsonOK(w, map[string]any{
 					"uid": uid, "uid_is_legacy": uid == "_legacy" || uid == "",
 					"banks": banks,
-					"diag": b.PgStore.DiagAttempts(ctx, uid, b.BankID),
+					"diag":  b.PgStore.DiagAttempts(ctx, uid, b.BankID),
 				})
 				return
 			}

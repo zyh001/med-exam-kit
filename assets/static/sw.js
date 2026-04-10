@@ -1,11 +1,15 @@
 // Service Worker for 医考练习 PWA
-const CACHE_NAME = 'med-quiz-v26';
+const CACHE_NAME = 'med-quiz-v30';
 
 const STATIC_ASSETS = [
     '/static/common.css',
     '/static/quiz.css',
     '/static/common.js',
     '/static/quiz.js',
+    '/static/quiz_ai.js',
+    '/static/marked.min.js',
+    '/static/katex.min.js',
+    '/static/katex.min.css',
 ];
 
 const OPTIONAL_ASSETS = [
@@ -40,6 +44,10 @@ self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
 
     if (url.pathname.startsWith('/api/')) {
+        // SSE/streaming requests must not be intercepted (cannot clone stream body)
+        const accept = event.request.headers.get('accept') || '';
+        if (accept.includes('text/event-stream') || event.request.method !== 'GET') return;
+
         event.respondWith(
             fetch(event.request).catch(() => new Response('{"error":"offline"}', {
                 headers: { 'Content-Type': 'application/json' }
