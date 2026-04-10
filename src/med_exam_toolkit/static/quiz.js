@@ -26,6 +26,7 @@ const S = {
   memoFlipped: false,
   examStart: null,
   examLimit: 90 * 60,
+  examSubmitted: false,
   timerInterval: null,
   bankInfo: null,
   results: null,
@@ -214,7 +215,7 @@ function _deserializeAns(raw) {
 
 /** 保存当前考试状态到 localStorage */
 function saveExamSession() {
-  if (S.mode !== 'exam' || !S.questions.length) return;
+  if (S.mode !== 'exam' || !S.questions.length || S.examSubmitted) return;
   const elapsedSec = Math.floor((Date.now() - S.examStart) / 1000);
   const remaining  = Math.max(0, S.examLimit - elapsedSec);
   const session = {
@@ -272,6 +273,16 @@ function _fmtSavedAt(ts) {
 function checkResumeSession() {
   const s = _loadRawSession();
   if (!s) return false;
+
+  // 基础字段校验：必须有 remaining 和 savedAt
+  if (typeof s.remaining !== 'number' || typeof s.savedAt !== 'number') {
+    clearExamSession(); return false;
+  }
+
+  // 超过 24 小时的存档直接丢弃
+  if (Date.now() - s.savedAt > 24 * 3600 * 1000) {
+    clearExamSession(); return false;
+  }
 
   // 若剩余时间已耗尽（超时超过 10 秒缓冲），丢弃
   const elapsed = Math.floor((Date.now() - s.savedAt) / 1000);
@@ -534,8 +545,6 @@ function showScreen(id, dir = 'forward') {
 
   // 每次切换回主页：先用本地数据即时渲染，再异步拉服务端最新数据
   if (id === 's-home') {
-    // 从考试完成状态返回主页时，确保不残留任何 exam session（防御性清除）
-    if (S.mode === 'exam_done') clearExamSession();
     renderHistorySection();   // 本地数据，无网络延迟
     refreshHomeData();        // 异步拉服务端记录、刷新徽章
   }
@@ -1357,7 +1366,8 @@ function buildModeGroups(questions) {
   questions.forEach((q, i) => {
     const mode = q.mode || '';
     if (groups.length === 0 || groups[groups.length - 1].mode !== mode) {
-      const allowBack = !mode.includes('案例');
+      // A3/A4型题和案例分析均不允许回退
+      const allowBack = !mode.includes('案例') && !mode.includes('A3') && !mode.includes('A4');
       groups.push({ mode, startIdx: i, endIdx: i, allowBack });
     } else {
       groups[groups.length - 1].endIdx = i;
@@ -1484,6 +1494,7 @@ async function startSession() {
   S.marked = new Set();
   S.revealed = new Set();
   S.examStart = Date.now();
+  S.examSubmitted = false;
   S.streak = 0;
   S.modeGroups       = buildModeGroups(S.questions);
   S.currentGroupIdx  = 0;
@@ -1521,6 +1532,7 @@ function startQuiz(remainingSeconds) {
     fill.className = 'progress-fill exam-fill';
     startTimer(remainingSeconds);
     buildGrid();
+    _showCalcBtn(true);
   } else {
     timer.style.display = 'none';
     // 练习模式也显示题目列表按钮
@@ -1528,6 +1540,7 @@ function startQuiz(remainingSeconds) {
     fill.className = 'progress-fill';
     document.getElementById('q-grid-panel').classList.remove('open');
     buildGrid();
+    _showCalcBtn(false);
   }
 
   showScreen('s-quiz');
@@ -1789,13 +1802,22 @@ function selectOpt(letter, btn) {
     S.ans[S.cur] = letter;
 
     if (isExam) {
-      // 考试：标记已选，自动跳下一题
+      // 考试：标记已选
       document.querySelectorAll('.opt').forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
       const dot = document.querySelector(`.q-dot[data-idx="${S.cur}"]`);
       if (dot) { dot.classList.add('answered'); }
       saveExamSession();   // 答题后立即保存
-      // 自动前进（短暂延迟让用户看到选中态）
+
+      // A3/A4/案例分析题不自动跳转，需要用户手动点下一题
+      const _curGIdx = getGroupIdxForQ(S.cur);
+      const _curGroup = S.modeGroups[_curGIdx];
+      if (_curGroup && !_curGroup.allowBack) {
+        updateGridDot();
+        return; // 不自动前进
+      }
+
+      // 其他题型：自动前进（短暂延迟让用户看到选中态）
       setTimeout(() => {
         const total = S.questions.length;
         if (S.cur < total - 1) {
@@ -2042,9 +2064,6 @@ function quitQuiz() {
       return;
     }
     clearExamSession();
-  } else if (S.mode === 'exam_done') {
-    // 考试已提交，进入的是「再练一遍」模式——直接返回，无需保存
-    clearExamSession(); // 防御性清除，确保不残留
   } else if (S.mode === 'practice') {
     // 练习模式：自动保存进度，直接退出
     savePracticeSession();
@@ -2177,6 +2196,8 @@ document.addEventListener('click', e => {
 async function submitExam() {
   clearInterval(S.timerInterval);
   clearExamSession();   // 正常交卷，清除存档
+  S.examSubmitted = true; // 防止任何路径重新保存
+  const origMode = S.mode; // 保存原始模式用于 calculateResults
   S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
 
   // sealed 模式：从服务端获取答案后再评分
@@ -2206,19 +2227,17 @@ async function submitExam() {
     }
   }
 
-  calculateResults();
-  clearExamSession(); // 二次兜底：防止 await 期间任何路径重新写入
+  // 再次确保清除（防止 await 期间被重新保存）
+  clearExamSession();
+  calculateResults(origMode);
   showScreen('s-results');
 }
-
 function retryQuiz() {
-  // 再练一遍：确定进入练习模式，无论之前是 exam/exam_done/practice
-  // exam_done 是考试提交后的内部状态，再练时统一恢复为 practice
-  const prevMode = S.mode;
+  // 如果题目还在内存，直接重置状态重新做一遍
   if (S.questions && S.questions.length) {
-    // 根据原始模式决定重试模式：exam/exam_done 重试为练习，其他保持
-    const retryMode = (prevMode === 'exam' || prevMode === 'exam_done') ? 'practice' : (prevMode || 'practice');
-    S.mode = retryMode;
+    // 恢复原始模式（submitExam 将 mode 设为 'exam_done'）
+    if (S.mode === 'exam_done' && S.results) S.mode = S.results.mode || 'exam';
+    S.examSubmitted = false; // 重置提交标记
     S.cur = 0;
     S.ans = {};
     S.revealed = new Set();
@@ -2228,15 +2247,15 @@ function retryQuiz() {
     S.modeGroups = buildModeGroups(S.questions);
     S.currentGroupIdx = 0;
     S.caseMaxReached = {};
-    S.practiceSessionId = retryMode === 'practice' ? String(Date.now()) : null;
-    if (retryMode === 'memo') startMemo();
+    S.practiceSessionId = S.mode === 'practice' ? String(Date.now()) : null;
+    if (S.mode === 'memo') startMemo();
     else {
       startQuiz();
-      if (retryMode === 'exam') saveExamSession();
+      if (S.mode === 'exam') saveExamSession();
     }
   } else {
     // 题目已被清理，回到配置页重新出题
-    openConfig((prevMode === 'exam' || prevMode === 'exam_done') ? 'practice' : (prevMode || 'practice'));
+    openConfig(S.mode || 'practice');
   }
 }
 
@@ -2515,7 +2534,9 @@ async function _recordMemoSession() {
 // ════════════════════════════════════════════
 // Results
 // ════════════════════════════════════════════
-function calculateResults() {
+function calculateResults(origMode) {
+  // origMode: 传入原始模式（submitExam 中 S.mode 已被改为 'exam_done'）
+  const effectiveMode = origMode || S.mode;
   // 深拷贝题目数据，防止后续修改影响结果页面
   const qs = JSON.parse(JSON.stringify(S.questions));
   // 深拷贝答案数据
@@ -2555,7 +2576,7 @@ function calculateResults() {
   });
 
   S.results = {
-    mode: S.mode,
+    mode: effectiveMode,
     total: qs.length, correct, wrong, skip,
     timeSec: Math.floor((Date.now() - S.examStart) / 1000),
     byUnit,
@@ -2564,7 +2585,7 @@ function calculateResults() {
   };
 
   // ── 计分 ──────────────────────────────────────────────────────────
-  if (CFG.scoring && S.mode === 'exam') {
+  if (CFG.scoring && effectiveMode === 'exam') {
     S.results.scoring      = true;
     S.results.scorePerMode = { ...CFG.scorePerMode };
     S.results.multiScoreMode = CFG.multiScoreMode;
@@ -2630,7 +2651,7 @@ function calculateResults() {
   // Save to history
   const record = {
     id:      sessionId,
-    mode: S.mode, total: qs.length, correct,
+    mode: effectiveMode, total: qs.length, correct,
     pct: Math.round(correct / qs.length * 100),
     skip,
     timeSec: S.results.timeSec,
@@ -2695,7 +2716,10 @@ function renderResults() {
 
   // Unit breakdown
   const bk = document.getElementById('unit-breakdown');
-  if (R.byUnit && Object.keys(R.byUnit).length > 1) {
+  // 考试模式不显示章节分析（防止泄露分组信息）
+  if (R.mode === 'exam') {
+    bk.style.display = 'none';
+  } else if (R.byUnit && Object.keys(R.byUnit).length > 1) {
     const entries = Object.entries(R.byUnit).sort((a,b) => b[1].total - a[1].total).slice(0, 8);
     bk.innerHTML = '<h3>章节分析</h3>' + entries.map(([unit, d]) => {
       const p = Math.round(d.correct / d.total * 100);
@@ -3175,6 +3199,7 @@ async function shareExam() {
   const fps = R.qs.map(q => q.fingerprint).filter(Boolean);
   if (!fps.length) { toast('题目缺少标识，无法分享'); return; }
   try {
+    // exam_done 是前端内部状态，分享时统一用 'exam'（练习模式用 'practice'）
     const shareMode = (R.mode === 'exam' || R.mode === 'exam_done') ? 'exam' : (R.mode || 'exam');
     const res = await apiFetch('/api/exam/share?' + bankQS(), {
       method: 'POST',
@@ -4355,6 +4380,125 @@ document.addEventListener('click', e=>{
   if(e.target.closest('.memo-card')) memoReveal();
 });
 
+// ════════════════════════════════════════════
+// 计算器（表达式输入模式）
+// ════════════════════════════════════════════
+var _calc = { input: '', done: false, is2nd: false, isDeg: true };
+
+function toggleCalc() {
+  var m = document.getElementById('calc-modal');
+  m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+}
+
+function setCalcMode(mode) {
+  document.getElementById('calc-keys-simple').style.display = mode === 'simple' ? '' : 'none';
+  document.getElementById('calc-keys-sci').style.display    = mode === 'sci'    ? '' : 'none';
+  document.getElementById('calc-mode-simple').classList.toggle('active', mode === 'simple');
+  document.getElementById('calc-mode-sci').classList.toggle('active', mode === 'sci');
+}
+
+function _calcRefresh() {
+  document.getElementById('calc-expr').textContent  = '';
+  document.getElementById('calc-result').textContent = _calc.input || '0';
+}
+
+function calcDigit(d) {
+  if (_calc.done) { _calc.input = ''; _calc.done = false; }
+  if (d === '.') {
+    var lastSeg = (_calc.input.match(/[\d.]*$/) || [''])[0];
+    if (lastSeg.includes('.')) return;
+  }
+  _calc.input += d;
+  _calcRefresh();
+}
+
+function calcOp(op) {
+  if (_calc.done) _calc.done = false;
+  if (op === '(' || op === ')') { _calc.input += op; _calcRefresh(); return; }
+  _calc.input = _calc.input.replace(/\s*[+\-×÷]\s*$/, '');
+  _calc.input += ' ' + op + ' ';
+  _calcRefresh();
+}
+
+function calcAC() {
+  _calc.input = ''; _calc.done = false;
+  document.getElementById('calc-expr').textContent = '';
+  document.getElementById('calc-result').textContent = '0';
+}
+
+function calcDel() {
+  if (_calc.done) return;
+  _calc.input = _calc.input.replace(/\s+$/, '');
+  var fm = _calc.input.match(/(asin|acos|atan|sin|cos|tan|sqrt|lg|ln|10\^|e\^)\($/);
+  if (fm) _calc.input = _calc.input.slice(0, -fm[0].length);
+  else _calc.input = _calc.input.slice(0, -1);
+  _calcRefresh();
+}
+
+function calcFunc(fn) {
+  if (_calc.done) { _calc.input = ''; _calc.done = false; }
+  var map2 = { sin:'asin(', cos:'acos(', tan:'atan(', lg:'10^(', ln:'e^(', '√':'(' };
+  var map1 = { sin:'sin(', cos:'cos(', tan:'tan(', lg:'lg(', ln:'ln(', '√':'sqrt(' };
+  if (fn === '!') { _calc.input += '!'; }
+  else if (fn === '1/x') { _calc.input = '1 ÷ (' + _calc.input + ')'; }
+  else { _calc.input += _calc.is2nd ? (map2[fn] || fn + '(') : (map1[fn] || fn + '('); }
+  _calcRefresh();
+}
+
+function calcPow() {
+  if (_calc.done) _calc.done = false;
+  _calc.input += '^';
+  _calcRefresh();
+}
+
+function calcConst(c) {
+  if (_calc.done) { _calc.input = ''; _calc.done = false; }
+  _calc.input += c;
+  _calcRefresh();
+}
+
+async function calcEval() {
+  var expr = _calc.input;
+  if (!expr) return;
+  document.getElementById('calc-expr').textContent = expr + ' =';
+  document.getElementById('calc-result').textContent = '…';
+  try {
+    var resp = await apiFetch('/api/calculate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expr: expr, deg: _calc.isDeg }) });
+    var res = await resp.json();
+    var val = res.result || 'Error';
+    document.getElementById('calc-result').textContent = val;
+    _calc.input = val === 'Error' ? '' : val;
+  } catch (e) {
+    document.getElementById('calc-result').textContent = 'Error';
+    _calc.input = '';
+  }
+  _calc.done = true;
+}
+
+function calc2nd() {
+  _calc.is2nd = !_calc.is2nd;
+  document.getElementById('calc-2nd').classList.toggle('is-2nd', _calc.is2nd);
+  var lbl = _calc.is2nd
+    ? { 'calc-sin':'asin', 'calc-cos':'acos', 'calc-tan':'atan', 'calc-lg':'10^x', 'calc-ln':'e^x' }
+    : { 'calc-sin':'sin',  'calc-cos':'cos',  'calc-tan':'tan',  'calc-lg':'lg',   'calc-ln':'ln' };
+  for (var id in lbl) { var el = document.getElementById(id); if (el) el.textContent = lbl[id]; }
+}
+
+function calcToggleDeg() {
+  _calc.isDeg = !_calc.isDeg;
+  document.getElementById('calc-deg').textContent = _calc.isDeg ? 'deg' : 'rad';
+}
+
+function calcCopyResult() {
+  var t = document.getElementById('calc-result').textContent;
+  if (navigator.clipboard) navigator.clipboard.writeText(t).then(function(){ toast('已复制'); });
+}
+
+function _showCalcBtn(show) {
+  var btn = document.getElementById('calc-toggle-btn');
+  if (btn) btn.style.display = show ? '' : 'none';
+}
+
 // 页面关闭/刷新时兜底保存
 window.addEventListener('beforeunload', () => {
   saveExamSession();
@@ -4494,7 +4638,7 @@ init();
         // 练习模式：强制保存进度存档，刷新后可从「进行中」继续
         savePracticeSession();
         saveMsg = '练习进度已自动保存，';
-      } else if (S.mode === 'exam' && S.questions.length) {
+      } else if (S.mode === 'exam' && S.questions.length && !S.examSubmitted) {
         // 考试模式：把当前状态写入 examSession key，刷新后 checkResumeSession 会弹恢复提示
         try {
           const key = examSessionKey();
