@@ -365,6 +365,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("POST /api/record/migrate", s.handleRecordMigrate)
 	m.HandleFunc("GET /api/history", s.handleHistory)
 	m.HandleFunc("DELETE /api/session/", s.handleDeleteSession)
+	m.HandleFunc("POST /api/calculate", s.handleCalculate)
 		// Web Push
 		m.HandleFunc("GET /api/push/vapid-key", s.handleVapidKey)
 		m.HandleFunc("POST /api/push/subscribe", s.handlePushSubscribe)
