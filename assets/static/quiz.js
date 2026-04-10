@@ -2012,10 +2012,10 @@ function buildExplain(q, selected) {
     body.innerHTML = '<span style="color:var(--muted)">暂无解析</span>';
   }
   inner.appendChild(body);
-  // AI Q&A panel (practice mode)
-  const userAns = isMulti ? (selected instanceof Set ? [...selected].sort().join('') : '') : (selected || '');
-  initAIPanel(inner, q, q.si || 0, userAns);
   panel.appendChild(inner);
+  // AI Q&A panel — placed below the explain box, not inside it
+  const userAns = isMulti ? (selected instanceof Set ? [...selected].sort().join('') : '') : (selected || '');
+  initAIPanel(panel, q, q.si || 0, userAns);
   return panel;
 }
 
@@ -3024,8 +3024,8 @@ function filterReview(type, tabEl) {
         </div>
       </div>`;
 
-    // AI Q&A panel (review mode)
-    const aiSlot = item.querySelector('.review-expand-inner');
+    // AI Q&A panel — placed below the review content
+    const aiSlot = item.querySelector('.review-expand');
     if (aiSlot) initAIPanel(aiSlot, q, q.si || 0, ansDisplay);
 
     item.querySelector('.review-item-head').onclick = () => {
