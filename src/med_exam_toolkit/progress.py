@@ -138,7 +138,13 @@ def init_db(db_path: Path) -> None:
 
 def record_session(db_path: Path, session: dict, user_id: str = LEGACY_USER) -> None:
     now_ms = int(time.time() * 1000)
-    today  = date.today().isoformat()
+    # 优先使用客户端传来的本地日期（避免服务端UTC与用户时区不符导致SM-2日期偏差）
+    client_date = session.get("date", "")
+    try:
+        date.fromisoformat(client_date)  # validate YYYY-MM-DD
+    except (ValueError, TypeError):
+        client_date = ""
+    today = client_date if client_date else date.today().isoformat()
     items  = session.get("items", [])
 
     with _open(db_path) as c:
@@ -214,7 +220,6 @@ def record_sessions_batch(
     """
     processed: list[str] = []
     skipped:   list[str] = []
-    today = date.today().isoformat()
     now_ms = int(time.time() * 1000)
 
     with _open(db_path) as c:
@@ -222,6 +227,14 @@ def record_sessions_batch(
             sid = session.get("id")
             if not sid:
                 continue
+
+            # 优先使用客户端传来的本地日期（时区修复）
+            client_date = session.get("date", "")
+            try:
+                date.fromisoformat(client_date)
+            except (ValueError, TypeError):
+                client_date = ""
+            today = client_date if client_date else date.today().isoformat()
 
             # 检查 session 是否已存在（离线重传场景）
             exists = c.execute(
@@ -336,8 +349,20 @@ def migrate_user_data(db_path: Path, from_uid: str, to_uid: str) -> dict:
 
 # ── 读操作 ────────────────────────────────────────────────────────────
 
-def get_due_fingerprints(db_path: Path, user_id: str = LEGACY_USER) -> list[str]:
-    today = date.today().isoformat()
+def get_due_fingerprints(
+    db_path: Path,
+    user_id: str = LEGACY_USER,
+    client_date: str = "",
+) -> list[str]:
+    """返回到期待复习的 fingerprint 列表。
+    client_date: 客户端本地日期 YYYY-MM-DD，用于修正 UTC 与用户时区差异；
+                 为空时回退到服务端当天日期。
+    """
+    try:
+        date.fromisoformat(client_date)
+        today = client_date
+    except (ValueError, TypeError):
+        today = date.today().isoformat()
     with _open(db_path) as c:
         rows = c.execute(
             "SELECT fingerprint FROM sm2 WHERE user_id=? AND next_due<=? ORDER BY next_due ASC",
@@ -408,8 +433,16 @@ def get_unit_stats(db_path: Path, user_id: str = LEGACY_USER) -> list[dict]:
             for r in rows]
 
 
-def get_overall_stats(db_path: Path, user_id: str = LEGACY_USER) -> dict:
-    today = date.today().isoformat()
+def get_overall_stats(
+    db_path: Path,
+    user_id: str = LEGACY_USER,
+    client_date: str = "",
+) -> dict:
+    try:
+        date.fromisoformat(client_date)
+        today = client_date
+    except (ValueError, TypeError):
+        today = date.today().isoformat()
     with _open(db_path) as c:
         att = c.execute(
             """SELECT COUNT(*) AS total,

@@ -5,6 +5,14 @@
 // ════════════════════════════════════════════
 // 状态
 // ════════════════════════════════════════════
+/** 返回用户本地日期字符串 YYYY-MM-DD，避免 toISOString() 的 UTC 偏差。
+ *  用于 SM-2 复习日期计算和 API 请求中的 ?date= 参数，确保中国用户
+ *  在 UTC 自然日午夜到 08:00 之间仍能正确看到当日复习任务。 */
+function _localDate() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
 const S = {
   mode: 'practice',
   questions: [],
@@ -327,11 +335,15 @@ async function init() {
       // 单题库：直接进入
       await selectBankAndEnter(0);
     } else {
-      // 多题库：优先恢复上次选择，无记录才展示选择页
+      // 多题库：优先恢复上次选择；携带分享链接时自动用 bank 0 进入（join 接口从 token 读真实 bankIdx）
       const saved = parseInt(localStorage.getItem(SELECTED_BANK_KEY) ?? '', 10);
       const validSaved = Number.isFinite(saved) && saved >= 0 && saved < S.banksInfo.length;
+      const hasShareToken = /[#&]share=[a-f0-9]+/.test(location.hash + location.search);
       if (validSaved) {
         await selectBankAndEnter(saved);
+      } else if (hasShareToken) {
+        // 直接用 bank 0 进入，_checkShareToken 会调 /api/exam/join，服务端从 token 取真正的 bankIdx
+        await selectBankAndEnter(0);
       } else {
         renderBankSelectPage();
       }
@@ -1617,7 +1629,8 @@ function _fillQ(wrap, q, isExam, isPractice) {
   const tags = document.createElement('div');
   tags.className = 'q-tags';
   if (q.mode) tags.innerHTML += `<span class="q-tag mode-tag">${esc(q.mode)}</span>`;
-  if (q.unit) tags.innerHTML += `<span class="q-tag unit-tag">${esc(q.unit)}</span>`;
+  // 考试模式不显示章节（防止泄露分组信息），其他模式正常显示
+  if (q.unit && !isExam) tags.innerHTML += `<span class="q-tag unit-tag">${esc(q.unit)}</span>`;
   if (q.rate != null && q.rate !== '' && q.rate !== undefined && !isExam) {
     let rateVal = q.rate;
     if (typeof rateVal === 'string') rateVal = parseFloat(rateVal.replace('%',''));
@@ -2457,7 +2470,7 @@ async function _recordMemoSession() {
   });
   if (!items.length) return;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = _localDate();
   const units  = [...new Set(items.map(it => it.unit).filter(Boolean))];
   const payload = {
     id:       'memo-' + String(Date.now()),
@@ -2610,7 +2623,7 @@ function calculateResults() {
     skip,
     timeSec: S.results.timeSec,
     time_sec: S.results.timeSec,
-    date: new Date().toISOString().slice(0, 10),
+    date: _localDate(),
     units: [...new Set(qs.map(q => q.unit).filter(Boolean))].slice(0,2).join('、'),
   };
   S.history.unshift(record);
@@ -2997,7 +3010,7 @@ async function _recordSessionToServer(results, questions, ans, sessionId) {
     items.push({ fingerprint: fp, result, mode: q.mode, unit: q.unit });
   });
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = _localDate();
   const units  = [...new Set(questions.map(q => q.unit).filter(Boolean))];
   const payload = {
     id:       sessionId || String(Date.now()),
@@ -3040,7 +3053,7 @@ async function _recordSessionToServer(results, questions, ans, sessionId) {
 async function _refreshProgressBadges() {
   try {
     const [dueRes, wbRes] = await Promise.all([
-      apiFetch('/api/review/due?' + bankQS()).then(r => r.json()),
+      apiFetch('/api/review/due?' + bankQS() + '&date=' + _localDate()).then(r => r.json()),
       apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json()),
     ]);
     const dueCount   = (dueRes.fingerprints || []).length;
@@ -3064,7 +3077,7 @@ async function _refreshProgressBadges() {
 /** 开始今日 SM-2 复习（练习模式，仅加载到期题目） */
 async function startReview() {
   try {
-    const res  = await apiFetch('/api/review/due?' + bankQS()).then(r => r.json());
+    const res  = await apiFetch('/api/review/due?' + bankQS() + '&date=' + _localDate()).then(r => r.json());
     const fps  = res.fingerprints || [];
     if (!fps.length) { toast('🎉 今日没有待复习题目！'); return; }
     const data = await apiFetch(
@@ -3153,7 +3166,7 @@ async function shareExam() {
     const res = await apiFetch('/api/exam/share?' + bankQS(), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fingerprints: fps, mode: R.mode || 'exam' }),
+      body: JSON.stringify({ fingerprints: fps, mode: R.mode || 'exam', time_limit: S.examLimit || CFG.examTime * 60 }),
     });
     const d = await res.json();
     if (!d.token) { toast('分享失败', true); return; }
@@ -3176,9 +3189,19 @@ async function _checkShareToken() {
   const token = m[1];
   location.hash = ''; // 清除 hash 防止重复触发
   try {
-    const res = await apiFetch('/api/exam/join?token=' + token + '&' + bankQS());
+    // 注意：join 接口从 token 内部读取 bankIdx，客户端不需要传 ?bank=N
+    const res = await apiFetch('/api/exam/join?token=' + token);
     const d   = await res.json();
-    if (!d.items || !d.items.length) { toast('试卷已过期或无效'); return; }
+    if (d.error) { toast('分享链接已过期或无效（' + d.error + '）', true); return; }
+    if (!d.items || !d.items.length) { toast('分享试卷为空或已过期', true); return; }
+
+    // 若服务端返回了 bank_idx（与当前题库不同），先静默切换
+    if (typeof d.bank_idx === 'number' && d.bank_idx !== S.bankID && d.bank_idx < S.banksInfo.length) {
+      S.bankID = d.bank_idx;
+      localStorage.setItem(SELECTED_BANK_KEY, String(d.bank_idx));
+      try { S.bankInfo = await apiFetch('/api/info?bank=' + d.bank_idx).then(r => r.json()); } catch(_) {}
+    }
+
     S.mode      = d.mode || 'exam';
     S.questions = d.items;
     S.examId    = d.exam_id || null;
@@ -3191,7 +3214,7 @@ async function _checkShareToken() {
     toast(`📋 已加载分享试卷：${d.items.length} 题`);
     if (S.mode === 'exam' || S.mode === 'exam_done') {
       S.mode = 'exam';
-      S.examLimit = d.time_limit || 3600;
+      S.examLimit = d.time_limit || 90 * 60;
       startQuiz();
       saveExamSession();
     } else {
