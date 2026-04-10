@@ -78,35 +78,51 @@ if (typeof marked !== 'undefined') {
  * - flush():    final render without cursor
  */
 function makeStreamingRenderer(container, cursor) {
-  let buffer = '';
+  let committed = '';   // text already rendered
+  let pending = '';     // text waiting to be dripped in
+  let rafId = null;
+  // Characters to release per animation frame (~60fps).
+  // 3 chars/frame ≈ 180 chars/sec — fast enough to keep up with most
+  // streaming speeds while still looking smooth and "flowy".
+  const CHARS_PER_FRAME = 3;
 
-  function renderMarkdown() {
+  function renderMarkdown(text, withCursor) {
     let html;
     if (typeof marked !== 'undefined' && marked.parse) {
-      try { html = marked.parse(buffer, { async: false }); } catch (e) { html = esc(buffer); }
+      try { html = marked.parse(text, { async: false }); } catch (e) { html = esc(text); }
     } else {
-      html = '<pre>' + esc(buffer) + '</pre>';
+      html = '<pre>' + esc(text) + '</pre>';
     }
     container.innerHTML = html;
-    if (cursor) container.appendChild(cursor);
+    if (withCursor && cursor) container.appendChild(cursor);
+  }
+
+  function drip() {
+    if (pending.length === 0) {
+      rafId = null;
+      return;
+    }
+    // Move a small slice from pending → committed
+    const slice = pending.slice(0, CHARS_PER_FRAME);
+    pending = pending.slice(CHARS_PER_FRAME);
+    committed += slice;
+    renderMarkdown(committed, true);
+    scrollMessages(container.parentElement || container);
+    rafId = requestAnimationFrame(drip);
   }
 
   // Public: push raw text chunk from SSE stream
   function push(text) {
-    buffer += text;
-    renderMarkdown();
-    scrollMessages(container.parentElement || container);
+    pending += text;
+    if (!rafId) rafId = requestAnimationFrame(drip);
   }
 
-  // Public: final flush — render without cursor
+  // Public: final flush — render everything immediately without cursor
   function flush() {
-    let html;
-    if (typeof marked !== 'undefined' && marked.parse) {
-      try { html = marked.parse(buffer, { async: false }); } catch (e) { html = esc(buffer); }
-    } else {
-      html = '<pre>' + esc(buffer) + '</pre>';
-    }
-    container.innerHTML = html;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    committed += pending;
+    pending = '';
+    renderMarkdown(committed, false);
   }
 
   return { push, flush };
