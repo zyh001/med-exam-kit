@@ -460,6 +460,7 @@
         <div class="progress-bar"><div class="progress-fill" id="progress-fill"></div></div>
       </div>
       <div class="quiz-timer" id="quiz-timer" style="display:none">⏱ <span id="timer-display">00:00</span></div>
+      <button class="flag-btn" id="calc-toggle-btn" onclick="toggleCalc()" title="计算器" style="display:none">🧮</button>
       <button class="flag-btn" id="flag-btn" onclick="toggleFlag()" title="标记">⚑</button>
     </div>
     <!-- Exam grid -->
@@ -475,8 +476,6 @@
         </div>
       </div>
     </div>
-    <!-- 考试模式浮动计算器按钮 -->
-    <button class="calc-fab" id="calc-toggle-btn" onclick="toggleCalc()" title="计算器" style="display:none">🧮</button>
     <div class="quiz-footer" id="quiz-footer">
       <button class="nav-btn" id="btn-prev" onclick="prevQ()">← 上题</button>
       <button class="nav-btn primary" id="btn-next" onclick="nextOrSubmit()">下一题 →</button>
@@ -674,8 +673,11 @@
         <button class="calc-close" onclick="toggleCalc()">✕</button>
       </div>
       <div class="calc-display">
-        <div class="calc-expr" id="calc-expr"></div>
-        <div class="calc-result" id="calc-result">0</div>
+        <div class="calc-history" id="calc-history"></div>
+        <div class="calc-current">
+          <div class="calc-expr" id="calc-expr"></div>
+          <div class="calc-result" id="calc-result">0</div>
+        </div>
       </div>
       <div class="calc-keys simple" id="calc-keys-simple">
         <button class="ck fn" onclick="calcAC()">AC</button>
