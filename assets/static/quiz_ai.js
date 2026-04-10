@@ -131,16 +131,10 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
       }
       pending = '';
     }
-    // End smd stream
+    // End smd stream — finalize DOM
     if (smdParser) {
       smd.parser_end(smdParser);
       smdParser = null;
-    }
-    // Final polish: re-render with marked for full GFM + LaTeX support
-    if (typeof marked !== 'undefined' && marked.parse && fullText) {
-      try {
-        container.innerHTML = marked.parse(fullText, { async: false });
-      } catch (e) { /* keep smd output */ }
     }
   }
 
