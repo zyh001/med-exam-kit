@@ -618,10 +618,16 @@ def api_exam_share():
     if not fps:
         return jsonify({"error": "fingerprints required"}), 400
 
-    mode       = body.get("mode", "exam")
+    # exam_done 是前端内部状态，统一规范为 'exam' 存储
+    raw_mode   = body.get("mode", "exam")
+    mode       = "exam" if raw_mode in ("exam", "exam_done") else raw_mode
     time_limit = int(body.get("time_limit", 90 * 60))
     if time_limit <= 0:
         time_limit = 90 * 60
+
+    scoring          = bool(body.get("scoring", False))
+    score_per_mode   = body.get("score_per_mode") or {}
+    multi_score_mode = body.get("multi_score_mode") or "strict"
 
     _, bank_idx, ok = _get_bank_with_idx()
     if not ok:
@@ -632,12 +638,15 @@ def api_exam_share():
     expires_at = now + _SHARE_TTL
 
     cfg = {
-        "fingerprints": fps,
-        "mode":         mode,
-        "bank_idx":     bank_idx,
-        "time_limit":   time_limit,
-        "ts":           now,
-        "expires_at":   expires_at,
+        "fingerprints":     fps,
+        "mode":             mode,
+        "bank_idx":         bank_idx,
+        "time_limit":       time_limit,
+        "scoring":          scoring,
+        "score_per_mode":   score_per_mode,
+        "multi_score_mode": multi_score_mode,
+        "ts":               now,
+        "expires_at":       expires_at,
     }
 
     with _share_lock:
@@ -680,29 +689,34 @@ def api_exam_join():
     # 从该题库按 fingerprint 过滤题目并展开为 flat 列表
     rows = _select_questions_by_fp(b.questions, fp_set)
 
-    # exam 模式：剥离答案，服务端暂存
+    # exam / exam_done 模式：剥离答案，服务端暂存密封
+    # 返回给客户端统一使用 'exam'，让接收方直接进入考试模式
+    is_exam_mode = cfg["mode"] in ("exam", "exam_done")
     eid = None
-    if cfg["mode"] == "exam" and rows:
+    if is_exam_mode and rows:
         eid = secrets.token_hex(16)
         answers = {r["fingerprint"]: {"answer": r["answer"], "discuss": r["discuss"]} for r in rows}
         for r in rows:
             r["answer"] = ""
             r["discuss"] = ""
         with _exam_lock:
-            # 清理超过 24h 的旧 exam session
             old = [k for k, v in _exam_sessions.items() if now - v["ts"] > 86400]
             for k in old:
                 del _exam_sessions[k]
             _exam_sessions[eid] = {"answers": answers, "ts": now}
 
+    out_mode   = "exam" if is_exam_mode else cfg["mode"]
     time_limit = cfg.get("time_limit", 90 * 60)
     return jsonify({
-        "items":      rows,
-        "total":      len(rows),
-        "mode":       cfg["mode"],
-        "exam_id":    eid,
-        "time_limit": time_limit,
-        "bank_idx":   bank_idx,
+        "items":            rows,
+        "total":            len(rows),
+        "mode":             out_mode,
+        "exam_id":          eid,
+        "time_limit":       time_limit,
+        "bank_idx":         bank_idx,
+        "scoring":          cfg.get("scoring", False),
+        "score_per_mode":   cfg.get("score_per_mode", {}),
+        "multi_score_mode": cfg.get("multi_score_mode", "strict"),
     })
 
 
