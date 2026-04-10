@@ -4457,13 +4457,21 @@ function calcConst(c) {
   _calcRefresh();
 }
 
-function calcEval() {
+async function calcEval() {
   var expr = _calc.input;
   if (!expr) return;
-  var val = _calcEvaluate(expr);
-  document.getElementById('calc-expr').textContent   = expr + ' =';
-  document.getElementById('calc-result').textContent  = val;
-  _calc.input = val;
+  document.getElementById('calc-expr').textContent = expr + ' =';
+  document.getElementById('calc-result').textContent = '…';
+  try {
+    var resp = await apiFetch('/api/calculate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expr: expr, deg: _calc.isDeg }) });
+    var res = await resp.json();
+    var val = res.result || 'Error';
+    document.getElementById('calc-result').textContent = val;
+    _calc.input = val === 'Error' ? '' : val;
+  } catch (e) {
+    document.getElementById('calc-result').textContent = 'Error';
+    _calc.input = '';
+  }
   _calc.done = true;
 }
 
@@ -4484,73 +4492,6 @@ function calcToggleDeg() {
 function calcCopyResult() {
   var t = document.getElementById('calc-result').textContent;
   if (navigator.clipboard) navigator.clipboard.writeText(t).then(function(){ toast('已复制'); });
-}
-
-/* ── 递归下降表达式解析器 ── */
-function _calcEvaluate(raw) {
-  try {
-    var e = raw.replace(/×/g,'*').replace(/÷/g,'/').replace(/−/g,'-').replace(/π/g,'(3.141592653589793)').replace(/%/g,'/100');
-    // 独立的 e 常量（不跟 ^ 且不在函数名中）
-    e = e.replace(/(?<![a-zA-Z])e(?!\^)(?![a-zA-Z])/g, '(2.718281828459045)');
-    var isDeg = _calc.isDeg;
-    var pos = 0;
-    function ws() { while (pos < e.length && e[pos] === ' ') pos++; }
-    function tryMatch(s) { ws(); if (e.substr(pos, s.length) === s) { pos += s.length; return true; } return false; }
-    function parseAtom() {
-      ws();
-      var fns = ['asin','acos','atan','sqrt','sin','cos','tan','lg','ln'];
-      for (var i = 0; i < fns.length; i++) {
-        if (e.substr(pos, fns[i].length) === fns[i] && e[pos + fns[i].length] === '(') {
-          pos += fns[i].length + 1;
-          var a = parseExpr();
-          if (e[pos] === ')') pos++;
-          var tr = function(x){ return x * 3.141592653589793 / 180; };
-          switch(fns[i]) {
-            case 'sin':  return Math.sin(isDeg ? tr(a) : a);
-            case 'cos':  return Math.cos(isDeg ? tr(a) : a);
-            case 'tan':  return Math.tan(isDeg ? tr(a) : a);
-            case 'asin': return Math.asin(a) * (isDeg ? 180/3.141592653589793 : 1);
-            case 'acos': return Math.acos(a) * (isDeg ? 180/3.141592653589793 : 1);
-            case 'atan': return Math.atan(a) * (isDeg ? 180/3.141592653589793 : 1);
-            case 'sqrt': return Math.sqrt(a);
-            case 'lg':   return Math.log10(a);
-            case 'ln':   return Math.log(a);
-          }
-        }
-      }
-      if (e.substr(pos,3) === '10^') { pos+=3; return Math.pow(10, parseUnary()); }
-      if (e.substr(pos,2) === 'e^')  { pos+=2; return Math.exp(parseUnary()); }
-      if (e[pos] === '(') { pos++; var v = parseExpr(); if (e[pos]===')') pos++; return v; }
-      var start = pos;
-      if (e[pos]==='-'||e[pos]==='+') pos++;
-      while (pos<e.length && ((e[pos]>='0'&&e[pos]<='9')||e[pos]==='.')) pos++;
-      if (pos<e.length && (e[pos]==='e'||e[pos]==='E')) { pos++; if(e[pos]==='+'||e[pos]==='-') pos++; while(pos<e.length&&e[pos]>='0'&&e[pos]<='9') pos++; }
-      var n = parseFloat(e.substring(start, pos));
-      if (isNaN(n)) throw new Error('bad');
-      return n;
-    }
-    function parsePostfix() { var v=parseAtom(); ws(); while(pos<e.length&&e[pos]==='!'){pos++;v=_factorial(v);} return v; }
-    function parseUnary() { ws(); if(e[pos]==='-'){pos++;return -parsePostfix();} if(e[pos]==='+')pos++; return parsePostfix(); }
-    function parsePow() { var b=parseUnary(); ws(); if(e[pos]==='^'){pos++;b=Math.pow(b,parsePow());} else if(pos+1<e.length&&e[pos]==='*'&&e[pos+1]==='*'){pos+=2;b=Math.pow(b,parsePow());} return b; }
-    function parseMulDiv() {
-      var v=parsePow();
-      while(true){ ws(); if(e[pos]==='*'&&(pos+1>=e.length||e[pos+1]!=='*')){pos++;v*=parsePow();} else if(e[pos]==='/'){pos++;v/=parsePow();} else break; }
-      return v;
-    }
-    function parseExpr() {
-      var v=parseMulDiv();
-      while(true){ ws(); if(e[pos]==='+'){pos++;v+=parseMulDiv();} else if(e[pos]==='-'){pos++;v-=parseMulDiv();} else break; }
-      return v;
-    }
-    var val = parseExpr();
-    if (!isFinite(val)) return val === Infinity ? '∞' : val === -Infinity ? '-∞' : 'Error';
-    return parseFloat(val.toPrecision(12)).toString();
-  } catch(err) { return 'Error'; }
-}
-
-function _factorial(n) {
-  if (n < 0 || n !== Math.floor(n) || n > 170) return NaN;
-  var r = 1; for (var i = 2; i <= n; i++) r *= i; return r;
 }
 
 function _showCalcBtn(show) {
