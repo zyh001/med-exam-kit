@@ -58,26 +58,6 @@ const inlineMathExt = {
   }
 };
 
-// ── CJK emphasis preprocessing ───────────────────────────────────
-// CommonMark's right-flanking rules reject closing ** when preceded
-// by Unicode punctuation (e.g. ）) and followed by non-punctuation
-// non-whitespace (e.g. CJK chars). Pre-render these to <strong>/<em>
-// before passing to marked, which passes through inline HTML cleanly.
-//
-// Example: **错误（A Error）**类型
-//   Closing ** preceded by ）(punct) + followed by 类(CJK) → NOT
-//   right-flanking → marked leaves it raw. Fix: pre-convert to HTML.
-
-const _CJK_RANGE = '\u4e00-\u9fff\u3400-\u4dbf\u3000-\u303f\uff00-\uffef';
-const _CJK_STRONG_RE = new RegExp('\\*\\*(.+?)\\*\\*(?=[' + _CJK_RANGE + '])', 'g');
-const _CJK_EM_RE     = new RegExp('(?<!\\*)\\*([^*]+?)\\*(?!\\*)(?=[' + _CJK_RANGE + '])', 'g');
-
-function preprocessCJKEmphasis(text) {
-  text = text.replace(_CJK_STRONG_RE, '<strong>$1</strong>');
-  text = text.replace(_CJK_EM_RE,     '<em>$1</em>');
-  return text;
-}
-
 // Configure marked for medical content + LaTeX math
 if (typeof marked !== 'undefined') {
   marked.use({
@@ -102,7 +82,7 @@ if (typeof marked !== 'undefined') {
  * - push(chunk): accumulate text, schedule drip animation
  * - flush():    final render of all remaining text
  */
-function makeStreamingRenderer(container, cursor) {
+function makeStreamingRenderer(container, cursor, scrollTarget) {
   let committed = '';           // text fed into renderer so far
   let pending = '';             // text waiting to drip in
   let rafId = null;
@@ -116,7 +96,7 @@ function makeStreamingRenderer(container, cursor) {
   function fullRender(withCursor) {
     let html;
     if (typeof marked !== 'undefined' && marked.parse) {
-      try { html = marked.parse(preprocessCJKEmphasis(committed), { async: false }); } catch (e) { html = esc(committed); }
+      try { html = marked.parse(committed, { async: false }); } catch (e) { html = esc(committed); }
     } else {
       html = '<pre>' + esc(committed) + '</pre>';
     }
@@ -155,7 +135,7 @@ function makeStreamingRenderer(container, cursor) {
       tailNode.textContent += slice;
     }
 
-    scrollMessages(container.parentElement || container);
+    if (scrollTarget) scrollMessages(scrollTarget);
     rafId = requestAnimationFrame(drip);
   }
 
@@ -476,7 +456,7 @@ function sendAIMessage(key) {
                 hasReasoning = true;
                 thinkingWrap.style.display = '';
                 thinkingWrap.classList.add('ai-thinking-fadein');
-                reasoningRenderer = makeStreamingRenderer(thinkingBody, null);
+                reasoningRenderer = makeStreamingRenderer(thinkingBody, null, messages);
               }
               reasoningRenderer.push(obj.reasoning);
               fullReasoning += obj.reasoning;
@@ -492,7 +472,7 @@ function sendAIMessage(key) {
               }
               // Lazily create streaming renderer on first content chunk
               if (!contentRenderer) {
-                contentRenderer = makeStreamingRenderer(contentWrap, cursor);
+                contentRenderer = makeStreamingRenderer(contentWrap, cursor, messages);
               }
               contentRenderer.push(obj.content);
               fullRawText += obj.content;
@@ -557,7 +537,7 @@ function sendAIMessage(key) {
  */
 function renderContent(container, text, cursor) {
   if (typeof marked !== 'undefined' && marked.parse) {
-    container.innerHTML = marked.parse(preprocessCJKEmphasis(text));
+    container.innerHTML = marked.parse(text);
   } else {
     // Fallback: escape and add line breaks
     container.textContent = text;
