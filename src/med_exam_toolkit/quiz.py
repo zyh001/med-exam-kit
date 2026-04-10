@@ -53,6 +53,15 @@ _RATE_WINDOW = 60
 _rate_buckets: dict[str, deque] = defaultdict(deque)
 _rate_lock   = threading.Lock()
 
+# ── 考试防作弊：sealed 模式答案暂存 ──
+_exam_sessions: dict[str, dict] = {}   # exam_id -> {fingerprint: {answer, discuss}, ts}
+_exam_lock = threading.Lock()
+
+# ── 试卷分享令牌（内存存储，7天有效，服务重启后失效）──
+_share_tokens: dict[str, dict] = {}    # token -> {fingerprints, mode, bank_idx, time_limit, ts, expires_at}
+_share_lock = threading.Lock()
+_SHARE_TTL = 7 * 24 * 3600             # 7 天有效期（秒）
+
 
 def _check_rate_limit(ip: str) -> bool:
     now = time.monotonic()
@@ -99,6 +108,42 @@ def _get_bank() -> tuple[BankState, bool]:
     if idx < 0 or idx >= len(_banks):
         return None, False
     return _banks[idx], True
+
+
+def _get_bank_with_idx() -> tuple[BankState, int, bool]:
+    """Like _get_bank() but also returns the index."""
+    try:
+        idx = int(request.args.get("bank", 0))
+    except (ValueError, TypeError):
+        return None, 0, False
+    if idx < 0 or idx >= len(_banks):
+        return None, 0, False
+    return _banks[idx], idx, True
+
+
+def _select_questions_by_fp(questions: list, fp_set: set) -> list[dict]:
+    """将题库中 fingerprint 在 fp_set 内的题目展开为 sqFlat 风格字典列表。"""
+    rows = []
+    for qi, q in enumerate(questions):
+        if q.fingerprint not in fp_set:
+            continue
+        shared = list(q.shared_options or [])
+        for si, sq in enumerate(q.sub_questions):
+            eff_opts = list(sq.options) if sq.options else shared
+            rows.append({
+                "qi": qi, "si": si,
+                "id": f"{qi}-{si}",
+                "mode": q.mode or "", "unit": q.unit or "",
+                "cls": getattr(q, "cls", "") or "",
+                "stem": q.stem or "", "shared_options": shared,
+                "text": sq.text or "", "options": eff_opts,
+                "answer": (sq.ai_answer or sq.answer or ""),
+                "discuss": (sq.ai_discuss or sq.discuss or ""),
+                "point": getattr(sq, "point", "") or "",
+                "rate": getattr(sq, "rate", "") or "",
+                "fingerprint": q.fingerprint,
+            })
+    return rows
 
 
 def _create_app() -> Flask:
@@ -425,8 +470,9 @@ def api_stats():
         return jsonify({"overall": {}, "history": [], "units": []})
     from med_exam_toolkit.progress import get_overall_stats, get_history, get_unit_stats
     uid = _get_user_id()
+    client_date = request.args.get("date", "")
     return jsonify({
-        "overall": get_overall_stats(b.db_path, user_id=uid),
+        "overall": get_overall_stats(b.db_path, user_id=uid, client_date=client_date),
         "history": get_history(b.db_path, user_id=uid, limit=20),
         "units":   get_unit_stats(b.db_path, user_id=uid),
     })
@@ -440,7 +486,9 @@ def api_review_due():
     if b.db_path is None or not b.db_path.exists():
         return jsonify({"fingerprints": [], "count": 0})
     from med_exam_toolkit.progress import get_due_fingerprints
-    fps = get_due_fingerprints(b.db_path, user_id=_get_user_id())
+    # 接受客户端本地日期以修正时区偏差（中国用户在 UTC 午夜到 08:00 间跨天时尤为关键）
+    client_date = request.args.get("date", "")
+    fps = get_due_fingerprints(b.db_path, user_id=_get_user_id(), client_date=client_date)
     return jsonify({"fingerprints": fps, "count": len(fps)})
 
 
@@ -539,6 +587,123 @@ def api_sync_status():
         return jsonify({"db_ready": True, **status})
     except Exception as e:
         return jsonify({"db_ready": False, "error": str(e)}), 500
+
+
+# ════════════════════════════════════════════
+# API — 考试防作弊 & 试卷分享
+# ════════════════════════════════════════════
+
+@app.get("/api/exam/reveal")
+def api_exam_reveal():
+    """考试模式提交后下发答案（一次性，消费后删除）。"""
+    eid = request.args.get("id", "")
+    if not eid:
+        return jsonify({"error": "缺少 exam id"}), 400
+    with _exam_lock:
+        sess = _exam_sessions.pop(eid, None)
+    if sess is None:
+        return jsonify({"error": "考试会话已过期或不存在"}), 404
+    return jsonify({"answers": sess["answers"]})
+
+
+@app.post("/api/exam/share")
+def api_exam_share():
+    """生成试卷分享令牌（7天有效，内存存储）。"""
+    try:
+        body = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid request"}), 400
+
+    fps = body.get("fingerprints", [])
+    if not fps:
+        return jsonify({"error": "fingerprints required"}), 400
+
+    mode       = body.get("mode", "exam")
+    time_limit = int(body.get("time_limit", 90 * 60))
+    if time_limit <= 0:
+        time_limit = 90 * 60
+
+    _, bank_idx, ok = _get_bank_with_idx()
+    if not ok:
+        return jsonify({"error": "bank not found"}), 404
+
+    token      = secrets.token_hex(8)
+    now        = int(time.time())
+    expires_at = now + _SHARE_TTL
+
+    cfg = {
+        "fingerprints": fps,
+        "mode":         mode,
+        "bank_idx":     bank_idx,
+        "time_limit":   time_limit,
+        "ts":           now,
+        "expires_at":   expires_at,
+    }
+
+    with _share_lock:
+        # 清理已过期 token
+        expired = [k for k, v in _share_tokens.items() if now > v.get("expires_at", 0)]
+        for k in expired:
+            del _share_tokens[k]
+        _share_tokens[token] = cfg
+
+    return jsonify({"ok": True, "token": token})
+
+
+@app.get("/api/exam/join")
+def api_exam_join():
+    """用 token 加入分享试卷。服务端从 token 读取 bank_idx，客户端无需传 ?bank=N。"""
+    token = request.args.get("token", "")
+    if not token:
+        return jsonify({"error": "缺少 token"}), 400
+
+    now = int(time.time())
+    with _share_lock:
+        cfg = _share_tokens.get(token)
+
+    if cfg is None:
+        return jsonify({"error": "分享链接已过期或无效"}), 404
+
+    # 校验 7 天有效期
+    if now > cfg.get("expires_at", 0):
+        with _share_lock:
+            _share_tokens.pop(token, None)
+        return jsonify({"error": "分享链接已过期（7天有效期）"}), 404
+
+    bank_idx = cfg["bank_idx"]
+    if bank_idx < 0 or bank_idx >= len(_banks):
+        return jsonify({"error": "题库不存在"}), 404
+
+    b = _banks[bank_idx]
+    fp_set = set(cfg["fingerprints"])
+
+    # 从该题库按 fingerprint 过滤题目并展开为 flat 列表
+    rows = _select_questions_by_fp(b.questions, fp_set)
+
+    # exam 模式：剥离答案，服务端暂存
+    eid = None
+    if cfg["mode"] == "exam" and rows:
+        eid = secrets.token_hex(16)
+        answers = {r["fingerprint"]: {"answer": r["answer"], "discuss": r["discuss"]} for r in rows}
+        for r in rows:
+            r["answer"] = ""
+            r["discuss"] = ""
+        with _exam_lock:
+            # 清理超过 24h 的旧 exam session
+            old = [k for k, v in _exam_sessions.items() if now - v["ts"] > 86400]
+            for k in old:
+                del _exam_sessions[k]
+            _exam_sessions[eid] = {"answers": answers, "ts": now}
+
+    time_limit = cfg.get("time_limit", 90 * 60)
+    return jsonify({
+        "items":      rows,
+        "total":      len(rows),
+        "mode":       cfg["mode"],
+        "exam_id":    eid,
+        "time_limit": time_limit,
+        "bank_idx":   bank_idx,
+    })
 
 
 # ════════════════════════════════════════════
