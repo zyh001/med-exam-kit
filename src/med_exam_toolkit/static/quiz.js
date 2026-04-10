@@ -534,6 +534,8 @@ function showScreen(id, dir = 'forward') {
 
   // 每次切换回主页：先用本地数据即时渲染，再异步拉服务端最新数据
   if (id === 's-home') {
+    // 从考试完成状态返回主页时，确保不残留任何 exam session（防御性清除）
+    if (S.mode === 'exam_done') clearExamSession();
     renderHistorySection();   // 本地数据，无网络延迟
     refreshHomeData();        // 异步拉服务端记录、刷新徽章
   }
@@ -2040,6 +2042,9 @@ function quitQuiz() {
       return;
     }
     clearExamSession();
+  } else if (S.mode === 'exam_done') {
+    // 考试已提交，进入的是「再练一遍」模式——直接返回，无需保存
+    clearExamSession(); // 防御性清除，确保不残留
   } else if (S.mode === 'practice') {
     // 练习模式：自动保存进度，直接退出
     savePracticeSession();
@@ -2202,11 +2207,18 @@ async function submitExam() {
   }
 
   calculateResults();
+  clearExamSession(); // 二次兜底：防止 await 期间任何路径重新写入
   showScreen('s-results');
 }
+
 function retryQuiz() {
-  // 如果题目还在内存，直接重置状态重新做一遍
+  // 再练一遍：确定进入练习模式，无论之前是 exam/exam_done/practice
+  // exam_done 是考试提交后的内部状态，再练时统一恢复为 practice
+  const prevMode = S.mode;
   if (S.questions && S.questions.length) {
+    // 根据原始模式决定重试模式：exam/exam_done 重试为练习，其他保持
+    const retryMode = (prevMode === 'exam' || prevMode === 'exam_done') ? 'practice' : (prevMode || 'practice');
+    S.mode = retryMode;
     S.cur = 0;
     S.ans = {};
     S.revealed = new Set();
@@ -2216,15 +2228,15 @@ function retryQuiz() {
     S.modeGroups = buildModeGroups(S.questions);
     S.currentGroupIdx = 0;
     S.caseMaxReached = {};
-    S.practiceSessionId = S.mode === 'practice' ? String(Date.now()) : null;
-    if (S.mode === 'memo') startMemo();
+    S.practiceSessionId = retryMode === 'practice' ? String(Date.now()) : null;
+    if (retryMode === 'memo') startMemo();
     else {
       startQuiz();
-      if (S.mode === 'exam') saveExamSession();
+      if (retryMode === 'exam') saveExamSession();
     }
   } else {
     // 题目已被清理，回到配置页重新出题
-    openConfig(S.mode || 'practice');
+    openConfig((prevMode === 'exam' || prevMode === 'exam_done') ? 'practice' : (prevMode || 'practice'));
   }
 }
 
