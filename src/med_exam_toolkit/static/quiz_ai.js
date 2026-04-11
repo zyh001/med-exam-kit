@@ -3,6 +3,41 @@
    依赖：common.js (apiFetch), quiz.js (S, esc, isMultiQ), marked.min.js, katex
    ================================================================ */
 
+// ── 按需懒加载 AI 静态资源 ────────────────────────────────────────
+// katex(264KB) + smd(12KB) + auto-render(3.5KB) 只在首次打开 AI 面板时加载
+const AI_STATIC_BASE = '/static';
+const _aiAssetsLoaded = { css: false, js: false };
+let _aiAssetsPromise = null;
+
+function loadAIAssets() {
+  if (_aiAssetsLoaded.js) return Promise.resolve();
+  if (_aiAssetsPromise) return _aiAssetsPromise;
+  _aiAssetsPromise = new Promise((resolve, reject) => {
+    if (!_aiAssetsLoaded.css) {
+      const link = document.createElement('link');
+      link.rel = 'stylesheet';
+      link.href = AI_STATIC_BASE + '/katex.min.css';
+      document.head.appendChild(link);
+      _aiAssetsLoaded.css = true;
+    }
+    const scripts = [
+      AI_STATIC_BASE + '/smd.min.js',
+      AI_STATIC_BASE + '/katex.min.js',
+      AI_STATIC_BASE + '/auto-render.min.js',
+    ];
+    function loadNext(i) {
+      if (i >= scripts.length) { _aiAssetsLoaded.js = true; resolve(); return; }
+      const sc = document.createElement('script');
+      sc.src = scripts[i];
+      sc.onload = () => loadNext(i + 1);
+      sc.onerror = () => reject(new Error('Failed to load ' + scripts[i]));
+      document.body.appendChild(sc);
+    }
+    loadNext(0);
+  });
+  return _aiAssetsPromise;
+}
+
 const AI_MAX_ROUNDS = 3;
 
 // key: "fingerprint-idx" → { round, history, streaming, els }
@@ -250,6 +285,7 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
 function initAIPanel(container, q, sqIdx, userAnswer) {
   // Hide AI entry when not configured
   if (typeof S === 'undefined' || !S.bankInfo || !S.bankInfo.ai_enabled) return;
+  loadAIAssets().catch(() => {}); // 预热：静默触发加载
 
   const key = q.fingerprint + '-' + sqIdx;
 
@@ -406,11 +442,10 @@ function toggleAIPanel(key) {
     panel.style.display = 'none';
     return;
   }
-  panel.style.display = '';
-  // Auto-send initial analysis on first open
-  if (state.round === 0 && !state.streaming) {
-    sendAIMessage(key);
-  }
+  loadAIAssets().then(() => {
+    panel.style.display = '';
+    if (state.round === 0 && !state.streaming) sendAIMessage(key);
+  }).catch(err => console.error('[AI] 资源加载失败', err));
 }
 
 function sendAIMessage(key) {
