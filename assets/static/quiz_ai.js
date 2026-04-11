@@ -67,6 +67,26 @@ if (typeof marked !== 'undefined') {
   });
 }
 
+// ── Table separator fix ──────────────────────────────────────────
+// AI models sometimes output malformed separators like | : | (no dashes).
+// marked requires ≥3 dashes per cell. Fix before parsing.
+function fixTableSeparators(text) {
+  return text.replace(
+    /^(\|[\s:\-|]*\|)$/gm,
+    function(row) {
+      return row.replace(/(?<=\|)\s*:?-{0,2}\s*(?=\|)/g, ' :--- ');
+    }
+  );
+}
+
+// ── Shared marked render (table fix + LaTeX) ─────────────────────
+function markedRender(text) {
+  if (typeof marked !== 'undefined' && marked.parse) {
+    return marked.parse(fixTableSeparators(text), { async: false });
+  }
+  return '<pre>' + esc(text) + '</pre>';
+}
+
 // ── Streaming renderer ─────────────────────────────────────────────
 // Uses streaming-markdown (smd) for incremental DOM rendering.
 // smd only appends to the DOM — never rewrites — so text always
@@ -134,10 +154,10 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
       smd.parser_end(smdParser);
       smdParser = null;
     }
-    // Re-render with marked for LaTeX/GFM polish
-    if (typeof marked !== 'undefined' && marked.parse && fullText) {
+    // Re-render with marked for LaTeX/GFM polish + table fix
+    if (fullText) {
       try {
-        container.innerHTML = marked.parse(fullText, { async: false });
+        container.innerHTML = markedRender(fullText);
       } catch (e) { /* keep smd output */ }
     }
   }
@@ -526,12 +546,7 @@ function sendAIMessage(key) {
  * Render markdown content into a container, optionally appending a cursor element.
  */
 function renderContent(container, text, cursor) {
-  if (typeof marked !== 'undefined' && marked.parse) {
-    container.innerHTML = marked.parse(text);
-  } else {
-    // Fallback: escape and add line breaks
-    container.textContent = text;
-  }
+  container.innerHTML = markedRender(text);
   if (cursor) container.appendChild(cursor);
 }
 
