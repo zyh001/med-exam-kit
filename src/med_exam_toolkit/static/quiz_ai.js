@@ -470,8 +470,11 @@ function sendAIMessage(key) {
   state.streaming = true;
   state.round++;
   updateRoundBadge(header, state.round);
-  input.disabled = true;
+  // 输入框保持可输入；仅按钮变为加载动画
   sendBtn.disabled = true;
+  sendBtn.dataset.origText = sendBtn.textContent;
+  sendBtn.innerHTML = '<span class="ai-spinner"></span>';
+  sendBtn.classList.add('ai-sending');
 
   // Create assistant message container
   const msgEl = appendMsg(messages, 'assistant', '');
@@ -499,9 +502,7 @@ function sendAIMessage(key) {
   msgEl.appendChild(contentWrap);
 
   // Cursor
-  const cursor = document.createElement('span');
-  cursor.className = 'ai-cursor';
-  cursor.textContent = '\u258D';
+  // 不使用文字光标，改用按钮加载动画指示流式状态
 
   // Build request body
   const reqBody = {
@@ -547,7 +548,24 @@ function sendAIMessage(key) {
 
     function read() {
       return reader.read().then(({ done, value }) => {
-        if (done || aborted) {
+        if (aborted) return;
+        if (done) {
+          // 流结束时 buffer 中可能还有最后一行完整数据，必须处理完再收尾
+          if (buffer.trim()) {
+            buffer += '\n'; // 补换行让 split 能提取最后一行
+            const tail = buffer.split('\n');
+            buffer = '';
+            for (const line of tail) {
+              if (!line.startsWith('data: ')) continue;
+              const data = line.slice(6);
+              if (data === '[DONE]') break;
+              try {
+                const obj = JSON.parse(data);
+                if (obj.content) { if (!contentRenderer) contentRenderer = makeStreamingRenderer(contentWrap, null, messages); contentRenderer.push(obj.content); fullRawText += obj.content; }
+                if (obj.reasoning) { if (!reasoningRenderer) reasoningRenderer = makeStreamingRenderer(thinkingBody, null, messages); reasoningRenderer.push(obj.reasoning); fullReasoning += obj.reasoning; }
+              } catch(e) {}
+            }
+          }
           finishStream();
           return;
         }
@@ -595,7 +613,7 @@ function sendAIMessage(key) {
               }
               // Lazily create streaming renderer on first content chunk
               if (!contentRenderer) {
-                contentRenderer = makeStreamingRenderer(contentWrap, cursor, messages);
+                contentRenderer = makeStreamingRenderer(contentWrap, null, messages);
               }
               contentRenderer.push(obj.content);
               fullRawText += obj.content;
@@ -641,6 +659,8 @@ function sendAIMessage(key) {
     if (state.round >= AI_MAX_ROUNDS) {
       input.disabled = true;
       sendBtn.disabled = true;
+      sendBtn.classList.remove('ai-sending');
+      sendBtn.innerHTML = sendBtn.dataset.origText || '发送';
       input.placeholder = '答疑次数已用完';
       const notice = document.createElement('div');
       notice.className = 'ai-closed';
@@ -649,6 +669,8 @@ function sendAIMessage(key) {
     } else {
       input.disabled = false;
       sendBtn.disabled = false;
+      sendBtn.classList.remove('ai-sending');
+      sendBtn.innerHTML = sendBtn.dataset.origText || '发送';
       // 不自动 focus，避免移动端弹出输入法
     }
     scrollMessages(messages);

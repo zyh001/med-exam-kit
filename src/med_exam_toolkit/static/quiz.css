@@ -2022,11 +2022,19 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-thinking-body pre{background:var(--card);padding:6px;border-radius:4px;overflow-x:auto;margin:4px 0}
 .ai-thinking-body pre code{background:none;padding:0}
 
-.ai-typing .ai-cursor{
-  display:inline-block;color:var(--accent);
-  animation:aiCursorPulse 1.2s ease-in-out infinite;
+/* 发送按钮加载动画 */
+.ai-send-btn.ai-sending{
+  pointer-events:none;
+  display:flex;align-items:center;justify-content:center;
 }
-@keyframes aiCursorPulse{0%,100%{opacity:1}50%{opacity:.2}}
+.ai-spinner{
+  width:16px;height:16px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.35);
+  border-top-color:#fff;
+  animation:aiSpin .7s linear infinite;
+  flex-shrink:0;
+}
+@keyframes aiSpin{to{transform:rotate(360deg)}}
 @keyframes aiFadeIn{
   from{opacity:0;transform:translateY(4px)}
   to{opacity:1;transform:none}
