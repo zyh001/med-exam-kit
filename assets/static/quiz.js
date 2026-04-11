@@ -3095,7 +3095,7 @@ async function _recordSessionToServer(results, questions, ans, sessionId) {
         result = (sel === q.answer) ? 1 : 0;
       }
     }
-    items.push({ fingerprint: fp, result, mode: q.mode, unit: q.unit });
+    items.push({ fingerprint: fp, result, mode: q.mode, unit: q.unit, quality: result === 1 ? 4 : result === 0 ? 1 : undefined });
   });
 
   const today = _localDate();

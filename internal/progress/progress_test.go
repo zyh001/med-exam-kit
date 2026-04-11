@@ -61,14 +61,18 @@ func TestRecordSession_UsersIsolated(t *testing.T) {
 	}
 }
 
-func TestSM2_FirstCorrect_NotDueToday(t *testing.T) {
+func TestSM2_FirstCorrect_DueToday(t *testing.T) {
 	db := openTestDB(t)
 	RecordSession(db, makeSession("s1", "u1", 1, 0, []string{"fp-sm2"}), "u1")
 	fps := GetDueFingerprints(db, "u1")
+	found := false
 	for _, fp := range fps {
 		if fp == "fp-sm2" {
-			t.Fatal("fp-sm2 should NOT be due today after first correct answer (interval=1 → due tomorrow)")
+			found = true
 		}
+	}
+	if !found {
+		t.Fatal("fp-sm2 should be due today after first correct answer (interval=0 → due today)")
 	}
 }
 
@@ -86,8 +90,8 @@ func TestSM2_WrongAnswerResets(t *testing.T) {
 	var interval, reps int
 	db.QueryRow("SELECT interval, reps FROM sm2 WHERE user_id='u1' AND fingerprint='fp1'").
 		Scan(&interval, &reps)
-	if reps != 0 || interval != 1 {
-		t.Fatalf("wrong answer should reset: interval=%d reps=%d", interval, reps)
+	if reps != 0 || interval != 0 {
+		t.Fatalf("wrong answer should reset: interval=%d reps=%d (want interval=0 reps=0)", interval, reps)
 	}
 }
 

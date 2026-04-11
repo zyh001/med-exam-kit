@@ -197,19 +197,21 @@ func updateSM2(tx *sql.Tx, userID, fp string, quality int, today string) error {
 		`SELECT ef, interval, reps FROM sm2 WHERE user_id=? AND fingerprint=?`,
 		userID, fp).Scan(&ef, &interval, &reps)
 	if err == sql.ErrNoRows {
-		ef, interval, reps = defaultEF, 1, 0
+		ef, interval, reps = defaultEF, 0, 0
 	} else if err != nil {
 		return err
 	}
 
 	if quality < 3 {
 		reps = 0
-		interval = 1
+		interval = 0
 	} else {
 		switch reps {
 		case 0:
-			interval = 1
+			interval = 0
 		case 1:
+			interval = 1
+		case 2:
 			interval = 6
 		default:
 			interval = int(math.Round(float64(interval) * ef))
@@ -332,8 +334,13 @@ func GetDueFingerprints(db *sql.DB, userID string) []string {
 	}
 	today := time.Now().Format("2006-01-02")
 	rows, err := db.Query(
-		`SELECT fingerprint FROM sm2 WHERE user_id=? AND next_due<=? ORDER BY next_due ASC`,
-		userID, today)
+		`SELECT fingerprint FROM sm2 WHERE user_id=? AND next_due<=?
+		UNION
+		SELECT DISTINCT fingerprint FROM attempts
+		WHERE user_id=? AND fingerprint NOT IN (
+			SELECT fingerprint FROM sm2 WHERE user_id=?
+		)`,
+		userID, today, userID, userID)
 	if err != nil {
 		return nil
 	}
@@ -517,7 +524,14 @@ func GetOverallStats(db *sql.DB, userID string) OverallStats {
 		s.Accuracy = int(math.Round(float64(s.Correct) / float64(s.TotalAttempts) * 100))
 	}
 	db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id=?`, userID).Scan(&s.Sessions)
-	db.QueryRow(`SELECT COUNT(*) FROM sm2 WHERE user_id=? AND next_due<=?`, userID, today).Scan(&s.DueToday)
+	db.QueryRow(`SELECT COUNT(*) FROM (
+		SELECT fingerprint FROM sm2 WHERE user_id=? AND next_due<=?
+		UNION
+		SELECT DISTINCT fingerprint FROM attempts
+		WHERE user_id=? AND fingerprint NOT IN (
+			SELECT fingerprint FROM sm2 WHERE user_id=?
+		)
+	)`, userID, today, userID, userID).Scan(&s.DueToday)
 	db.QueryRow(`SELECT COUNT(DISTINCT fingerprint) FROM attempts WHERE user_id=? AND result=0`, userID).Scan(&s.WrongTopics)
 	return s
 }
@@ -673,9 +687,24 @@ func GetOverallStatsByFP(db *sql.DB, userID string, fps []string, clientDate str
 
 	args2 := append([]any{userID}, args[1:]...)
 	db.QueryRow(`SELECT COUNT(*) FROM sessions WHERE user_id=?`, userID).Scan(&s.Sessions)
-	db.QueryRow(`SELECT COUNT(*) FROM sm2 WHERE user_id=? AND next_due<=?
-		AND fingerprint IN (`+inClause+`)`,
-		append([]any{userID, today}, args[1:]...)...).Scan(&s.DueToday)
+	// DueToday: sm2 due items + items with attempts but no sm2 record (legacy data)
+	dueArgs := make([]any, 0, len(fps)*3+3)
+	dueArgs = append(dueArgs, userID, today)
+	for _, fp := range fps { dueArgs = append(dueArgs, fp) }
+	dueArgs = append(dueArgs, userID)
+	for _, fp := range fps { dueArgs = append(dueArgs, fp) }
+	dueArgs = append(dueArgs, userID)
+	for _, fp := range fps { dueArgs = append(dueArgs, fp) }
+	db.QueryRow(`SELECT COUNT(*) FROM (
+		SELECT fingerprint FROM sm2 WHERE user_id=? AND next_due<=?
+		AND fingerprint IN (`+inClause+`)
+		UNION
+		SELECT DISTINCT fingerprint FROM attempts
+		WHERE user_id=? AND fingerprint IN (`+inClause+`)
+		AND fingerprint NOT IN (
+			SELECT fingerprint FROM sm2 WHERE user_id=? AND fingerprint IN (`+inClause+`)
+		)
+	)`, dueArgs...).Scan(&s.DueToday)
 	_ = args2
 	db.QueryRow(`SELECT COUNT(DISTINCT fingerprint) FROM attempts WHERE user_id=? AND result=0
 		AND fingerprint IN (`+inClause+`)`, args...).Scan(&s.WrongTopics)
@@ -838,19 +867,35 @@ func GetDueFingerprintsByFP(db *sql.DB, userID string, fps []string, clientDate 
 		today = time.Now().Format("2006-01-02")
 	}
 	placeholders := make([]string, len(fps))
-	args := make([]any, 0, len(fps)+2)
-	args = append(args, userID, today)
-	for i, fp := range fps {
+	for i := range fps {
 		placeholders[i] = "?"
-		args = append(args, fp)
 	}
 	inClause := strings.Join(placeholders, ",")
+	// Build args: userID, today, fps... (for first SELECT), then userID, fps... (for UNION)
+	args := make([]any, 0, len(fps)*2+3)
+	args = append(args, userID, today)
+	for _, fp := range fps {
+		args = append(args, fp)
+	}
+	args = append(args, userID)
+	for _, fp := range fps {
+		args = append(args, fp)
+	}
+	args = append(args, userID)
+	for _, fp := range fps {
+		args = append(args, fp)
+	}
 
 	rows, err := db.Query(`
 		SELECT fingerprint FROM sm2
 		WHERE user_id=? AND next_due<=?
 		AND fingerprint IN (`+inClause+`)
-		ORDER BY next_due ASC`, args...)
+		UNION
+		SELECT DISTINCT fingerprint FROM attempts
+		WHERE user_id=? AND fingerprint IN (`+inClause+`)
+		AND fingerprint NOT IN (
+			SELECT fingerprint FROM sm2 WHERE user_id=? AND fingerprint IN (`+inClause+`)
+		)`, args...)
 	if err != nil {
 		return nil
 	}
