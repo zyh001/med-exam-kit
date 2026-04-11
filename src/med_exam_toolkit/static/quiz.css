@@ -1906,6 +1906,10 @@ button,a,[role=button],label{touch-action:manipulation}
 
 /* 2nd mode highlight */
 .ck.sc.is-2nd{background:var(--accent);color:#fff}
+
+/* ════════════════════════════════════════════
+   AI 答疑面板
+════════════════════════════════════════════ */
 .ai-entry-btn{
   display:flex;align-items:center;justify-content:center;gap:6px;
   width:100%;margin-top:10px;padding:10px 0;
@@ -2027,7 +2031,6 @@ button,a,[role=button],label{touch-action:manipulation}
   from{opacity:0;transform:translateY(4px)}
   to{opacity:1;transform:none}
 }
-/* New block elements slide in softly during streaming */
 .ai-block-in{animation:aiBlockIn .3s ease both}
 @keyframes aiBlockIn{
   from{opacity:0;transform:translateY(6px)}
@@ -2044,6 +2047,12 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-input{
   flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;
   background:var(--surface);color:var(--text);font-size:13px;outline:none;
+  resize:none;           /* 禁止手动拖拽 */
+  line-height:1.45;
+  min-height:36px;       /* 单行基准高度 */
+  max-height:calc(1.45em * 4 + 16px); /* 最多 4 行 */
+  overflow-y:hidden;     /* JS 控制是否滚动 */
+  transition:height .1s ease;
 }
 .ai-input:focus{border-color:var(--accent)}
 .ai-input:disabled{opacity:.5;cursor:not-allowed}
