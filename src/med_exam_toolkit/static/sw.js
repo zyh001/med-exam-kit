@@ -1,16 +1,11 @@
 // Service Worker for 医考练习 PWA
-const CACHE_NAME = 'med-quiz-v1.5.0-py';
+const CACHE_NAME = 'med-quiz-v26';
 
 const STATIC_ASSETS = [
     '/static/common.css',
     '/static/quiz.css',
     '/static/common.js',
     '/static/quiz.js',
-    '/static/quiz_ai.js',
-    '/static/smd.min.js',
-    '/static/katex.min.js',
-    '/static/katex.min.css',
-    '/static/auto-render.min.js',
 ];
 
 const OPTIONAL_ASSETS = [

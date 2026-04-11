@@ -4346,9 +4346,21 @@ function getSwipeDir(dx, dy){
 }
 
 // ── 做题区：左右滑动切题 ─────────────────────
+// ── 检查触摸起点是否在可横向滚动的容器内 ─────────────────────
+function _isTouchInHScrollable(el) {
+  while (el && el !== document.body) {
+    const tag = el.tagName;
+    if (tag === 'PRE' || tag === 'CODE') return true;
+    const ox = window.getComputedStyle(el).overflowX;
+    if ((ox === 'auto' || ox === 'scroll') && el.scrollWidth > el.clientWidth + 2) return true;
+    el = el.parentElement;
+  }
+  return false;
+}
+
 (function setupQuizSwipe(){
   const THRESHOLD=70, VELOCITY=0.32, RESIST=0.35;
-  let tx=0,ty=0,t0=0,locked=null,dragging=false;
+  let tx=0,ty=0,t0=0,locked=null,dragging=false,touchTarget=null;
 
   const quizScreen = document.getElementById('s-quiz');
   if(!quizScreen) return;
@@ -4388,13 +4400,15 @@ function getSwipeDir(dx, dy){
   quizBody.addEventListener('touchstart', e=>{
     if(document.querySelector('.screen.active')?.id!=='s-quiz') return;
     const t=e.touches[0]; tx=t.clientX; ty=t.clientY; t0=Date.now();
-    locked=null; dragging=false;
+    locked=null; dragging=false; touchTarget=e.target;
   },{passive:true});
 
   quizBody.addEventListener('touchmove', e=>{
     if(document.querySelector('.screen.active')?.id!=='s-quiz') return;
     const t=e.touches[0], dx=t.clientX-tx, dy=t.clientY-ty;
-    if(!locked){ const d=getSwipeDir(dx,dy); if(!d) return; locked=d; }
+    if(!locked){ const d=getSwipeDir(dx,dy); if(!d) return;
+      if(d!=='vertical'&&_isTouchInHScrollable(touchTarget)){locked='vertical';return;}
+      locked=d; }
     if(locked==='vertical') return;
     e.preventDefault();
     dragging=true;
@@ -4439,7 +4453,7 @@ function getSwipeDir(dx, dy){
 // ── 背题卡片：左划=已掌握，右划=再练 ──────────
 (function setupMemoSwipe(){
   const THRESHOLD=80, VELOCITY=0.38, RESIST=0.38;
-  let tx=0,ty=0,t0=0,locked=null,dragging=false;
+  let tx=0,ty=0,t0=0,locked=null,dragging=false,touchTarget=null;
 
   function card(){ return document.getElementById('memo-card'); }
   function overlay(){ return document.getElementById('memo-swipe-overlay'); }
@@ -4471,13 +4485,15 @@ function getSwipeDir(dx, dy){
     if(document.querySelector('.screen.active')?.id!=='s-memo') return;
     if(e.target.closest('.memo-reveal-btn')||e.target.closest('.memo-rate-row')) return;
     const t=e.touches[0]; tx=t.clientX; ty=t.clientY; t0=Date.now();
-    locked=null; dragging=false;
+    locked=null; dragging=false; touchTarget=e.target;
   },{passive:true});
 
   memoBody.addEventListener('touchmove', e=>{
     if(document.querySelector('.screen.active')?.id!=='s-memo') return;
     const t=e.touches[0], dx=t.clientX-tx, dy=t.clientY-ty;
-    if(!locked){const d=getSwipeDir(dx,dy);if(!d) return;locked=d;}
+    if(!locked){const d=getSwipeDir(dx,dy);if(!d) return;
+      if(d!=='vertical'&&_isTouchInHScrollable(touchTarget)){locked='vertical';return;}
+      locked=d;}
     if(locked==='vertical') return;
     if(!S.memoRevealed) return;
     e.preventDefault(); dragging=true;
@@ -4836,7 +4852,7 @@ init();
 // Review 页面：左右滑动切换 Tab（跟手拖拽 + 平滑过渡）
 (function setupReviewTabSwipe(){
   const THRESHOLD = 40, VELOCITY = 0.25;
-  let tx=0, ty=0, t0=0, locked=null, dragging=false, animating=false;
+  let tx=0, ty=0, t0=0, locked=null, dragging=false, animating=false, touchTarget=null;
 
   const reviewScreen = document.getElementById('s-review');
   if (!reviewScreen) return;
@@ -4889,7 +4905,7 @@ init();
     if (animating) return;
     if (document.querySelector('.screen.active')?.id !== 's-review') return;
     const t = e.touches[0]; tx = t.clientX; ty = t.clientY; t0 = Date.now();
-    locked = null; dragging = false;
+    locked = null; dragging = false; touchTarget = e.target;
     reviewBody.style.transition = 'none';
   }, { passive: true });
 
@@ -4898,7 +4914,9 @@ init();
     if (document.querySelector('.screen.active')?.id !== 's-review') return;
     const t = e.touches[0];
     const dx = t.clientX - tx, dy = t.clientY - ty;
-    if (!locked){ const d = getSwipeDir(dx, dy); if (!d) return; locked = d; }
+    if (!locked){ const d = getSwipeDir(dx, dy); if (!d) return;
+      if(d!=='vertical'&&_isTouchInHScrollable(touchTarget)){locked='vertical';return;}
+      locked = d; }
     if (locked === 'vertical') return;
     e.preventDefault();
     dragging = true;
