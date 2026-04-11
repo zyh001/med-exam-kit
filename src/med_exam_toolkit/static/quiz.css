@@ -2025,7 +2025,7 @@ button,a,[role=button],label{touch-action:manipulation}
 /* 发送按钮加载动画 */
 .ai-send-btn.ai-sending{
   pointer-events:none;
-  display:flex;align-items:center;justify-content:center;
+  background:var(--muted);
 }
 .ai-spinner{
   width:16px;height:16px;border-radius:50%;
@@ -2049,29 +2049,42 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-error{color:var(--danger) !important}
 
 .ai-input-area{
-  display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--border);
-  background:var(--card);align-items:flex-end;
+  padding:8px 10px 10px;
+  background:var(--card);
+}
+.ai-input-box{
+  display:flex;align-items:flex-end;gap:0;
+  border:1px solid var(--border);border-radius:20px;
+  background:var(--surface);
+  padding:4px 4px 4px 14px;
+  transition:border-color .2s,box-shadow .2s;
+}
+.ai-input-box:focus-within{
+  border-color:var(--accent);
+  box-shadow:0 0 0 2px color-mix(in srgb, var(--accent) 15%, transparent);
 }
 .ai-input{
-  flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;
-  background:var(--surface);color:var(--text);font-size:13px;outline:none;
-  resize:none;           /* 禁止手动拖拽 */
+  flex:1;padding:6px 0;border:none;background:transparent;
+  color:var(--text);font-size:13px;outline:none;
+  resize:none;
   line-height:1.45;
-  min-height:36px;       /* 单行基准高度 */
-  max-height:calc(1.45em * 4 + 16px); /* 最多 4 行 */
-  overflow-y:hidden;     /* JS 控制是否滚动 */
+  min-height:20px;
+  max-height:calc(1.45em * 4 + 12px);
+  overflow-y:hidden;
   transition:height .1s ease;
 }
-.ai-input:focus{border-color:var(--accent)}
+.ai-input::placeholder{color:var(--muted)}
 .ai-input:disabled{opacity:.5;cursor:not-allowed}
 .ai-send-btn{
-  padding:0 14px;border:none;border-radius:8px;
-  height:36px;flex-shrink:0;          /* 固定高度，不随 textarea 拉伸 */
-  background:var(--accent);color:#fff;font-size:13px;font-weight:600;
-  cursor:pointer;transition:all .1s;
+  width:32px;height:32px;flex-shrink:0;
+  border:none;border-radius:50%;
+  background:var(--accent);color:#fff;
+  cursor:pointer;transition:all .15s;
+  display:flex;align-items:center;justify-content:center;
+  padding:0;
 }
-.ai-send-btn:hover{opacity:.9}
-.ai-send-btn:disabled{opacity:.4;cursor:not-allowed}
+.ai-send-btn:hover{opacity:.85;transform:scale(1.05)}
+.ai-send-btn:disabled{opacity:.3;cursor:not-allowed;transform:none}
 
 .ai-closed{
   text-align:center;font-size:12px;color:var(--muted);
