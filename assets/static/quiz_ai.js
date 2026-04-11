@@ -1,8 +1,6 @@
 /* ================================================================
    quiz_ai.js  — AI 答疑面板模块
-   依赖：common.js (apiFetch), quiz.js (S, esc, isMultiQ)
-         smd.min.js, katex.min.js, auto-render.min.js
-   不再依赖 marked.min.js — 全程使用 smd 增量渲染 + KaTeX
+   依赖：common.js (apiFetch), quiz.js (S, esc, isMultiQ), marked.min.js, katex
    ================================================================ */
 
 const AI_MAX_ROUNDS = 3;
@@ -10,67 +8,150 @@ const AI_MAX_ROUNDS = 3;
 // key: "fingerprint-idx" → { round, history, streaming, els }
 const aiPanels = new Map();
 
-// ── KaTeX auto-render helper ──────────────────────────────────────
-// 对一个 DOM 节点运行 KaTeX auto-render（如果可用）
-const KATEX_DELIMITERS = [
-  { left: '$$', right: '$$', display: true  },
-  { left: '$',  right: '$',  display: false },
-];
-function renderLatexIn(el) {
-  if (typeof renderMathInElement === 'function') {
-    try {
-      renderMathInElement(el, { delimiters: KATEX_DELIMITERS, throwOnError: false });
-    } catch(e) {}
+// ── Marked extensions for LaTeX math ──────────────────────────────
+
+// Block math: $$...$$ on its own line
+const blockMathExt = {
+  name: 'blockMath',
+  level: 'block',
+  start(src) { return src.indexOf('$$'); },
+  tokenizer(src) {
+    const match = src.match(/^\$\$([\s\S]+?)\$\$/);
+    if (match) {
+      return { type: 'blockMath', raw: match[0], formula: match[1].trim() };
+    }
+  },
+  renderer(token) {
+    if (typeof katex !== 'undefined') {
+      try {
+        return '<p class="ai-math-display">' + katex.renderToString(token.formula, { displayMode: true, throwOnError: false }) + '</p>';
+      } catch (e) { /* fall through */ }
+    }
+    return '<p class="ai-math-display">' + esc(token.raw) + '</p>';
   }
-}
+};
 
-// ── Plain text fallback render ────────────────────────────────────
-// 当 smd 不可用时，把原始文本放进 <pre>
-function plainRender(container, text) {
-  container.innerHTML = '<pre style="white-space:pre-wrap">' + esc(text) + '</pre>';
-}
-
-// ── renderContent：用于恢复历史对话 ──────────────────────────────
-// 历史消息已经完整，用 smd 一次性渲染整段文本
-function renderContent(container, text) {
-  container.innerHTML = '';
-  if (!text) return;
-  if (typeof smd !== 'undefined' && smd.default_renderer && smd.parser) {
-    const renderer = smd.default_renderer(container);
-    const parser   = smd.parser(renderer);
-    smd.parser_write(parser, text);
-    smd.parser_end(parser);
-    renderLatexIn(container);
-  } else {
-    plainRender(container, text);
+// Inline math: $...$ (no newlines inside)
+const inlineMathExt = {
+  name: 'inlineMath',
+  level: 'inline',
+  start(src) { return src.indexOf('$'); },
+  tokenizer(src) {
+    // Display math $$...$$ in inline context
+    const displayMatch = src.match(/^\$\$([\s\S]+?)\$\$/);
+    if (displayMatch) {
+      return { type: 'inlineMath', raw: displayMatch[0], formula: displayMatch[1].trim(), display: true };
+    }
+    // Inline math $...$
+    const inlineMatch = src.match(/^\$([^\$\n]+?)\$/);
+    if (inlineMatch) {
+      return { type: 'inlineMath', raw: inlineMatch[0], formula: inlineMatch[1], display: false };
+    }
+  },
+  renderer(token) {
+    if (typeof katex !== 'undefined') {
+      try {
+        return katex.renderToString(token.formula, { displayMode: !!token.display, throwOnError: false });
+      } catch (e) { /* fall through */ }
+    }
+    return esc(token.raw);
   }
+};
+
+// Configure marked for medical content + LaTeX math (used for restoring cached messages)
+if (typeof marked !== 'undefined') {
+  marked.use({
+    breaks: true,
+    gfm: true,
+    extensions: [blockMathExt, inlineMathExt],
+  });
 }
 
-// ── makeStreamingRenderer ─────────────────────────────────────────
-// 流式阶段：smd 增量追加 DOM，MutationObserver 实时触发 KaTeX
+// ── Table separator fix ──────────────────────────────────────────
+// AI models sometimes output malformed separators like | : | (no dashes).
+// marked requires ≥3 dashes per cell. Fix before parsing.
+function fixTableSeparators(text) {
+  return text.replace(
+    /^(\|[\s:\-|]*\|)$/gm,
+    function(row) {
+      return row.replace(/(?<=\|)\s*:?-{0,2}\s*(?=\|)/g, ' :--- ');
+    }
+  );
+}
+
+// ── Join broken table rows ───────────────────────────────────────
+// AI may output table headers that wrap across multiple lines.
+// marked requires each row on a single line. Join them.
+function joinBrokenTableRows(text) {
+  var lines = text.split('\n');
+  var result = [];
+  var i = 0;
+  while (i < lines.length) {
+    var line = lines[i];
+    // Check if this line looks like start of a table row (starts with |)
+    // but does NOT end with | — it's broken
+    if (/^\|/.test(line.trim()) && !/\|\s*$/.test(line.trim())) {
+      // Look ahead: keep joining until we find a line ending with |
+      // or hit a separator row or non-table line
+      var joined = line;
+      while (++i < lines.length) {
+        var next = lines[i].trim();
+        // separator row → stop, don't join
+        if (/^\|[\s:\-|]*\|$/.test(next)) break;
+        // empty line → stop
+        if (!next) break;
+        joined += next;
+        if (/\|\s*$/.test(next)) { i++; break; }
+      }
+      result.push(joined);
+    } else {
+      result.push(line);
+      i++;
+    }
+  }
+  return result.join('\n');
+}
+
+// ── Shared marked render (table fix + LaTeX) ─────────────────────
+function markedRender(text) {
+  if (typeof marked !== 'undefined' && marked.parse) {
+    return marked.parse(joinBrokenTableRows(fixTableSeparators(text)), { async: false });
+  }
+  return '<pre>' + esc(text) + '</pre>';
+}
+
+// ── Streaming renderer ─────────────────────────────────────────────
+// Uses streaming-markdown (smd) for incremental DOM rendering.
+// smd only appends to the DOM — never rewrites — so text always
+// appears at its final position with zero layout jumps.
+// Characters are drip-fed via requestAnimationFrame for smooth flow.
+
+/**
+ * Create a streaming renderer attached to a container + cursor.
+ * - push(chunk): accumulate text, schedule drip animation
+ * - flush():    finalize stream, do a final marked render for polish
+ */
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let pending  = '';
-  let rafId    = null;
+  let pending = '';
+  let fullText = '';
+  let rafId = null;
   let smdParser = null;
 
+  // Initialize smd parser
   if (typeof smd !== 'undefined' && smd.default_renderer && smd.parser) {
     const renderer = smd.default_renderer(container);
     smdParser = smd.parser(renderer);
   }
 
-  // MutationObserver：新块级节点 → 滑入动画 + 立即渲染 LaTeX
+  // Observe new block elements and animate them in
   let observer = null;
   try {
     observer = new MutationObserver(function(mutations) {
       for (const m of mutations) {
         for (const node of m.addedNodes) {
-          if (node.nodeType !== 1) continue;
-          const tag = node.tagName;
-          if (/^(P|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|PRE|CODE)$/i.test(tag)) {
+          if (node.nodeType === 1 && /^(P|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName)) {
             node.classList.add('ai-block-in');
           }
-          // 实时 LaTeX 渲染（含 SPAN，katex 会生成 span）
-          renderLatexIn(node);
         }
       }
     });
@@ -83,15 +164,16 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
 
   function drip() {
     if (pending.length === 0) { rafId = null; return; }
-    // 词级释放：找到下一个空白边界
-    let end = 1;
+    // Word-level release: emit one word (or whitespace cluster) per frame
+    var end = 1;
     if (/\s/.test(pending[0])) {
       while (end < pending.length && /\s/.test(pending[end])) end++;
     } else {
       while (end < pending.length && !/\s/.test(pending[end])) end++;
     }
-    const slice = pending.slice(0, end);
+    var slice = pending.slice(0, end);
     pending = pending.slice(end);
+    fullText += slice;
 
     if (smdParser) {
       smd.parser_write(smdParser, slice);
@@ -109,17 +191,24 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
     if (!rafId) rafId = requestAnimationFrame(drip);
   }
 
-  function flush(fullText) {
-    // 停止动画，写入剩余
+  function flush() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     if (pending.length > 0) {
+      fullText += pending;
       if (smdParser) smd.parser_write(smdParser, pending);
       pending = '';
     }
-    if (smdParser) { smd.parser_end(smdParser); smdParser = null; }
+    if (smdParser) {
+      smd.parser_end(smdParser);
+      smdParser = null;
+    }
     if (observer) { observer.disconnect(); observer = null; }
-    // flush 后对整个容器再跑一次 LaTeX，确保公式完整渲染
-    renderLatexIn(container);
+    // Re-render with marked for LaTeX/GFM polish + table fix
+    if (fullText) {
+      try {
+        container.innerHTML = markedRender(fullText);
+      } catch (e) { /* keep smd output */ }
+    }
   }
 
   return { push, flush };
@@ -127,39 +216,52 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
 
 
 /**
- * 创建并插入 AI 答疑区
+ * Create and insert the AI Q&A section into a container.
+ * @param {HTMLElement} container - parent element to append into
+ * @param {object} q - question object (must have .fingerprint)
+ * @param {number} sqIdx - sub-question index (0 for simple questions)
+ * @param {string} userAnswer - user's selected answer letter(s)
  */
 function initAIPanel(container, q, sqIdx, userAnswer) {
+  // Hide AI entry when not configured
   if (typeof S === 'undefined' || !S.bankInfo || !S.bankInfo.ai_enabled) return;
 
   const key = q.fingerprint + '-' + sqIdx;
 
+  // Extract cached data from previous visit (DOM refs are stale after navigation)
   let cachedRound = 0, cachedHistory = [];
   if (aiPanels.has(key)) {
     const old = aiPanels.get(key);
-    cachedRound   = old.round;
+    cachedRound = old.round;
     cachedHistory = old.history;
     aiPanels.delete(key);
   }
 
+  // ── Entry button ──
   const entryBtn = document.createElement('button');
   entryBtn.className = 'ai-entry-btn';
-  entryBtn.innerHTML = cachedHistory.length > 0
-    ? '<span class="ai-sparkle">&#10024;</span> AI 解析 (已有对话)'
-    : '<span class="ai-sparkle">&#10024;</span> AI 帮你解析';
+  if (cachedHistory.length > 0) {
+    entryBtn.innerHTML = '<span class="ai-sparkle">&#10024;</span> AI 解析 (已有对话)';
+  } else {
+    entryBtn.innerHTML = '<span class="ai-sparkle">&#10024;</span> AI 帮你解析';
+  }
   entryBtn.onclick = () => toggleAIPanel(key);
 
+  // ── Panel ──
   const panel = document.createElement('div');
   panel.className = 'ai-panel';
   panel.style.display = 'none';
 
+  // Header with round indicator
   const header = document.createElement('div');
   header.className = 'ai-panel-header';
   header.innerHTML = '<span class="ai-panel-title">AI 答疑</span><span class="ai-round-badge">1/' + AI_MAX_ROUNDS + '</span>';
 
+  // Messages area
   const messages = document.createElement('div');
   messages.className = 'ai-messages';
 
+  // Input area
   const inputArea = document.createElement('div');
   inputArea.className = 'ai-input-area';
   const input = document.createElement('input');
@@ -170,8 +272,8 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   const sendBtn = document.createElement('button');
   sendBtn.className = 'ai-send-btn';
   sendBtn.textContent = '发送';
-  sendBtn.onclick  = () => sendAIMessage(key);
-  input.onkeydown  = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(key); } };
+  sendBtn.onclick = () => sendAIMessage(key);
+  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(key); } };
   inputArea.appendChild(input);
   inputArea.appendChild(sendBtn);
 
@@ -183,20 +285,30 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   container.appendChild(panel);
 
   aiPanels.set(key, {
-    round: cachedRound, history: cachedHistory,
-    streaming: false, q, sqIdx, userAnswer,
+    round: cachedRound,
+    history: cachedHistory,
+    streaming: false,
+    q,
+    sqIdx,
+    userAnswer,
     els: { entryBtn, panel, header, messages, input, sendBtn },
   });
 
+  // Restore cached conversation into new DOM
   if (cachedHistory.length > 0) {
     restoreMessages(key);
+    // Auto-expand panel to show cached conversation
     panel.style.display = '';
   }
 }
 
+/**
+ * Restore cached conversation messages into a freshly created panel DOM.
+ */
 function restoreMessages(key) {
   const state = aiPanels.get(key);
   if (!state || state.history.length === 0) return;
+
   const { history, els } = state;
   const { messages, header, input, sendBtn } = els;
 
@@ -208,66 +320,84 @@ function restoreMessages(key) {
     } else {
       const msgEl = appendMsg(messages, 'assistant', '');
 
+      // Restore thinking section if reasoning exists
       if (msg.reasoning) {
-        const tw = document.createElement('div');
-        tw.className = 'ai-thinking-wrap';
-        const th = document.createElement('div');
-        th.className = 'ai-thinking-header ai-thinking-collapsed';
-        th.innerHTML = '<span class="ai-thinking-icon">&#128161;</span> <span class="ai-thinking-label">思考过程</span>';
-        const tb = document.createElement('div');
-        tb.className = 'ai-thinking-body';
-        tb.style.display = 'none';
-        renderContent(tb, msg.reasoning);
-        tw.appendChild(th); tw.appendChild(tb);
-        msgEl.appendChild(tw);
-        th.onclick = () => {
-          const hidden = tb.style.display === 'none';
-          tb.style.display = hidden ? '' : 'none';
-          th.classList.toggle('ai-thinking-collapsed', !hidden);
-          th.classList.toggle('ai-thinking-expanded', hidden);
+        const thinkingWrap = document.createElement('div');
+        thinkingWrap.className = 'ai-thinking-wrap';
+        const thinkingHeader = document.createElement('div');
+        thinkingHeader.className = 'ai-thinking-header ai-thinking-collapsed';
+        thinkingHeader.innerHTML = '<span class="ai-thinking-icon">&#128161;</span> <span class="ai-thinking-label">思考过程</span>';
+        const thinkingBody = document.createElement('div');
+        thinkingBody.className = 'ai-thinking-body';
+        thinkingBody.style.display = 'none';
+        renderContent(thinkingBody, msg.reasoning, null);
+        thinkingWrap.appendChild(thinkingHeader);
+        thinkingWrap.appendChild(thinkingBody);
+        msgEl.appendChild(thinkingWrap);
+        thinkingHeader.onclick = () => {
+          const hidden = thinkingBody.style.display === 'none';
+          thinkingBody.style.display = hidden ? '' : 'none';
+          thinkingHeader.classList.toggle('ai-thinking-collapsed', !hidden);
+          thinkingHeader.classList.toggle('ai-thinking-expanded', hidden);
         };
       }
 
-      const cw = document.createElement('div');
-      cw.className = 'ai-content-wrap';
-      renderContent(cw, msg.content);
-      msgEl.appendChild(cw);
+      // Render main content
+      const contentWrap = document.createElement('div');
+      contentWrap.className = 'ai-content-wrap';
+      renderContent(contentWrap, msg.content, null);
+      msgEl.appendChild(contentWrap);
     }
   }
 
+  // Update input state
   if (state.round >= AI_MAX_ROUNDS) {
-    input.disabled = true; sendBtn.disabled = true;
+    input.disabled = true;
+    sendBtn.disabled = true;
     input.placeholder = '答疑次数已用完';
     const notice = document.createElement('div');
     notice.className = 'ai-closed';
     notice.textContent = '答疑次数已用完';
     messages.appendChild(notice);
   }
+
   scrollMessages(messages);
 }
 
-function clearAICache() { aiPanels.clear(); }
+function clearAICache() {
+  aiPanels.clear();
+}
 
 function toggleAIPanel(key) {
   const state = aiPanels.get(key);
   if (!state) return;
   const { panel } = state.els;
-  if (panel.style.display !== 'none') { panel.style.display = 'none'; return; }
+  const isOpen = panel.style.display !== 'none';
+  if (isOpen) {
+    panel.style.display = 'none';
+    return;
+  }
   panel.style.display = '';
-  if (state.round === 0 && !state.streaming) sendAIMessage(key);
+  // Auto-send initial analysis on first open
+  if (state.round === 0 && !state.streaming) {
+    sendAIMessage(key);
+  }
 }
 
 function sendAIMessage(key) {
   const state = aiPanels.get(key);
-  if (!state || state.streaming || state.round >= AI_MAX_ROUNDS) return;
+  if (!state || state.streaming) return;
+  if (state.round >= AI_MAX_ROUNDS) return;
 
   const { q, sqIdx, userAnswer, els } = state;
   const { messages, input, sendBtn, header } = els;
 
+  // If this is a follow-up (round > 0), capture user input
   let userText = '';
   if (state.round > 0) {
     userText = input.value.trim();
     if (!userText) return;
+    // Show user message bubble
     appendMsg(messages, 'user', userText);
     state.history.push({ role: 'user', content: userText });
     input.value = '';
@@ -276,38 +406,49 @@ function sendAIMessage(key) {
   state.streaming = true;
   state.round++;
   updateRoundBadge(header, state.round);
-  input.disabled = true; sendBtn.disabled = true;
+  input.disabled = true;
+  sendBtn.disabled = true;
 
+  // Create assistant message container
   const msgEl = appendMsg(messages, 'assistant', '');
   msgEl.classList.add('ai-typing');
 
+  // Thinking section (hidden initially)
   const thinkingWrap = document.createElement('div');
   thinkingWrap.className = 'ai-thinking-wrap';
   thinkingWrap.style.display = 'none';
+
   const thinkingHeader = document.createElement('div');
   thinkingHeader.className = 'ai-thinking-header';
   thinkingHeader.innerHTML = '<span class="ai-thinking-icon">&#128161;</span> <span class="ai-thinking-label">思考中…</span>';
+
   const thinkingBody = document.createElement('div');
   thinkingBody.className = 'ai-thinking-body';
+
   thinkingWrap.appendChild(thinkingHeader);
   thinkingWrap.appendChild(thinkingBody);
   msgEl.appendChild(thinkingWrap);
 
+  // Content section
   const contentWrap = document.createElement('div');
   contentWrap.className = 'ai-content-wrap';
   msgEl.appendChild(contentWrap);
 
+  // Cursor
   const cursor = document.createElement('span');
   cursor.className = 'ai-cursor';
   cursor.textContent = '\u258D';
 
+  // Build request body
   const reqBody = {
-    fingerprint: q.fingerprint, sq_index: sqIdx,
+    fingerprint: q.fingerprint,
+    sq_index: sqIdx,
     user_answer: userAnswer,
     bank: typeof S !== 'undefined' && S.bankID != null ? S.bankID : 0,
     history: state.history.slice(),
   };
 
+  // Use raw fetch (not apiFetch) because we need streaming
   const uid = typeof _getUIDCookie === 'function' ? _getUIDCookie() : '';
   const headers = {
     'Content-Type': 'application/json',
@@ -316,37 +457,59 @@ function sendAIMessage(key) {
   };
   if (uid) headers['X-User-ID'] = uid;
 
-  let fullReasoning = '', hasReasoning = false, thinkingCollapsed = false;
+  let fullReasoning = '';
+  let hasReasoning = false;
+  let thinkingCollapsed = false;
   let aborted = false;
-  let contentRenderer = null, reasoningRenderer = null;
-  let fullRawText = '';
+  let contentRenderer = null; // streaming renderer for content
+  let reasoningRenderer = null; // streaming renderer for thinking
+  let fullRawText = ''; // raw text for history saving
 
-  fetch('/api/ai/chat', { method: 'POST', headers, body: JSON.stringify(reqBody) })
-  .then(res => {
-    if (!res.ok) return res.text().then(t => { throw new Error(t); });
-    if (!res.body) throw new Error('ReadableStream not available');
+  fetch('/api/ai/chat', {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(reqBody),
+  }).then(res => {
+    if (!res.ok) {
+      return res.text().then(t => { throw new Error(t); });
+    }
+    if (!res.body) {
+      throw new Error('ReadableStream not available');
+    }
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
+    let chunkCount = 0;
 
     function read() {
       return reader.read().then(({ done, value }) => {
-        if (done || aborted) { finishStream(); return; }
-        buffer += decoder.decode(value, { stream: true });
+        if (done || aborted) {
+          finishStream();
+          return;
+        }
+        const text = decoder.decode(value, { stream: true });
+        buffer += text;
         const lines = buffer.split('\n');
-        buffer = lines.pop();
+        buffer = lines.pop(); // keep incomplete line
         for (const line of lines) {
           if (!line.startsWith('data: ')) continue;
           const data = line.slice(6);
-          if (data === '[DONE]') { finishStream(); return; }
+          if (data === '[DONE]') {
+            finishStream();
+            return;
+          }
           try {
             const obj = JSON.parse(data);
+            chunkCount++;
             if (obj.error) {
               contentWrap.textContent = '[错误] ' + obj.error;
               fullRawText = '[错误] ' + obj.error;
               scrollMessages(messages);
-              finishStream(); return;
+              finishStream();
+              return;
             }
+
+            // Handle reasoning/thinking content — stream it incrementally
             if (obj.reasoning) {
               if (!hasReasoning) {
                 hasReasoning = true;
@@ -358,18 +521,22 @@ function sendAIMessage(key) {
               fullReasoning += obj.reasoning;
               scrollMessages(messages);
             }
+
+            // Handle main content — stream it paragraph by paragraph
             if (obj.content) {
+              // If we had reasoning and now content starts, collapse thinking
               if (hasReasoning && !thinkingCollapsed) {
                 thinkingCollapsed = true;
                 collapseThinking(thinkingHeader, thinkingBody);
               }
+              // Lazily create streaming renderer on first content chunk
               if (!contentRenderer) {
                 contentRenderer = makeStreamingRenderer(contentWrap, cursor, messages);
               }
               contentRenderer.push(obj.content);
               fullRawText += obj.content;
             }
-          } catch(e) { console.warn('[AI] parse error:', e); }
+          } catch (e) { console.warn('[AI] parse error:', e, 'line:', line); }
         }
         return read();
       });
@@ -391,32 +558,50 @@ function sendAIMessage(key) {
     state.streaming = false;
     msgEl.classList.remove('ai-typing');
 
+    // If reasoning was never collapsed (no content came after), collapse it now
     if (hasReasoning && !thinkingCollapsed) {
       thinkingCollapsed = true;
       collapseThinking(thinkingHeader, thinkingBody);
     }
-    if (contentRenderer) contentRenderer.flush(fullRawText);
-    if (cursor.parentNode) cursor.parentNode.removeChild(cursor);
 
+    // Final flush of streaming renderer
+    if (contentRenderer) {
+      contentRenderer.flush();
+    }
+
+    // Save assistant response to history
     if (fullRawText) {
       state.history.push({ role: 'assistant', content: fullRawText, reasoning: fullReasoning || '' });
     }
 
     if (state.round >= AI_MAX_ROUNDS) {
-      input.disabled = true; sendBtn.disabled = true;
+      input.disabled = true;
+      sendBtn.disabled = true;
       input.placeholder = '答疑次数已用完';
       const notice = document.createElement('div');
       notice.className = 'ai-closed';
       notice.textContent = '答疑次数已用完';
       messages.appendChild(notice);
     } else {
-      input.disabled = false; sendBtn.disabled = false;
+      input.disabled = false;
+      sendBtn.disabled = false;
       input.focus();
     }
     scrollMessages(messages);
   }
 }
 
+/**
+ * Render markdown content into a container, optionally appending a cursor element.
+ */
+function renderContent(container, text, cursor) {
+  container.innerHTML = markedRender(text);
+  if (cursor) container.appendChild(cursor);
+}
+
+/**
+ * Collapse the thinking section — make it toggleable.
+ */
 function collapseThinking(headerEl, bodyEl) {
   headerEl.querySelector('.ai-thinking-label').textContent = '思考过程';
   headerEl.classList.add('ai-thinking-collapsed');
@@ -440,11 +625,16 @@ function appendMsg(container, role, text) {
 
 let _scrollRafId = null;
 function scrollMessages(container) {
-  if (_scrollRafId) return;
+  // Smooth scroll: lerp toward bottom over multiple frames
+  if (_scrollRafId) return; // already animating
   function step() {
     const target = container.scrollHeight - container.clientHeight;
-    const diff   = target - container.scrollTop;
-    if (diff <= 1) { container.scrollTop = target; _scrollRafId = null; return; }
+    const diff = target - container.scrollTop;
+    if (diff <= 1) {
+      container.scrollTop = target;
+      _scrollRafId = null;
+      return;
+    }
     container.scrollTop += diff * 0.18;
     _scrollRafId = requestAnimationFrame(step);
   }
