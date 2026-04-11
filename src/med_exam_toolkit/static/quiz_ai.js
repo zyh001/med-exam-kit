@@ -137,14 +137,7 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
     // Re-render with marked for LaTeX/GFM polish
     if (typeof marked !== 'undefined' && marked.parse && fullText) {
       try {
-        // Fix malformed table separators: | : | or | :- | → | :--- |
-        const fixed = fullText.replace(
-          /^(\|[\s:\-|]*\|)$/gm,
-          function(row) {
-            return row.replace(/(?<=\|)\s*:?-{0,2}\s*(?=\|)/g, ' :--- ');
-          }
-        );
-        container.innerHTML = marked.parse(fixed, { async: false });
+        container.innerHTML = marked.parse(fullText, { async: false });
       } catch (e) { /* keep smd output */ }
     }
   }
