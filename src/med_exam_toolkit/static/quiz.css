@@ -1972,7 +1972,7 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-msg-assistant .ai-content-wrap blockquote{
   border-left:3px solid var(--border);margin:6px 0;padding:4px 10px;color:var(--muted);
 }
-.ai-msg-assistant .ai-content-wrap{overflow-x:auto}
+.ai-msg-assistant .ai-content-wrap{overflow-x:auto;overflow-y:hidden}
 .ai-msg-assistant .ai-content-wrap table{border-collapse:collapse;margin:6px 0;font-size:12px;width:100%;display:table}
 .ai-msg-assistant .ai-content-wrap th,.ai-msg-assistant .ai-content-wrap td{
   border:1px solid var(--border);padding:4px 8px;text-align:left;
