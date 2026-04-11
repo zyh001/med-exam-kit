@@ -136,7 +136,6 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
   let fullText = '';
   let rafId = null;
   let smdParser = null;
-  const CHARS_PER_FRAME = 4;
 
   // Initialize smd parser
   if (typeof smd !== 'undefined' && smd.default_renderer && smd.parser) {
@@ -144,23 +143,41 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
     smdParser = smd.parser(renderer);
   }
 
+  // Observe new block elements and animate them in
+  let observer = null;
+  try {
+    observer = new MutationObserver(function(mutations) {
+      for (const m of mutations) {
+        for (const node of m.addedNodes) {
+          if (node.nodeType === 1 && /^(P|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName)) {
+            node.classList.add('ai-block-in');
+          }
+        }
+      }
+    });
+    observer.observe(container, { childList: true, subtree: true });
+  } catch(e) {}
+
   function placeCursor() {
-    if (cursor) {
-      // Always keep cursor at the very end of container
-      container.appendChild(cursor);
-    }
+    if (cursor) container.appendChild(cursor);
   }
 
   function drip() {
     if (pending.length === 0) { rafId = null; return; }
-    const slice = pending.slice(0, CHARS_PER_FRAME);
-    pending = pending.slice(CHARS_PER_FRAME);
+    // Word-level release: emit one word (or whitespace cluster) per frame
+    var end = 1;
+    if (/\s/.test(pending[0])) {
+      while (end < pending.length && /\s/.test(pending[end])) end++;
+    } else {
+      while (end < pending.length && !/\s/.test(pending[end])) end++;
+    }
+    var slice = pending.slice(0, end);
+    pending = pending.slice(end);
     fullText += slice;
 
     if (smdParser) {
       smd.parser_write(smdParser, slice);
     } else {
-      // Fallback: plain text append
       container.appendChild(document.createTextNode(slice));
     }
 
@@ -178,15 +195,14 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
     if (pending.length > 0) {
       fullText += pending;
-      if (smdParser) {
-        smd.parser_write(smdParser, pending);
-      }
+      if (smdParser) smd.parser_write(smdParser, pending);
       pending = '';
     }
     if (smdParser) {
       smd.parser_end(smdParser);
       smdParser = null;
     }
+    if (observer) { observer.disconnect(); observer = null; }
     // Re-render with marked for LaTeX/GFM polish + table fix
     if (fullText) {
       try {

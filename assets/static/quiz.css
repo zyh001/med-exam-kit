@@ -2024,11 +2024,16 @@ button,a,[role=button],label{touch-action:manipulation}
 
 .ai-typing .ai-cursor{
   display:inline-block;color:var(--accent);
-  animation:aiBlink 1s step-end infinite;
+  animation:aiCursorPulse 1.2s ease-in-out infinite;
 }
-@keyframes aiBlink{0%,100%{opacity:1}50%{opacity:0}}
+@keyframes aiCursorPulse{0%,100%{opacity:1}50%{opacity:.2}}
 @keyframes aiFadeIn{
   from{opacity:0;transform:translateY(4px)}
+  to{opacity:1;transform:none}
+}
+.ai-block-in{animation:aiBlockIn .3s ease both}
+@keyframes aiBlockIn{
+  from{opacity:0;transform:translateY(6px)}
   to{opacity:1;transform:none}
 }
 .ai-thinking-fadein{animation:aiFadeIn .3s ease both}
