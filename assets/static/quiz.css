@@ -2042,7 +2042,7 @@ button,a,[role=button],label{touch-action:manipulation}
 
 .ai-input-area{
   display:flex;gap:6px;padding:8px 12px;border-top:1px solid var(--border);
-  background:var(--card);
+  background:var(--card);align-items:flex-end;
 }
 .ai-input{
   flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:8px;
@@ -2057,7 +2057,8 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-input:focus{border-color:var(--accent)}
 .ai-input:disabled{opacity:.5;cursor:not-allowed}
 .ai-send-btn{
-  padding:8px 14px;border:none;border-radius:8px;
+  padding:0 14px;border:none;border-radius:8px;
+  height:36px;flex-shrink:0;          /* 固定高度，不随 textarea 拉伸 */
   background:var(--accent);color:#fff;font-size:13px;font-weight:600;
   cursor:pointer;transition:all .1s;
 }
