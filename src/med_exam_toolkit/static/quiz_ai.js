@@ -79,10 +79,43 @@ function fixTableSeparators(text) {
   );
 }
 
+// ── Join broken table rows ───────────────────────────────────────
+// AI may output table headers that wrap across multiple lines.
+// marked requires each row on a single line. Join them.
+function joinBrokenTableRows(text) {
+  var lines = text.split('\n');
+  var result = [];
+  var i = 0;
+  while (i < lines.length) {
+    var line = lines[i];
+    // Check if this line looks like start of a table row (starts with |)
+    // but does NOT end with | — it's broken
+    if (/^\|/.test(line.trim()) && !/\|\s*$/.test(line.trim())) {
+      // Look ahead: keep joining until we find a line ending with |
+      // or hit a separator row or non-table line
+      var joined = line;
+      while (++i < lines.length) {
+        var next = lines[i].trim();
+        // separator row → stop, don't join
+        if (/^\|[\s:\-|]*\|$/.test(next)) break;
+        // empty line → stop
+        if (!next) break;
+        joined += next;
+        if (/\|\s*$/.test(next)) { i++; break; }
+      }
+      result.push(joined);
+    } else {
+      result.push(line);
+      i++;
+    }
+  }
+  return result.join('\n');
+}
+
 // ── Shared marked render (table fix + LaTeX) ─────────────────────
 function markedRender(text) {
   if (typeof marked !== 'undefined' && marked.parse) {
-    return marked.parse(fixTableSeparators(text), { async: false });
+    return marked.parse(joinBrokenTableRows(fixTableSeparators(text)), { async: false });
   }
   return '<pre>' + esc(text) + '</pre>';
 }
