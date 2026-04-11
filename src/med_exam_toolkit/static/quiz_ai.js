@@ -21,12 +21,13 @@ function loadAIAssets() {
       _aiAssetsLoaded.css = true;
     }
     const scripts = [
+      AI_STATIC_BASE + '/marked.min.js',
       AI_STATIC_BASE + '/smd.min.js',
       AI_STATIC_BASE + '/katex.min.js',
       AI_STATIC_BASE + '/auto-render.min.js',
     ];
     function loadNext(i) {
-      if (i >= scripts.length) { _aiAssetsLoaded.js = true; resolve(); return; }
+      if (i >= scripts.length) { _aiAssetsLoaded.js = true; _configureMarked(); resolve(); return; }
       const sc = document.createElement('script');
       sc.src = scripts[i];
       sc.onload = () => loadNext(i + 1);
@@ -93,13 +94,16 @@ const inlineMathExt = {
   }
 };
 
-// Configure marked for medical content + LaTeX math (used for restoring cached messages)
-if (typeof marked !== 'undefined') {
-  marked.use({
-    breaks: true,
-    gfm: true,
-    extensions: [blockMathExt, inlineMathExt],
-  });
+// Configure marked for medical content + LaTeX math (called after lazy-load)
+function _configureMarked() {
+  if (typeof marked !== 'undefined' && !_configureMarked._done) {
+    marked.use({
+      breaks: true,
+      gfm: true,
+      extensions: [blockMathExt, inlineMathExt],
+    });
+    _configureMarked._done = true;
+  }
 }
 
 // ── Table separator fix ──────────────────────────────────────────

@@ -186,14 +186,15 @@ def _update_sm2(c, user_id: str, fingerprint: str, quality: int, today: str) -> 
         (user_id, fingerprint),
     ).fetchone()
     ef       = float(row["ef"])     if row else _DEFAULT_EF
-    interval = int(row["interval"]) if row else 1
+    interval = int(row["interval"]) if row else 0
     reps     = int(row["reps"])     if row else 0
 
     if quality < 3:
-        reps = 0; interval = 1
+        reps = 0; interval = 0
     else:
-        if   reps == 0: interval = 1
-        elif reps == 1: interval = 6
+        if   reps == 0: interval = 0
+        elif reps == 1: interval = 1
+        elif reps == 2: interval = 6
         else:           interval = round(interval * ef)
         reps += 1
     ef = max(_MIN_EF, ef + 0.1 - (5-quality)*(0.08 + (5-quality)*0.02))
@@ -365,8 +366,13 @@ def get_due_fingerprints(
         today = date.today().isoformat()
     with _open(db_path) as c:
         rows = c.execute(
-            "SELECT fingerprint FROM sm2 WHERE user_id=? AND next_due<=? ORDER BY next_due ASC",
-            (user_id, today),
+            """SELECT fingerprint FROM sm2 WHERE user_id=? AND next_due<=?
+               UNION
+               SELECT DISTINCT fingerprint FROM attempts
+               WHERE user_id=? AND fingerprint NOT IN (
+                   SELECT fingerprint FROM sm2 WHERE user_id=?
+               )""",
+            (user_id, today, user_id, user_id),
         ).fetchall()
     return [r["fingerprint"] for r in rows]
 
@@ -455,8 +461,15 @@ def get_overall_stats(
             "SELECT COUNT(*) AS cnt FROM sessions WHERE user_id=?", (user_id,)
         ).fetchone()["cnt"]
         due = c.execute(
-            "SELECT COUNT(*) AS cnt FROM sm2 WHERE user_id=? AND next_due<=?",
-            (user_id, today),
+            """SELECT COUNT(*) AS cnt FROM (
+                SELECT fingerprint FROM sm2 WHERE user_id=? AND next_due<=?
+                UNION
+                SELECT DISTINCT fingerprint FROM attempts
+                WHERE user_id=? AND fingerprint NOT IN (
+                    SELECT fingerprint FROM sm2 WHERE user_id=?
+                )
+            )""",
+            (user_id, today, user_id, user_id),
         ).fetchone()["cnt"]
         wrong_topics = c.execute(
             "SELECT COUNT(DISTINCT fingerprint) FROM attempts WHERE user_id=? AND result=0",
