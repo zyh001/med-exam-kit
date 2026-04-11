@@ -607,8 +607,22 @@ function appendMsg(container, role, text) {
   return el;
 }
 
+let _scrollRafId = null;
 function scrollMessages(container) {
-  container.scrollTop = container.scrollHeight;
+  // Smooth scroll: lerp toward bottom over multiple frames
+  if (_scrollRafId) return; // already animating
+  function step() {
+    const target = container.scrollHeight - container.clientHeight;
+    const diff = target - container.scrollTop;
+    if (diff <= 1) {
+      container.scrollTop = target;
+      _scrollRafId = null;
+      return;
+    }
+    container.scrollTop += diff * 0.18;
+    _scrollRafId = requestAnimationFrame(step);
+  }
+  _scrollRafId = requestAnimationFrame(step);
 }
 
 function updateRoundBadge(header, round) {
