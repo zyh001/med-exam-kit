@@ -242,7 +242,7 @@ const SyncManager = (() => {
    */
   async function record(payload, bankIdx) {
     await _enqueue(payload, bankIdx);
-    flush();   // 不 await，后台运行
+    await flush();   // 等待上传完成，确保服务端已写入 SM-2
   }
 
   /** 注册 UI 状态变化回调 */
