@@ -40,6 +40,7 @@ function loadAIAssets() {
 }
 
 const AI_MAX_ROUNDS = 3;
+const _AI_SEND_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14V2M8 2L3 7M8 2l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 // key: "fingerprint-idx" → { round, history, streaming, els }
 const aiPanels = new Map();
@@ -326,9 +327,11 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   const messages = document.createElement('div');
   messages.className = 'ai-messages';
 
-  // Input area
+  // Input area — Claude/ChatGPT style floating capsule
   const inputArea = document.createElement('div');
   inputArea.className = 'ai-input-area';
+  const inputBox = document.createElement('div');
+  inputBox.className = 'ai-input-box';
   const input = document.createElement('textarea');
   input.className = 'ai-input';
   input.placeholder = '追问…';
@@ -336,15 +339,16 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   input.rows = 1;
   const sendBtn = document.createElement('button');
   sendBtn.className = 'ai-send-btn';
-  sendBtn.textContent = '发送';
+  sendBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14V2M8 2L3 7M8 2l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   sendBtn.onclick = () => sendAIMessage(key);
   input.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(key); }
   };
   // 自适应高度：随内容增长，最多 4 行
   input.oninput = () => autoResizeTextarea(input);
-  inputArea.appendChild(input);
-  inputArea.appendChild(sendBtn);
+  inputBox.appendChild(input);
+  inputBox.appendChild(sendBtn);
+  inputArea.appendChild(inputBox);
 
   panel.appendChild(header);
   panel.appendChild(messages);
@@ -476,7 +480,7 @@ function sendAIMessage(key) {
   updateRoundBadge(header, state.round);
   // 输入框保持可输入；仅按钮变为加载动画
   sendBtn.disabled = true;
-  sendBtn.dataset.origText = sendBtn.textContent;
+  sendBtn.dataset.origHTML = sendBtn.innerHTML;
   sendBtn.innerHTML = '<span class="ai-spinner"></span>';
   sendBtn.classList.add('ai-sending');
 
@@ -664,7 +668,7 @@ function sendAIMessage(key) {
       input.disabled = true;
       sendBtn.disabled = true;
       sendBtn.classList.remove('ai-sending');
-      sendBtn.innerHTML = sendBtn.dataset.origText || '发送';
+      sendBtn.innerHTML = sendBtn.dataset.origHTML || _AI_SEND_ICON;
       input.placeholder = '答疑次数已用完';
       const notice = document.createElement('div');
       notice.className = 'ai-closed';
@@ -674,7 +678,7 @@ function sendAIMessage(key) {
       input.disabled = false;
       sendBtn.disabled = false;
       sendBtn.classList.remove('ai-sending');
-      sendBtn.innerHTML = sendBtn.dataset.origText || '发送';
+      sendBtn.innerHTML = sendBtn.dataset.origHTML || _AI_SEND_ICON;
       // 不自动 focus，避免移动端弹出输入法
     }
     scrollMessages(messages);
