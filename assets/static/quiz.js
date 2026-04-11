@@ -1592,6 +1592,7 @@ function startQuiz(remainingSeconds) {
 // ─── 通用滑动切题助手 ─────────────────────────────────────────────
 // dir: 'forward'(→) | 'back'(←) | 'none'(无动画，初次渲染)
 let _slideCleanTimer = null;   // 追踪上一次动画的清理 setTimeout
+let _autoAdvanceTimer = null;  // 练习模式答对后自动跳转计时器
 
 function _slideQ(dir, buildFn) {
   const body = document.querySelector('.quiz-body');
@@ -1641,6 +1642,9 @@ function _slideQ(dir, buildFn) {
 }
 
 function renderQ(dir = 'none') {
+  // 取消上一题的自动跳转计时器，防止手动导航后计时器仍触发导致跳题或白屏
+  if (_autoAdvanceTimer) { clearTimeout(_autoAdvanceTimer); _autoAdvanceTimer = null; }
+
   const q       = S.questions[S.cur];
   const total   = S.questions.length;
   const isExam  = S.mode === 'exam';
@@ -1889,10 +1893,14 @@ function selectOpt(letter, btn) {
       S.revealed.add(S.cur);
       _trackStreak(letter === q.answer);
       savePracticeSession();  // 每次答题立即保存进度
+      const answeredIdx = S.cur;  // 捕获当前题号，防止计时器触发时 S.cur 已变
       setTimeout(() => {
+        if (S.cur !== answeredIdx) return;  // 用户已手动导航，跳过
         renderQ('none');
         if (letter === q.answer) {
-          setTimeout(() => {
+          _autoAdvanceTimer = setTimeout(() => {
+            _autoAdvanceTimer = null;
+            if (S.cur !== answeredIdx) return;  // 再次检查
             const total = S.questions.length;
             if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
             else finishPractice();
@@ -1952,7 +1960,9 @@ function submitMulti() {
     const isCorrect = sel.size === correctSet.size && [...correctSet].every(l => sel.has(l));
     _trackStreak(isCorrect);
     savePracticeSession();  // 保存进度
+    const answeredIdx = S.cur;
     setTimeout(() => {
+      if (S.cur !== answeredIdx) return;
       renderQ('none');
       setTimeout(() => {
         const explain = document.getElementById('explain-panel');
@@ -2306,6 +2316,7 @@ function retryQuiz() {
 }
 
 function finishPractice() {
+  if (_autoAdvanceTimer) { clearTimeout(_autoAdvanceTimer); _autoAdvanceTimer = null; }
   clearPracticeSession();  // 完成则删除进度
   calculateResults();
   showScreen('s-results');
