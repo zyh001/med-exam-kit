@@ -120,6 +120,17 @@ function markedRender(text) {
   return '<pre>' + esc(text) + '</pre>';
 }
 
+
+// ── Textarea 自适应高度（最多 4 行）────────────────────────────────
+function autoResizeTextarea(el) {
+  el.style.height = 'auto';
+  // lineHeight 约 20px；4 行上限
+  const lineH = parseInt(window.getComputedStyle(el).lineHeight) || 20;
+  const maxH  = lineH * 4 + 16; // 16 = padding top+bottom
+  el.style.height = Math.min(el.scrollHeight, maxH) + 'px';
+  el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
+}
+
 // ── Streaming renderer ─────────────────────────────────────────────
 // Uses streaming-markdown (smd) for incremental DOM rendering.
 // smd only appends to the DOM — never rewrites — so text always
@@ -162,16 +173,30 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
     if (cursor) container.appendChild(cursor);
   }
 
+  // 目标速率：约 40ms 写完一个 SSE chunk（raf ≈ 16ms/帧）
+  // 每帧释放字符数 = pending.length / FRAMES_PER_CHUNK，下限 1，上限 32
+  const FRAMES_PER_CHUNK = 3;  // 每个 chunk 用 3 帧写完
+  const MAX_PER_FRAME = 32;    // 单帧最多写 32 字符（避免过大 chunk 卡顿）
+  const MIN_PER_FRAME = 1;
+
   function drip() {
     if (pending.length === 0) { rafId = null; return; }
-    // Word-level release: emit one word (or whitespace cluster) per frame
-    var end = 1;
-    if (/\s/.test(pending[0])) {
-      while (end < pending.length && /\s/.test(pending[end])) end++;
-    } else {
-      while (end < pending.length && !/\s/.test(pending[end])) end++;
+
+    // 动态决定本帧写多少字符
+    const want = Math.ceil(pending.length / FRAMES_PER_CHUNK);
+    const n = Math.max(MIN_PER_FRAME, Math.min(MAX_PER_FRAME, want));
+
+    // 不在词中间断开（中文逐字，英文到词边界）
+    let end = n;
+    if (end < pending.length && !/[\s\u4e00-\u9fff\u3000-\u303f]/.test(pending[end])) {
+      // 在英文词中间：往后找词边界（最多再多 8 字符）
+      let look = end;
+      while (look < pending.length && look < end + 8 && !/\s/.test(pending[look])) look++;
+      end = look;
     }
-    var slice = pending.slice(0, end);
+    end = Math.min(end, pending.length);
+
+    const slice = pending.slice(0, end);
     pending = pending.slice(end);
     fullText += slice;
 
@@ -264,16 +289,20 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   // Input area
   const inputArea = document.createElement('div');
   inputArea.className = 'ai-input-area';
-  const input = document.createElement('input');
-  input.type = 'text';
+  const input = document.createElement('textarea');
   input.className = 'ai-input';
   input.placeholder = '追问…';
   input.maxLength = 500;
+  input.rows = 1;
   const sendBtn = document.createElement('button');
   sendBtn.className = 'ai-send-btn';
   sendBtn.textContent = '发送';
   sendBtn.onclick = () => sendAIMessage(key);
-  input.onkeydown = (e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(key); } };
+  input.onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(key); }
+  };
+  // 自适应高度：随内容增长，最多 4 行
+  input.oninput = () => autoResizeTextarea(input);
   inputArea.appendChild(input);
   inputArea.appendChild(sendBtn);
 
@@ -585,7 +614,7 @@ function sendAIMessage(key) {
     } else {
       input.disabled = false;
       sendBtn.disabled = false;
-      input.focus();
+      // 不自动 focus，避免移动端弹出输入法
     }
     scrollMessages(messages);
   }
