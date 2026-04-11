@@ -2,6 +2,23 @@
 // 所有 /api/* 请求必须通过 apiFetch() 发出，它会自动附加此 Token。
 // 外部脚本/页面无法获知 Token，因此无法伪造 API 请求。
 
+// ── quiz_ai.js 按需加载 ──────────────────────────────────────────
+let _quizAILoaded = false;
+let _quizAIPromise = null;
+function _loadQuizAI() {
+  if (_quizAILoaded) return Promise.resolve();
+  if (_quizAIPromise) return _quizAIPromise;
+  _quizAIPromise = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = '/static/quiz_ai.js';
+    sc.onload  = () => { _quizAILoaded = true; resolve(); };
+    sc.onerror = () => reject(new Error('Failed to load quiz_ai.js'));
+    document.body.appendChild(sc);
+  });
+  return _quizAIPromise;
+}
+
+
 // ════════════════════════════════════════════
 // 状态
 // ════════════════════════════════════════════
@@ -2015,7 +2032,7 @@ function buildExplain(q, selected) {
   panel.appendChild(inner);
   // AI Q&A panel — placed below the explain box, not inside it
   const userAns = isMulti ? (selected instanceof Set ? [...selected].sort().join('') : '') : (selected || '');
-  initAIPanel(panel, q, q.si || 0, userAns);
+  _loadQuizAI().then(() => initAIPanel(panel, q, q.si || 0, userAns)).catch(() => {});
   return panel;
 }
 
@@ -3026,7 +3043,7 @@ function filterReview(type, tabEl) {
 
     // AI Q&A panel — placed below the review content
     const aiSlot = item.querySelector('.review-expand');
-    if (aiSlot) initAIPanel(aiSlot, q, q.si || 0, ansDisplay);
+    if (aiSlot) _loadQuizAI().then(() => initAIPanel(aiSlot, q, q.si || 0, ansDisplay)).catch(() => {});
 
     item.querySelector('.review-item-head').onclick = () => {
       const el = document.getElementById(`rexp-${i}`);
