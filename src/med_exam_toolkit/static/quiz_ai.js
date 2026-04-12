@@ -341,28 +341,54 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   input.maxLength = 500;
   input.rows = 1;
 
-  // ASR 麦克风按钮（仅在配置了 ASR 时显示）
-  let micBtn = null;
-  if (typeof S !== 'undefined' && S.bankInfo && S.bankInfo.asr_enabled) {
-    micBtn = document.createElement('button');
-    micBtn.className = 'ai-mic-btn';
-    micBtn.type = 'button';
-    micBtn.title = '语音输入';
-    micBtn.innerHTML = _AI_MIC_ICON;
-    micBtn.onclick = () => _toggleASR(key);
-  }
-
   const sendBtn = document.createElement('button');
   sendBtn.className = 'ai-send-btn';
   sendBtn.innerHTML = _AI_SEND_ICON;
-  sendBtn.onclick = () => sendAIMessage(key);
+
+  // 长按发送按钮 → 语音输入（仅在 ASR 已配置时生效）
+  const _asrEnabled = typeof S !== 'undefined' && S.bankInfo && S.bankInfo.asr_enabled;
+  let _longPressTimer = null;
+  let _longPressTriggered = false;
+
+  function _onPressStart(e) {
+    if (!_asrEnabled || sendBtn.disabled) return;
+    _longPressTriggered = false;
+    _longPressTimer = setTimeout(() => {
+      _longPressTriggered = true;
+      e.preventDefault();
+      _startASR(key);
+    }, 500);
+  }
+  function _onPressEnd(e) {
+    if (_longPressTimer) { clearTimeout(_longPressTimer); _longPressTimer = null; }
+    if (_longPressTriggered) {
+      e.preventDefault();
+      _stopASR();
+      _longPressTriggered = false;
+      return;
+    }
+  }
+  function _onPressCancel() {
+    if (_longPressTimer) { clearTimeout(_longPressTimer); _longPressTimer = null; }
+  }
+
+  sendBtn.addEventListener('touchstart', _onPressStart, { passive: false });
+  sendBtn.addEventListener('touchend', _onPressEnd);
+  sendBtn.addEventListener('touchcancel', _onPressCancel);
+  sendBtn.addEventListener('mousedown', _onPressStart);
+  sendBtn.addEventListener('mouseup', _onPressEnd);
+  sendBtn.addEventListener('mouseleave', _onPressCancel);
+  sendBtn.addEventListener('contextmenu', (e) => { if (_asrEnabled) e.preventDefault(); });
+
+  sendBtn.onclick = (e) => {
+    if (_longPressTriggered) { e.preventDefault(); return; }
+    sendAIMessage(key);
+  };
   input.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(key); }
   };
-  // 自适应高度：随内容增长，最多 4 行
   input.oninput = () => autoResizeTextarea(input);
   inputBox.appendChild(input);
-  if (micBtn) inputBox.appendChild(micBtn);
   inputBox.appendChild(sendBtn);
   inputArea.appendChild(inputBox);
 
@@ -380,7 +406,7 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
     q,
     sqIdx,
     userAnswer,
-    els: { entryBtn, panel, header, messages, input, sendBtn, micBtn },
+    els: { entryBtn, panel, header, messages, input, sendBtn },
   });
 
   // Restore cached conversation into new DOM
@@ -796,11 +822,11 @@ function updateRoundBadge(header, round) {
 // ══════════════════════════════════════════
 let _asrState = null;
 
-async function _toggleASR(key) {
-  if (_asrState) { _stopASR(); return; }
+async function _startASR(key) {
+  if (_asrState) return;
   const state = aiPanels.get(key);
   if (!state) return;
-  const { input, micBtn } = state.els;
+  const { input, sendBtn } = state.els;
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } });
@@ -847,8 +873,9 @@ async function _toggleASR(key) {
   processor.connect(audioCtx.destination);
 
   _asrState = { ws, audioCtx, source, processor, stream, key, baseText: input.value };
-  if (micBtn) { micBtn.innerHTML = _AI_MIC_STOP; micBtn.classList.add('ai-mic-active'); }
-  input.placeholder = '正在聆听…';
+  sendBtn.innerHTML = _AI_MIC_ICON;
+  sendBtn.classList.add('ai-mic-active');
+  input.placeholder = '正在聆听… 松开结束';
 }
 
 function _stopASR() {
@@ -862,8 +889,9 @@ function _stopASR() {
   if (ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'stop' })); } catch(e) {} setTimeout(() => { try { ws.close(); } catch(e) {} }, 500); }
   _asrState = null;
   if (state) {
-    const { input, micBtn } = state.els;
-    if (micBtn) { micBtn.innerHTML = _AI_MIC_ICON; micBtn.classList.remove('ai-mic-active'); }
+    const { input, sendBtn } = state.els;
+    sendBtn.innerHTML = _AI_SEND_ICON;
+    sendBtn.classList.remove('ai-mic-active');
     input.placeholder = '追问…';
   }
 }
