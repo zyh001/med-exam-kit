@@ -154,27 +154,12 @@ function joinBrokenTableRows(text) {
   return result.join('\n');
 }
 
-// ── Fix CJK bold/italic rendering ─────────────────────────────────
-// CommonMark's "flanking delimiter" rules reject ** when:
-//   - opening ** is preceded by CJK char + followed by CJK punctuation
-//     e.g. 领域**（外科）这些**  ← opening ** not left-flanking
-//   - closing ** is preceded by CJK punctuation + followed by CJK char
-//     e.g. **错误（A）**类型     ← closing ** not right-flanking
-// Fix: convert **text** → <strong>text</strong> before marked parses,
-// bypassing the flanking check entirely. Code blocks are protected.
-function fixBrokenInlineFormatting(text) {
-  var parts = text.split(/(```[\s\S]*?```)/g);
-  for (var i = 0; i < parts.length; i++) {
-    if (parts[i].indexOf('```') === 0) continue; // skip fenced code blocks
-    parts[i] = parts[i].replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
-  }
-  return parts.join('');
-}
-
 // ── Shared marked render (table fix + LaTeX) ─────────────────────
+// CJK flanking delimiter fix is in marked.min.js itself (E/H/W/ue/De/qe
+// regexes extended with \u3400-\u9FFF\uF900-\uFAFF CJK ranges).
 function markedRender(text) {
   if (typeof marked !== 'undefined' && marked.parse) {
-    return marked.parse(fixBrokenInlineFormatting(joinBrokenTableRows(fixTableSeparators(text))), { async: false });
+    return marked.parse(joinBrokenTableRows(fixTableSeparators(text)), { async: false });
   }
   return '<pre>' + esc(text) + '</pre>';
 }
