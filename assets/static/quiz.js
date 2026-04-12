@@ -4609,7 +4609,7 @@ function setCalcMode(mode) {
   document.getElementById('calc-mode-simple').classList.toggle('active', mode === 'simple');
   document.getElementById('calc-mode-sci').classList.toggle('active', mode === 'sci');
   document.getElementById('calc-mode-adv').classList.toggle('active', mode === 'adv');
-  if (mode === 'adv') _loadMathJS();
+  if (mode === 'adv') _loadAdvAssets();
 }
 
 function _calcRefresh() {
@@ -4681,11 +4681,9 @@ async function calcEval() {
   document.getElementById('calc-expr').textContent = expr + ' =';
   document.getElementById('calc-result').textContent = '…';
   try {
-    var resp = await apiFetch('/api/calculate', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ expr: expr, deg: _calc.isDeg }) });
-    var res = await resp.json();
-    var val = res.result || 'Error';
+    await _ensureMathJS();
+    var val = _calcLocalEval(expr, _calc.isDeg);
     document.getElementById('calc-result').textContent = val;
-    // push to history
     _calc.history.push({ expr: expr, val: val });
     _calcRenderHistory();
     _calc.input = val === 'Error' ? '' : val;
@@ -4694,6 +4692,40 @@ async function calcEval() {
     _calc.input = '';
   }
   _calc.done = true;
+}
+
+// 本地计算（math.js）— 简易/科学模式共用
+function _calcLocalEval(raw, deg) {
+  var s = raw;
+  s = s.replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-');
+  s = s.replace(/π/g, 'pi');
+  // lg(x) → log10(x)
+  s = s.replace(/\blg\(/g, 'log10(');
+  // 10^(...) → 10^(...)  — math.js handles ^ natively
+  s = s.replace(/10\^/g, '10^');
+  // e^(...) → e^(...)
+  s = s.replace(/\be\^/g, 'e^');
+  // % → /100
+  s = s.replace(/%/g, '/100');
+
+  var scope = {};
+  if (deg) {
+    var toRad = Math.PI / 180, fromRad = 180 / Math.PI;
+    scope = {
+      sin: function(x) { return Math.sin(x * toRad); },
+      cos: function(x) { return Math.cos(x * toRad); },
+      tan: function(x) { return Math.tan(x * toRad); },
+      asin: function(x) { return Math.asin(x) * fromRad; },
+      acos: function(x) { return Math.acos(x) * fromRad; },
+      atan: function(x) { return Math.atan(x) * fromRad; },
+    };
+  }
+
+  var result = math.evaluate(s, scope);
+  if (typeof result !== 'number') return String(result);
+  if (!isFinite(result)) return result > 0 ? '∞' : result < 0 ? '-∞' : 'Error';
+  if (Number.isNaN(result)) return 'Error';
+  return parseFloat(result.toPrecision(12)).toString();
 }
 
 function _calcRenderHistory() {
@@ -4792,15 +4824,21 @@ function _loadScript(url) {
   });
 }
 
-function _loadMathJS() {
+// 仅加载 math.js（简易/科学模式按 = 时调用）
+function _ensureMathJS() {
+  if (_mathJSLoaded || typeof math !== 'undefined') { _mathJSLoaded = true; return Promise.resolve(); }
+  return _loadScript('https://cdnjs.cloudflare.com/ajax/libs/mathjs/13.2.2/math.min.js')
+    .then(function() { _mathJSLoaded = true; });
+}
+
+// 加载 math.js + KaTeX（高级模式用）
+function _loadAdvAssets() {
   var tasks = [];
   if (!_mathJSLoaded && typeof math === 'undefined') {
-    tasks.push(_loadScript('https://cdnjs.cloudflare.com/ajax/libs/mathjs/13.2.2/math.min.js')
-      .then(function() { _mathJSLoaded = true; }));
+    tasks.push(_ensureMathJS());
   }
   if (typeof katex === 'undefined') {
     tasks.push(_loadScript('/static/katex.min.js'));
-    // Also load CSS
     if (!document.querySelector('link[href*="katex"]')) {
       var link = document.createElement('link');
       link.rel = 'stylesheet'; link.href = '/static/katex.min.css';
@@ -4864,7 +4902,7 @@ function cadvEval() {
   var raw = inp.value.trim();
   if (!raw) return;
 
-  _loadMathJS().then(function() {
+  _loadAdvAssets().then(function() {
     var processed = _cadvPreprocess(raw);
     var resultTex = '', exprTex = '';
 
