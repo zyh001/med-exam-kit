@@ -164,7 +164,6 @@ def _create_app():
     app.config["JSON_AS_ASCII"] = False
     app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
     Compress(app)
-    sock = Sock(app)
     _sock = Sock(app)
 
     @app.before_request
@@ -1399,7 +1398,7 @@ def api_ai_chat():
 def asr_ws(ws):
     """Proxy audio between browser and DashScope real-time ASR."""
     if not _asr_api_key:
-        ws.send(json.dumps({"type": "error", "text": "ASR not configured"}))
+        ws.send(_json.dumps({"type": "error", "text": "ASR not configured"}))
         return
 
     import websocket as _ws_client
@@ -1417,7 +1416,7 @@ def asr_ws(ws):
             timeout=10,
         )
     except Exception as e:
-        ws.send(json.dumps({"type": "error", "text": f"ASR 连接失败: {e}"}))
+        ws.send(_json.dumps({"type": "error", "text": f"ASR 连接失败: {e}"}))
         return
 
     # Send run-task
@@ -1430,22 +1429,22 @@ def asr_ws(ws):
             "input": {},
         },
     }
-    ds.send(json.dumps(run_task))
+    ds.send(_json.dumps(run_task))
 
     # Wait for task-started
     try:
-        start_resp = json.loads(ds.recv())
+        start_resp = _json.loads(ds.recv())
         if start_resp.get("header", {}).get("event") != "task-started":
             err = start_resp.get("header", {}).get("error_message", "unknown")
-            ws.send(json.dumps({"type": "error", "text": f"ASR 启动失败: {err}"}))
+            ws.send(_json.dumps({"type": "error", "text": f"ASR 启动失败: {err}"}))
             ds.close()
             return
     except Exception as e:
-        ws.send(json.dumps({"type": "error", "text": f"ASR 启动异常: {e}"}))
+        ws.send(_json.dumps({"type": "error", "text": f"ASR 启动异常: {e}"}))
         ds.close()
         return
 
-    ws.send(json.dumps({"type": "ready"}))
+    ws.send(_json.dumps({"type": "ready"}))
 
     # Background thread: read from DashScope → send to browser
     import threading
@@ -1461,25 +1460,25 @@ def asr_ws(ws):
                     continue
                 except Exception:
                     break
-                resp = json.loads(raw)
+                resp = _json.loads(raw)
                 event = resp.get("header", {}).get("event", "")
                 if event == "result-generated":
                     sentence = resp.get("payload", {}).get("output", {}).get("sentence", {})
                     if sentence.get("text"):
                         try:
-                            ws.send(json.dumps({"type": "partial", "text": sentence["text"]}))
+                            ws.send(_json.dumps({"type": "partial", "text": sentence["text"]}))
                         except Exception:
                             break
                 elif event == "task-finished":
                     try:
-                        ws.send(json.dumps({"type": "done"}))
+                        ws.send(_json.dumps({"type": "done"}))
                     except Exception:
                         pass
                     break
                 elif event == "task-failed":
                     err = resp.get("header", {}).get("error_message", "")
                     try:
-                        ws.send(json.dumps({"type": "error", "text": err}))
+                        ws.send(_json.dumps({"type": "error", "text": err}))
                     except Exception:
                         pass
                     break
@@ -1499,12 +1498,12 @@ def asr_ws(ws):
             if data is None:
                 break
             if isinstance(data, str):
-                ctrl = json.loads(data)
+                ctrl = _json.loads(data)
                 if ctrl.get("type") == "stop":
                     finish = {"header": {"action": "finish-task", "task_id": task_id},
                               "payload": {"input": {}}}
                     try:
-                        ds.send(json.dumps(finish))
+                        ds.send(_json.dumps(finish))
                     except Exception:
                         pass
                     break

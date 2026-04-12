@@ -32,6 +32,7 @@ dependencies = [
     "flask-compress>=1.20",
     "flask-sock>=0.7.0",
     "websocket-client>=1.6.0",
+    "websocket-client>=1.6.0",
     "tqdm>=4.65",
     "termcolor>=2.0",
     "lxml>=4.9",
