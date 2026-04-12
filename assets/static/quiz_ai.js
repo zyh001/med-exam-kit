@@ -154,15 +154,21 @@ function joinBrokenTableRows(text) {
   return result.join('\n');
 }
 
-// ── Fix broken inline formatting across line breaks ──────────────
-// AI sometimes outputs **（\n）** or **"\n"** where bold markers span
-// across a single line break. CommonMark treats \n as a soft break
-// inside paragraphs but does NOT allow ** delimiters to span lines.
-// Fix: join the broken content onto one line.
+// ── Fix CJK bold/italic rendering ─────────────────────────────────
+// CommonMark's "flanking delimiter" rules reject ** when:
+//   - opening ** is preceded by CJK char + followed by CJK punctuation
+//     e.g. 领域**（外科）这些**  ← opening ** not left-flanking
+//   - closing ** is preceded by CJK punctuation + followed by CJK char
+//     e.g. **错误（A）**类型     ← closing ** not right-flanking
+// Fix: convert **text** → <strong>text</strong> before marked parses,
+// bypassing the flanking check entirely. Code blocks are protected.
 function fixBrokenInlineFormatting(text) {
-  // Fix **text\ntext** — bold spanning a single line break (short content, ≤40 chars each side)
-  text = text.replace(/\*\*([^*\n]{0,40})\n([^*\n]{0,40})\*\*/g, '**$1 $2**');
-  return text;
+  var parts = text.split(/(```[\s\S]*?```)/g);
+  for (var i = 0; i < parts.length; i++) {
+    if (parts[i].indexOf('```') === 0) continue; // skip fenced code blocks
+    parts[i] = parts[i].replace(/\*\*([^*\n]+?)\*\*/g, '<strong>$1</strong>');
+  }
+  return parts.join('');
 }
 
 // ── Shared marked render (table fix + LaTeX) ─────────────────────
