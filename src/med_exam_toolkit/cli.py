@@ -646,9 +646,13 @@ def edit(bank, password, port, host, no_browser, no_pin):
 @click.option("--ai-key", default="", help="AI API Key")
 @click.option("--ai-base-url", default="", help="AI API Base URL（自定义端点）")
 @click.option("--ai-thinking/--ai-no-thinking", default=None, help="混合思考模型的思考开关")
+@click.option("--asr-key", default="", help="ASR API Key（DashScope）")
+@click.option("--asr-model", default="", help="ASR 模型名（默认 qwen3-asr-flash）")
+@click.option("--asr-base-url", default="", help="ASR WebSocket URL")
 @click.pass_context
 def quiz(ctx, banks, password, port, host, no_browser, no_record, no_pin, pin,
-         ai_provider, ai_model, ai_key, ai_base_url, ai_thinking):
+         ai_provider, ai_model, ai_key, ai_base_url, ai_thinking,
+         asr_key, asr_model, asr_base_url):
     """启动医考练习 Web 应用（练习/考试/背题模式，支持多题库）
 
     \b
@@ -656,25 +660,31 @@ def quiz(ctx, banks, password, port, host, no_browser, no_record, no_pin, pin,
     支持三种模式：练习模式、考试模式、背题模式
     多题库示例：med-exam quiz -b 内科.mqb -b 外科.mqb
     AI 答疑：  med-exam quiz -b x.mqb --ai-provider qwen --ai-key sk-xxx
+    语音识别：  med-exam quiz -b x.mqb --asr-key sk-xxx
     按 Ctrl+C 退出
     """
     if not banks:
         raise click.UsageError("请用 -b 指定至少一个题库路径（多题库：-b a.mqb -b b.mqb）")
 
-    # 从 config.yaml 读取 AI 配置（命令行优先）
+    # 从 config.yaml 读取 AI / ASR 配置（命令行优先）
     ctx_cfg = (ctx.obj or {}).get("config", {})
     ai_cfg  = ctx_cfg.get("ai", {})
     ai_provider = ai_provider or ai_cfg.get("provider", "")
     ai_model    = ai_model    or ai_cfg.get("model", "")
     ai_key      = ai_key      or ai_cfg.get("api_key", "")
     ai_base_url = ai_base_url or ai_cfg.get("base_url", "")
+    asr_cfg = ctx_cfg.get("asr", {})
+    asr_key      = asr_key      or asr_cfg.get("api_key", "")
+    asr_model    = asr_model    or asr_cfg.get("model", "")
+    asr_base_url = asr_base_url or asr_cfg.get("base_url", "")
 
     from med_exam_toolkit.quiz import start_quiz
     start_quiz(list(banks), port=port, host=host, no_browser=no_browser,
                password=password, no_record=no_record, no_pin=no_pin, pin=pin,
                ai_provider=ai_provider, ai_model=ai_model,
                ai_api_key=ai_key, ai_base_url=ai_base_url,
-               ai_thinking=ai_thinking)
+               ai_thinking=ai_thinking,
+               asr_api_key=asr_key, asr_model=asr_model, asr_base_url=asr_base_url)
 
 
 def main():

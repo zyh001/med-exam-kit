@@ -13,6 +13,7 @@ from pathlib import Path
 from typing import Optional
 from flask import Flask, jsonify, request, render_template, make_response
 from flask_compress import Compress
+from flask_sock import Sock
 
 # ════════════════════════════════════════════
 # 多题库状态
@@ -53,6 +54,11 @@ _ai_client:   "object | None" = None
 _ai_model:    str  = ""
 _ai_provider: str  = ""
 _ai_enable_thinking: "bool | None" = None
+
+# ── ASR 语音识别 ──
+_asr_api_key:  str = ""
+_asr_model:    str = ""
+_asr_base_url: str = ""
 
 # ── 速率限制 ──
 _RATE_LIMIT  = 120
@@ -153,11 +159,13 @@ def _select_questions_by_fp(questions: list, fp_set: set) -> list[dict]:
     return rows
 
 
-def _create_app() -> Flask:
+def _create_app():
     app = Flask(__name__, template_folder="templates", static_folder="static")
     app.config["JSON_AS_ASCII"] = False
     app.config["MAX_CONTENT_LENGTH"] = 32 * 1024 * 1024
     Compress(app)
+    sock = Sock(app)
+    _sock = Sock(app)
 
     @app.before_request
     def _guard():
@@ -220,7 +228,7 @@ def _create_app() -> Flask:
             return jsonify({"error": "Unauthorized", "auth": False}), 401
 
         if request.path.startswith("/api/"):
-            token = request.headers.get("X-Session-Token", "")
+            token = request.headers.get("X-Session-Token", "") or request.args.get("token", "")
             if not secrets.compare_digest(token, _session_token):
                 return jsonify({"error": "Unauthorized"}), 401
             ip = _get_real_ip()
@@ -235,10 +243,10 @@ def _create_app() -> Flask:
         apply_security_headers(response)
         return response
 
-    return app
+    return app, _sock
 
 
-app = _create_app()
+app, sock = _create_app()
 
 
 @app.errorhandler(413)
@@ -775,6 +783,7 @@ def api_info():
         "unit_sq":        unit_sq,
         "unit_mode_sq":   unit_mode_sq,
         "ai_enabled":     _ai_client is not None,
+        "asr_enabled":    bool(_asr_api_key),
     })
 
 
@@ -1385,6 +1394,133 @@ def api_ai_chat():
                     headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+# ── ASR WebSocket proxy ──────────────────────────────────────────────
+@sock.route("/api/asr/ws")
+def asr_ws(ws):
+    """Proxy audio between browser and DashScope real-time ASR."""
+    if not _asr_api_key:
+        ws.send(json.dumps({"type": "error", "text": "ASR not configured"}))
+        return
+
+    import websocket as _ws_client
+    import uuid as _uuid
+    task_id = str(_uuid.uuid4())
+
+    # Connect to DashScope
+    try:
+        ds = _ws_client.create_connection(
+            _asr_base_url,
+            header=[
+                f"Authorization: bearer {_asr_api_key}",
+                "X-DashScope-DataInspection: enable",
+            ],
+            timeout=10,
+        )
+    except Exception as e:
+        ws.send(json.dumps({"type": "error", "text": f"ASR 连接失败: {e}"}))
+        return
+
+    # Send run-task
+    run_task = {
+        "header": {"action": "run-task", "task_id": task_id, "streaming": "duplex"},
+        "payload": {
+            "task_group": "audio", "task": "asr", "function": "recognition",
+            "model": _asr_model,
+            "parameters": {"format": "pcm", "sample_rate": 16000},
+            "input": {},
+        },
+    }
+    ds.send(json.dumps(run_task))
+
+    # Wait for task-started
+    try:
+        start_resp = json.loads(ds.recv())
+        if start_resp.get("header", {}).get("event") != "task-started":
+            err = start_resp.get("header", {}).get("error_message", "unknown")
+            ws.send(json.dumps({"type": "error", "text": f"ASR 启动失败: {err}"}))
+            ds.close()
+            return
+    except Exception as e:
+        ws.send(json.dumps({"type": "error", "text": f"ASR 启动异常: {e}"}))
+        ds.close()
+        return
+
+    ws.send(json.dumps({"type": "ready"}))
+
+    # Background thread: read from DashScope → send to browser
+    import threading
+    stop_event = threading.Event()
+
+    def _ds_reader():
+        try:
+            while not stop_event.is_set():
+                ds.settimeout(1.0)
+                try:
+                    raw = ds.recv()
+                except _ws_client.WebSocketTimeoutException:
+                    continue
+                except Exception:
+                    break
+                resp = json.loads(raw)
+                event = resp.get("header", {}).get("event", "")
+                if event == "result-generated":
+                    sentence = resp.get("payload", {}).get("output", {}).get("sentence", {})
+                    if sentence.get("text"):
+                        try:
+                            ws.send(json.dumps({"type": "partial", "text": sentence["text"]}))
+                        except Exception:
+                            break
+                elif event == "task-finished":
+                    try:
+                        ws.send(json.dumps({"type": "done"}))
+                    except Exception:
+                        pass
+                    break
+                elif event == "task-failed":
+                    err = resp.get("header", {}).get("error_message", "")
+                    try:
+                        ws.send(json.dumps({"type": "error", "text": err}))
+                    except Exception:
+                        pass
+                    break
+        finally:
+            try:
+                ds.close()
+            except Exception:
+                pass
+
+    reader = threading.Thread(target=_ds_reader, daemon=True)
+    reader.start()
+
+    # Main loop: read from browser → forward to DashScope
+    try:
+        while True:
+            data = ws.receive(timeout=30)
+            if data is None:
+                break
+            if isinstance(data, str):
+                ctrl = json.loads(data)
+                if ctrl.get("type") == "stop":
+                    finish = {"header": {"action": "finish-task", "task_id": task_id},
+                              "payload": {"input": {}}}
+                    try:
+                        ds.send(json.dumps(finish))
+                    except Exception:
+                        pass
+                    break
+            else:
+                # Binary audio data
+                try:
+                    ds.send_binary(data)
+                except Exception:
+                    break
+    except Exception:
+        pass
+    finally:
+        stop_event.set()
+        reader.join(timeout=3)
+
+
 # ════════════════════════════════════════════
 # 启动函数
 # ════════════════════════════════════════════
@@ -1403,6 +1539,9 @@ def start_quiz(
     ai_api_key:  str = "",
     ai_base_url: str = "",
     ai_thinking: bool | None = None,
+    asr_api_key: str = "",
+    asr_model:   str = "",
+    asr_base_url: str = "",
 ) -> None:
     """启动医考练习 Web 应用（支持多题库）。
 
@@ -1416,7 +1555,8 @@ def start_quiz(
     global _banks, _session_token, _asset_ver, \
            _server_port, _server_host, \
            _access_code, _cookie_secret, _pin_enabled, _pin_len, \
-           _ai_client, _ai_model, _ai_provider, _ai_enable_thinking
+           _ai_client, _ai_model, _ai_provider, _ai_enable_thinking, \
+           _asr_api_key, _asr_model, _asr_base_url
 
     # 兼容旧的单路径传参
     if isinstance(bank_paths, (str, Path)):
@@ -1448,6 +1588,13 @@ def start_quiz(
         except Exception as e:
             print(f"[WARN] AI 答疑初始化失败: {e}")
             _ai_client = None
+
+    # ── ASR 语音识别 ──
+    _asr_api_key  = asr_api_key
+    _asr_model    = asr_model or "qwen3-asr-flash"
+    _asr_base_url = asr_base_url or "wss://dashscope.aliyuncs.com/api-ws/v1/inference/"
+    if _asr_api_key:
+        print(f"[INFO] ASR 语音识别已启用: model={_asr_model}")
 
     from med_exam_toolkit.auth import generate_access_code, derive_secret
     if pin:
@@ -1531,6 +1678,22 @@ def start_quiz(
     except Exception as _e:
         import logging
         logging.getLogger(__name__).warning("[push] 初始化失败: %s", _e)
+
+    # 定期清理脏数据：删除 7 天未活跃用户的答题记录
+    def _cleanup_loop():
+        import time as _t
+        _t.sleep(60)  # 启动后 1 分钟首次执行
+        while True:
+            for b in _banks:
+                if b.get("db_path"):
+                    try:
+                        users, rows = progress.cleanup_stale_users(Path(b["db_path"]))
+                        if users > 0:
+                            print(f"[cleanup] {b.get('name','?')}: removed {users} stale users ({rows} rows)")
+                    except Exception:
+                        pass
+            _t.sleep(86400)  # 每 24 小时
+    threading.Thread(target=_cleanup_loop, daemon=True).start()
 
     app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 

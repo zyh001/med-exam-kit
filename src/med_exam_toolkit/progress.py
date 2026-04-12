@@ -480,3 +480,28 @@ def get_overall_stats(
             "wrong_attempts":att["wrong"] or 0,
             "accuracy":round(correct/total*100) if total else 0,
             "sessions":sessions,"due_today":due,"wrong_topics":wrong_topics}
+
+def cleanup_stale_users(db_path: Path, max_age_days: int = 7) -> tuple[int, int]:
+    """Delete all data for users inactive for more than max_age_days.
+    The _legacy user is never deleted.
+    Returns (users_cleaned, rows_deleted)."""
+    cutoff = int((time.time() - max_age_days * 86400) * 1000)
+    users = 0
+    rows = 0
+    with _open(db_path) as c:
+        stale = c.execute(
+            """SELECT user_id, MAX(ts) AS last_ts FROM (
+                SELECT user_id, ts FROM sessions
+                UNION ALL
+                SELECT user_id, ts FROM attempts
+            ) GROUP BY user_id
+            HAVING last_ts < ? AND user_id != ?""",
+            (cutoff, LEGACY_USER),
+        ).fetchall()
+    for row in stale:
+        uid = row["user_id"]
+        counts = clear_user_data(db_path, uid)
+        total = sum(counts.values())
+        rows += total
+        users += 1
+    return users, rows
