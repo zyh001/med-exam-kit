@@ -154,10 +154,21 @@ function joinBrokenTableRows(text) {
   return result.join('\n');
 }
 
+// ── Fix broken inline formatting across line breaks ──────────────
+// AI sometimes outputs **（\n）** or **"\n"** where bold markers span
+// across a single line break. CommonMark treats \n as a soft break
+// inside paragraphs but does NOT allow ** delimiters to span lines.
+// Fix: join the broken content onto one line.
+function fixBrokenInlineFormatting(text) {
+  // Fix **text\ntext** — bold spanning a single line break (short content, ≤40 chars each side)
+  text = text.replace(/\*\*([^*\n]{0,40})\n([^*\n]{0,40})\*\*/g, '**$1 $2**');
+  return text;
+}
+
 // ── Shared marked render (table fix + LaTeX) ─────────────────────
 function markedRender(text) {
   if (typeof marked !== 'undefined' && marked.parse) {
-    return marked.parse(joinBrokenTableRows(fixTableSeparators(text)), { async: false });
+    return marked.parse(fixBrokenInlineFormatting(joinBrokenTableRows(fixTableSeparators(text))), { async: false });
   }
   return '<pre>' + esc(text) + '</pre>';
 }
@@ -791,28 +802,30 @@ function scrollMessages(container) {
 /** 绑定用户滚动检测到 messages 容器 */
 function _bindScrollPause(messagesEl) {
   _scrollTarget = messagesEl;
-  let userTouching = false;
-  // 触摸/鼠标按下 → 标记用户正在交互
-  messagesEl.addEventListener('touchstart', () => { userTouching = true; }, { passive: true });
-  messagesEl.addEventListener('mousedown',  () => { userTouching = true; });
-  // 触摸/鼠标释放 → 检查是否在底部
+  // 触摸/鼠标按下 → 立即暂停自动滚动（消除顿挫感）
+  function onPress() {
+    _scrollPaused = true;
+    if (_scrollRafId) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null; }
+  }
+  messagesEl.addEventListener('touchstart', onPress, { passive: true });
+  messagesEl.addEventListener('mousedown',  onPress);
+  // 触摸/鼠标释放 → 检查是否在底部，在底部则恢复自动滚动
   function onRelease() {
-    if (!userTouching) return;
-    userTouching = false;
-    // 延迟检查，等惯性滚动稳定
+    // 短延迟等惯性滚动稳定
     setTimeout(() => {
-      const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
-      _scrollPaused = !atBottom;
-    }, 150);
+      var atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
+      if (atBottom) _scrollPaused = false;
+    }, 100);
   }
   messagesEl.addEventListener('touchend',   onRelease, { passive: true });
   messagesEl.addEventListener('mouseup',    onRelease);
-  // 滚轮事件（桌面端）
+  // 滚轮事件（桌面端）→ 立即暂停，检查位置
   messagesEl.addEventListener('wheel', () => {
-    // 滚轮每次触发都检查位置
+    _scrollPaused = true;
+    if (_scrollRafId) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null; }
     setTimeout(() => {
-      const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
-      _scrollPaused = !atBottom;
+      var atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
+      if (atBottom) _scrollPaused = false;
     }, 50);
   }, { passive: true });
 }
