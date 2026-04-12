@@ -1913,6 +1913,45 @@ button,a,[role=button],label{touch-action:manipulation}
 /* 2nd mode highlight */
 .ck.sc.is-2nd{background:var(--accent);color:#fff}
 
+/* Memory indicator */
+.ck.has-mem{position:relative}
+.ck.has-mem::after{content:'';position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
+
+/* ── 高级计算器模式 ── */
+.calc-adv-wrap{padding:8px}
+.cadv-display{
+  background:var(--bg);border-radius:var(--r);padding:12px;min-height:80px;
+  margin-bottom:8px;overflow-x:auto;overflow-y:hidden;
+}
+.cadv-expr{font-size:14px;color:var(--text-light);min-height:20px;overflow-x:auto;margin-bottom:4px}
+.cadv-result{font-size:22px;color:var(--text);font-weight:600;min-height:28px;overflow-x:auto}
+.cadv-result .katex{font-size:22px}
+.cadv-expr .katex{font-size:14px}
+.cadv-input-row{display:flex;gap:6px;margin-bottom:6px}
+.cadv-input{
+  flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--r);
+  background:var(--bg);color:var(--text);font-size:15px;font-family:'Courier New',monospace;
+  outline:none;transition:border-color .2s;
+}
+.cadv-input:focus{border-color:var(--accent)}
+.cadv-go{
+  width:42px;height:42px;border:none;border-radius:var(--r);
+  background:var(--accent);color:#fff;font-size:20px;font-weight:700;
+  cursor:pointer;flex-shrink:0;transition:transform .1s;
+}
+.cadv-go:active{transform:scale(.93)}
+.cadv-hint{font-size:11px;color:var(--text-light);margin-bottom:8px;line-height:1.5}
+.cadv-btns{display:flex;flex-wrap:wrap;gap:4px}
+.cb{
+  padding:6px 0;min-width:calc(16.66% - 4px);flex:1 0 calc(16.66% - 4px);
+  border:1px solid var(--border);border-radius:8px;background:var(--surface);
+  color:var(--text);font-size:13px;cursor:pointer;text-align:center;
+  transition:background .15s,transform .1s;
+}
+.cb:active{transform:scale(.93);background:var(--border)}
+.cb sup{font-size:9px}
+.cadv-err{color:#e74c3c}
+
 /* ════════════════════════════════════════════
    AI 答疑面板
 ════════════════════════════════════════════ */
