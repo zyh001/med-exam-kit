@@ -723,19 +723,18 @@ function appendMsg(container, role, text) {
 
 let _scrollRafId = null;
 let _scrollPaused = false;   // 用户手动上滑时暂停自动滚动
-let _autoScrolling = false;  // 标记当前是否程序触发的滚动
+let _scrollTarget = null;    // 当前滚动容器引用
 
 function scrollMessages(container) {
   if (_scrollPaused) return;  // 用户已手动上滑，不自动滚动
   if (_scrollRafId) return;
-  _autoScrolling = true;
   function step() {
+    if (_scrollPaused) { _scrollRafId = null; return; }  // 动画中途被打断
     const target = container.scrollHeight - container.clientHeight;
     const diff = target - container.scrollTop;
     if (diff <= 1) {
       container.scrollTop = target;
       _scrollRafId = null;
-      _autoScrolling = false;
       return;
     }
     container.scrollTop += diff * 0.18;
@@ -746,21 +745,37 @@ function scrollMessages(container) {
 
 /** 绑定用户滚动检测到 messages 容器 */
 function _bindScrollPause(messagesEl) {
-  messagesEl.addEventListener('scroll', () => {
-    if (_autoScrolling) return;  // 程序触发的滚动，忽略
-    const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 30;
-    _scrollPaused = !atBottom;
+  _scrollTarget = messagesEl;
+  let userTouching = false;
+  // 触摸/鼠标按下 → 标记用户正在交互
+  messagesEl.addEventListener('touchstart', () => { userTouching = true; }, { passive: true });
+  messagesEl.addEventListener('mousedown',  () => { userTouching = true; });
+  // 触摸/鼠标释放 → 检查是否在底部
+  function onRelease() {
+    if (!userTouching) return;
+    userTouching = false;
+    // 延迟检查，等惯性滚动稳定
+    setTimeout(() => {
+      const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
+      _scrollPaused = !atBottom;
+    }, 150);
+  }
+  messagesEl.addEventListener('touchend',   onRelease, { passive: true });
+  messagesEl.addEventListener('mouseup',    onRelease);
+  // 滚轮事件（桌面端）
+  messagesEl.addEventListener('wheel', () => {
+    // 滚轮每次触发都检查位置
+    setTimeout(() => {
+      const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
+      _scrollPaused = !atBottom;
+    }, 50);
   }, { passive: true });
-  // 触摸开始时标记为用户操作
-  messagesEl.addEventListener('touchstart', () => { _autoScrolling = false; }, { passive: true });
-  messagesEl.addEventListener('mousedown', () => { _autoScrolling = false; }, { passive: true });
 }
 
 /** 重置滚动状态（新消息开始流式输出时） */
 function _resetScrollPause() {
   _scrollPaused = false;
   if (_scrollRafId) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null; }
-  _autoScrolling = false;
 }
 
 function updateRoundBadge(header, round) {
