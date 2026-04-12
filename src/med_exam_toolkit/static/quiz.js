@@ -4942,8 +4942,11 @@ function cadvEval() {
         result = math.evaluate(processed, scope);
 
         if (typeof result === 'number') {
-          // Format nicely
-          if (Number.isInteger(result) && Math.abs(result) < 1e15) {
+          // Handle special values
+          if (result === Infinity) { resultTex = '\\infty'; }
+          else if (result === -Infinity) { resultTex = '-\\infty'; }
+          else if (isNaN(result)) { resultTex = '\\text{Error}'; }
+          else if (Number.isInteger(result) && Math.abs(result) < 1e15) {
             resultTex = String(result);
           } else {
             resultTex = parseFloat(result.toPrecision(12)).toString();
