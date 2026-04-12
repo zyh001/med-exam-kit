@@ -4827,7 +4827,7 @@ function _loadScript(url) {
 // 仅加载 math.js（简易/科学模式按 = 时调用）
 function _ensureMathJS() {
   if (_mathJSLoaded || typeof math !== 'undefined') { _mathJSLoaded = true; return Promise.resolve(); }
-  return _loadScript('https://cdnjs.cloudflare.com/ajax/libs/mathjs/13.2.2/math.min.js')
+  return _loadScript('/static/math.min.js')
     .then(function() { _mathJSLoaded = true; });
 }
 
