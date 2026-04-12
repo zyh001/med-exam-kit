@@ -14,6 +14,7 @@ _PROVIDER_BASE_URLS: dict[str, str] = {
     "qwen-intl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
     "kimi":      "https://api.moonshot.cn/v1",
     "minimax":   "https://api.minimaxi.com/v1",
+    "zhipu":     "https://open.bigmodel.cn/api/paas/v4",
 }
 
 # 各 provider 的推荐默认模型
@@ -25,6 +26,7 @@ _PROVIDER_DEFAULT_MODELS: dict[str, str] = {
     "qwen-intl": "qwen-plus",
     "kimi":      "kimi-k2.5",
     "minimax":   "MiniMax-M2.5",
+    "zhipu":     "glm-5",
 }
 
 # ── 模型分类 ──
@@ -52,6 +54,8 @@ _HYBRID_THINKING_KEYWORDS = (
     "kimi-k2.5",
     # MiniMax 系列（混合推理模型，通过 reasoning_split 参数控制）
     "minimax",
+    # GLM-5 系列（智谱 AI，通过 thinking 参数控制）
+    "glm-5", "glm-4.7",
 )
 
 
@@ -232,8 +236,8 @@ def build_chat_params(
         params["temperature"] = 1
         params["max_tokens"]  = max_tokens
         # 根据 provider 使用不同的思考参数格式
-        if provider == "kimi":
-            # 月之暗面 Kimi：{"thinking": {"type": "enabled"}}
+        if provider in ("kimi", "zhipu"):
+            # 月之暗面 Kimi / 智谱 GLM：{"thinking": {"type": "enabled"}}
             params["extra_body"] = {"thinking": {"type": "enabled"}}
         elif provider == "minimax":
             # MiniMax：{"reasoning_split": True}
@@ -248,8 +252,8 @@ def build_chat_params(
         if hybrid:
             # 混合模型显式关闭，避免 API 端默认开启
             # 根据 provider 使用不同的思考参数格式
-            if provider == "kimi":
-                # 月之暗面 Kimi：{"thinking": {"type": "disabled"}}
+            if provider in ("kimi", "zhipu"):
+                # 月之暗面 Kimi / 智谱 GLM：{"thinking": {"type": "disabled"}}
                 params["extra_body"] = {"thinking": {"type": "disabled"}}
             elif provider == "minimax":
                 # MiniMax：{"reasoning_split": False}

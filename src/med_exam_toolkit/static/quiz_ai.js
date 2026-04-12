@@ -154,10 +154,19 @@ function joinBrokenTableRows(text) {
   return result.join('\n');
 }
 
+// ── Fix broken inline formatting across line breaks ──────────────
+// AI sometimes outputs **（\n）** or **"\n"** where bold markers span
+// across a single line break. CommonMark does NOT allow ** to span lines.
+function fixBrokenInlineFormatting(text) {
+  // Fix **text\ntext** — bold spanning a single line break (short content, ≤40 chars each side)
+  text = text.replace(/\*\*([^*\n]{0,40})\n([^*\n]{0,40})\*\*/g, '**$1 $2**');
+  return text;
+}
+
 // ── Shared marked render (table fix + LaTeX) ─────────────────────
 function markedRender(text) {
   if (typeof marked !== 'undefined' && marked.parse) {
-    return marked.parse(joinBrokenTableRows(fixTableSeparators(text)), { async: false });
+    return marked.parse(fixBrokenInlineFormatting(joinBrokenTableRows(fixTableSeparators(text))), { async: false });
   }
   return '<pre>' + esc(text) + '</pre>';
 }
@@ -786,23 +795,26 @@ function scrollMessages(container) {
 
 function _bindScrollPause(messagesEl) {
   _scrollTarget = messagesEl;
-  let userTouching = false;
-  messagesEl.addEventListener('touchstart', () => { userTouching = true; }, { passive: true });
-  messagesEl.addEventListener('mousedown',  () => { userTouching = true; });
+  function onPress() {
+    _scrollPaused = true;
+    if (_scrollRafId) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null; }
+  }
+  messagesEl.addEventListener('touchstart', onPress, { passive: true });
+  messagesEl.addEventListener('mousedown',  onPress);
   function onRelease() {
-    if (!userTouching) return;
-    userTouching = false;
     setTimeout(() => {
-      const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
-      _scrollPaused = !atBottom;
-    }, 150);
+      var atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
+      if (atBottom) _scrollPaused = false;
+    }, 100);
   }
   messagesEl.addEventListener('touchend',   onRelease, { passive: true });
   messagesEl.addEventListener('mouseup',    onRelease);
   messagesEl.addEventListener('wheel', () => {
+    _scrollPaused = true;
+    if (_scrollRafId) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null; }
     setTimeout(() => {
-      const atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
-      _scrollPaused = !atBottom;
+      var atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
+      if (atBottom) _scrollPaused = false;
     }, 50);
   }, { passive: true });
 }
