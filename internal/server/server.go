@@ -95,6 +95,11 @@ type Config struct {
 	AIBaseURL       string
 	AIEnableThinking *bool
 
+	// ASR (语音识别)
+	ASRAPIKey  string
+	ASRModel   string
+	ASRBaseURL string
+
 	// Legacy single-bank fields kept for editor command compatibility.
 	// When Banks is set, these are ignored.
 	Questions     []*models.Question
@@ -228,6 +233,18 @@ func (s *Server) ListenAndServe() error {
 		}
 	}()
 
+	// 定期清理脏数据：删除 7 天未活跃用户的答题记录
+	go func() {
+		// 首次启动 1 分钟后执行一次，之后每 24 小时执行
+		time.Sleep(1 * time.Minute)
+		s.runUserCleanup()
+		ticker := time.NewTicker(24 * time.Hour)
+		defer ticker.Stop()
+		for range ticker.C {
+			s.runUserCleanup()
+		}
+	}()
+
 	select {
 	case err := <-errCh:
 		return err
@@ -249,6 +266,19 @@ func (s *Server) Close() {
 	for _, b := range s.cfg.Banks {
 		if b.DB != nil {
 			b.DB.Close()
+		}
+	}
+}
+
+// runUserCleanup removes stale user data (>7 days inactive) from all SQLite banks.
+func (s *Server) runUserCleanup() {
+	for i, b := range s.cfg.Banks {
+		if b.DB == nil {
+			continue
+		}
+		users, rows := progress.CleanupStaleUsers(b.DB, 7)
+		if users > 0 {
+			log.Printf("[cleanup] bank=%d: removed %d stale users (%d rows)", i, users, rows)
 		}
 	}
 }
@@ -314,6 +344,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// /api/debug 只需访问码，无需 Session Token（调试用，不含敏感操作）
 	if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/debug" {
 		tok := r.Header.Get("X-Session-Token")
+		// WebSocket 无法设置自定义 Header，从 query param 获取 token
+		if tok == "" {
+			tok = r.URL.Query().Get("token")
+		}
 		if subtle.ConstantTimeCompare([]byte(tok), []byte(s.sessionToken)) != 1 {
 			jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
 			return
@@ -400,6 +434,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/exam/join", s.handleExamJoin)
 	// AI Q&A
 	m.HandleFunc("POST /api/ai/chat", s.handleAIChat)
+	m.HandleFunc("GET /api/asr/ws", s.handleASRWebSocket)
 }
 
 // ── Bank selection ────────────────────────────────────────────────────
@@ -601,6 +636,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"asset_ver":      s.assetVer,
 		"record_enabled": b.RecordEnabled,
 			"ai_enabled":     s.aiClient != nil,
+			"asr_enabled":    s.cfg.ASRAPIKey != "",
 	})
 }
 

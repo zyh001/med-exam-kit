@@ -216,6 +216,9 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		AIAPIKey:        fileCfg.AIAPIKey,
 		AIBaseURL:       fileCfg.AIBaseURL,
 		AIEnableThinking: fileCfg.AIEnableThinking,
+		ASRAPIKey:        fileCfg.ASRAPIKey,
+		ASRModel:         fileCfg.ASRModel,
+		ASRBaseURL:       fileCfg.ASRBaseURL,
 	}
 	cfg.Assets = Assets
 
