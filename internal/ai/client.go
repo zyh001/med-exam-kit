@@ -22,6 +22,7 @@ var ProviderBaseURLs = map[string]string{
 	"qwen-intl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
 	"kimi":      "https://api.moonshot.cn/v1",
 	"minimax":   "https://api.minimaxi.com/v1",
+	"zhipu":     "https://open.bigmodel.cn/api/paas/v4",
 }
 
 var ProviderDefaultModels = map[string]string{
@@ -31,6 +32,7 @@ var ProviderDefaultModels = map[string]string{
 	"qwen":     "qwen-plus",
 	"kimi":     "kimi-k2.5",
 	"minimax":  "MiniMax-M2.5",
+	"zhipu":    "glm-5",
 }
 
 // ── Model classification ──
@@ -48,6 +50,7 @@ var hybridThinkingKeywords = []string{
 	"qwen-max", "qwen-plus", "qwen3",
 	"kimi-k2.5",
 	"minimax",
+	"glm-5", "glm-4.7",
 }
 
 // IsReasoningModel returns true for pure reasoning models (o1/o3/R1 etc).
@@ -194,7 +197,7 @@ func (c *Client) ChatCompletion(messages []ChatMessage, temperature float64, max
 		body["temperature"] = 1
 		body["max_tokens"] = maxTokens
 		switch c.Provider {
-		case "kimi":
+		case "kimi", "zhipu":
 			body["thinking"] = map[string]string{"type": "enabled"}
 		case "minimax":
 			body["reasoning_split"] = true
@@ -206,7 +209,7 @@ func (c *Client) ChatCompletion(messages []ChatMessage, temperature float64, max
 		body["max_tokens"] = maxTokens
 		if hybrid {
 			switch c.Provider {
-			case "kimi":
+			case "kimi", "zhipu":
 				body["thinking"] = map[string]string{"type": "disabled"}
 			case "minimax":
 				body["reasoning_split"] = false
@@ -323,7 +326,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []ChatMessag
 		body["temperature"] = 1
 		body["max_tokens"] = maxTokens
 		switch c.Provider {
-		case "kimi":
+		case "kimi", "zhipu":
 			body["thinking"] = map[string]string{"type": "enabled"}
 		case "minimax":
 			body["reasoning_split"] = true
@@ -335,7 +338,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []ChatMessag
 		body["max_tokens"] = maxTokens
 		if hybrid {
 			switch c.Provider {
-			case "kimi":
+			case "kimi", "zhipu":
 				body["thinking"] = map[string]string{"type": "disabled"}
 			case "minimax":
 				body["reasoning_split"] = false
