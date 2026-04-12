@@ -1946,11 +1946,11 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-msg{font-size:13px;line-height:1.6;word-break:break-word;max-width:95%}
 .ai-msg-user{
   align-self:flex-end;background:var(--accent);color:#fff;
-  padding:6px 10px;border-radius:12px 12px 2px 12px;
+  padding:6px 10px;border-radius:var(--r) var(--r) 4px var(--r);
 }
 .ai-msg-assistant{
   align-self:flex-start;background:var(--card);color:var(--text);
-  padding:8px 10px;border-radius:12px 12px 12px 2px;
+  padding:8px 10px;border-radius:var(--r) var(--r) var(--r) 4px;
   max-width:100%;
 }
 /* Markdown content inside assistant messages */
@@ -2060,9 +2060,9 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .ai-input-box{
   display:flex;align-items:flex-end;gap:0;
-  border:1px solid var(--border);border-radius:20px;
+  border:1px solid var(--border);border-radius:var(--r);
   background:var(--surface);
-  padding:4px 4px 4px 14px;
+  padding:4px 4px 4px 12px;
   transition:border-color .2s,box-shadow .2s;
 }
 .ai-input-box:focus-within{
@@ -2083,13 +2083,13 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-input:disabled{opacity:.5;cursor:not-allowed}
 .ai-send-btn{
   width:32px;height:32px;flex-shrink:0;
-  border:none;border-radius:50%;
+  border:none;border-radius:10px;
   background:var(--accent);color:#fff;
   cursor:pointer;transition:all .15s;
   display:flex;align-items:center;justify-content:center;
   padding:0;
 }
-.ai-send-btn:hover{opacity:.85;transform:scale(1.05)}
+.ai-send-btn:hover{opacity:.85}
 .ai-send-btn:disabled{opacity:.3;cursor:not-allowed;transform:none}
 .ai-send-btn.ai-mic-active{
   background:var(--danger);
