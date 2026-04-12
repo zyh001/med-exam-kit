@@ -2091,17 +2091,8 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .ai-send-btn:hover{opacity:.85;transform:scale(1.05)}
 .ai-send-btn:disabled{opacity:.3;cursor:not-allowed;transform:none}
-.ai-mic-btn{
-  width:32px;height:32px;flex-shrink:0;
-  border:none;border-radius:50%;
-  background:transparent;color:var(--muted);
-  cursor:pointer;transition:all .15s;
-  display:flex;align-items:center;justify-content:center;
-  padding:0;
-}
-.ai-mic-btn:hover{color:var(--text);background:var(--surface)}
-.ai-mic-btn.ai-mic-active{
-  color:#fff;background:var(--danger);
+.ai-send-btn.ai-mic-active{
+  background:var(--danger);
   animation:aiMicPulse 1.5s ease-in-out infinite;
 }
 @keyframes aiMicPulse{
