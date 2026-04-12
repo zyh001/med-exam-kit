@@ -670,6 +670,7 @@
         <div class="calc-mode-switch">
           <button class="calc-mode-btn active" id="calc-mode-simple" onclick="setCalcMode('simple')">简易</button>
           <button class="calc-mode-btn" id="calc-mode-sci" onclick="setCalcMode('sci')">科学</button>
+          <button class="calc-mode-btn" id="calc-mode-adv" onclick="setCalcMode('adv')">高级</button>
         </div>
         <button class="calc-close" onclick="toggleCalc()">✕</button>
       </div>
@@ -697,7 +698,7 @@
         <button class="ck" onclick="calcDigit('2')">2</button>
         <button class="ck" onclick="calcDigit('3')">3</button>
         <button class="ck op" onclick="calcOp('+')">+</button>
-        <button class="ck fn" onclick="calcCopyResult()">📋</button>
+        <button class="ck fn" id="calc-mem-s" onclick="calcMemory()">M</button>
         <button class="ck" onclick="calcDigit('0')">0</button>
         <button class="ck" onclick="calcDigit('.')">.</button>
         <button class="ck eq" onclick="calcEval()">=</button>
@@ -734,10 +735,42 @@
         <button class="ck" onclick="calcDigit('3')">3</button>
         <button class="ck op" onclick="calcOp('+')">+</button>
         <button class="ck fn sc" onclick="calcConst('e')">e</button>
-        <button class="ck fn sc" onclick="calcCopyResult()">📋</button>
+        <button class="ck fn sc" id="calc-mem-sc" onclick="calcMemory()">M</button>
         <button class="ck" onclick="calcDigit('0')">0</button>
         <button class="ck" onclick="calcDigit('.')">.</button>
         <button class="ck eq" onclick="calcEval()">=</button>
+      </div>
+      <!-- 高级模式 (LaTeX + math.js) -->
+      <div class="calc-adv-wrap" id="calc-keys-adv" style="display:none">
+        <div class="cadv-display">
+          <div class="cadv-expr" id="cadv-expr"></div>
+          <div class="cadv-result" id="cadv-result"></div>
+        </div>
+        <div class="cadv-input-row">
+          <input type="text" class="cadv-input" id="cadv-input" placeholder="输入表达式，如 2x^2+3x-5" autocomplete="off" spellcheck="false">
+          <button class="cadv-go" id="cadv-go" onclick="cadvEval()">=</button>
+        </div>
+        <div class="cadv-hint" id="cadv-hint">隐式乘法: 2x → 2·x &#160; diff(x^2,x) → 求导 &#160; x! → 阶乘</div>
+        <div class="cadv-btns">
+          <button class="cb" id="cadv-deg" onclick="cadvToggleDeg()">DEG</button>
+          <button class="cb" onclick="cadvIns('sin(')">sin</button>
+          <button class="cb" onclick="cadvIns('cos(')">cos</button>
+          <button class="cb" onclick="cadvIns('tan(')">tan</button>
+          <button class="cb" onclick="cadvIns('asin(')">asin</button>
+          <button class="cb" onclick="cadvIns('acos(')">acos</button>
+          <button class="cb" onclick="cadvIns('atan(')">atan</button>
+          <button class="cb" onclick="cadvIns('log(')">log</button>
+          <button class="cb" onclick="cadvIns('ln(')">ln</button>
+          <button class="cb" onclick="cadvIns('sqrt(')">√</button>
+          <button class="cb" onclick="cadvIns('^')">x<sup>y</sup></button>
+          <button class="cb" onclick="cadvIns('!')">n!</button>
+          <button class="cb" onclick="cadvIns('pi')">π</button>
+          <button class="cb" onclick="cadvIns('e')">e</button>
+          <button class="cb" onclick="cadvIns('x')">x</button>
+          <button class="cb" onclick="cadvIns('abs(')">|x|</button>
+          <button class="cb" onclick="cadvIns('diff(')">d/dx</button>
+          <button class="cb" onclick="cadvIns('simplify(')">化简</button>
+        </div>
       </div>
     </div>
   </div>
