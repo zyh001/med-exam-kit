@@ -41,6 +41,8 @@ function loadAIAssets() {
 
 const AI_MAX_ROUNDS = 3;
 const _AI_SEND_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14V2M8 2L3 7M8 2l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const _AI_MIC_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1z" stroke="currentColor" stroke-width="1.5"/><path d="M4 7v.5a4 4 0 0 0 8 0V7M8 12.5V15M5.5 15h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
+const _AI_MIC_STOP = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5" stroke="currentColor" stroke-width="1.5"/></svg>';
 
 // key: "fingerprint-idx" → { round, history, streaming, els }
 const aiPanels = new Map();
@@ -338,9 +340,21 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   input.placeholder = '追问…';
   input.maxLength = 500;
   input.rows = 1;
+
+  // ASR 麦克风按钮（仅在配置了 ASR 时显示）
+  let micBtn = null;
+  if (typeof S !== 'undefined' && S.bankInfo && S.bankInfo.asr_enabled) {
+    micBtn = document.createElement('button');
+    micBtn.className = 'ai-mic-btn';
+    micBtn.type = 'button';
+    micBtn.title = '语音输入';
+    micBtn.innerHTML = _AI_MIC_ICON;
+    micBtn.onclick = () => _toggleASR(key);
+  }
+
   const sendBtn = document.createElement('button');
   sendBtn.className = 'ai-send-btn';
-  sendBtn.innerHTML = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14V2M8 2L3 7M8 2l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  sendBtn.innerHTML = _AI_SEND_ICON;
   sendBtn.onclick = () => sendAIMessage(key);
   input.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(key); }
@@ -348,6 +362,7 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   // 自适应高度：随内容增长，最多 4 行
   input.oninput = () => autoResizeTextarea(input);
   inputBox.appendChild(input);
+  if (micBtn) inputBox.appendChild(micBtn);
   inputBox.appendChild(sendBtn);
   inputArea.appendChild(inputBox);
 
@@ -365,7 +380,7 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
     q,
     sqIdx,
     userAnswer,
-    els: { entryBtn, panel, header, messages, input, sendBtn },
+    els: { entryBtn, panel, header, messages, input, sendBtn, micBtn },
   });
 
   // Restore cached conversation into new DOM
@@ -781,4 +796,124 @@ function _resetScrollPause() {
 function updateRoundBadge(header, round) {
   const badge = header.querySelector('.ai-round-badge');
   if (badge) badge.textContent = round + '/' + AI_MAX_ROUNDS;
+}
+
+// ══════════════════════════════════════════
+// ASR 语音识别
+// ══════════════════════════════════════════
+let _asrState = null;  // { ws, audioCtx, source, processor, key }
+
+async function _toggleASR(key) {
+  if (_asrState) { _stopASR(); return; }
+
+  const state = aiPanels.get(key);
+  if (!state) return;
+  const { input, micBtn } = state.els;
+
+  // 请求麦克风权限
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+  } catch (e) {
+    toast('无法访问麦克风，请检查权限设置');
+    return;
+  }
+
+  // 连接 ASR WebSocket
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(`${proto}//${location.host}/api/asr/ws?token=${encodeURIComponent(window.SESSION_TOKEN||'')}`);
+  ws.binaryType = 'arraybuffer';
+
+  let ready = false;
+  const pendingChunks = [];
+
+  ws.onopen = () => {};
+  ws.onmessage = (evt) => {
+    try {
+      const msg = JSON.parse(evt.data);
+      if (msg.type === 'ready') {
+        ready = true;
+        // 发送缓冲的音频数据
+        pendingChunks.forEach(c => ws.send(c));
+        pendingChunks.length = 0;
+      } else if (msg.type === 'partial') {
+        // 实时更新输入框
+        if (msg.text) {
+          input.value = (_asrState ? _asrState.baseText : '') + msg.text;
+          autoResizeTextarea(input);
+        }
+      } else if (msg.type === 'done') {
+        _stopASR();
+      } else if (msg.type === 'error') {
+        toast('语音识别错误: ' + (msg.text || '未知'));
+        _stopASR();
+      }
+    } catch (e) {}
+  };
+  ws.onerror = () => { toast('语音连接失败'); _stopASR(); };
+  ws.onclose = () => { if (_asrState) _stopASR(); };
+
+  // Web Audio API: 采集 PCM 16kHz 16-bit mono
+  const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
+  const source = audioCtx.createMediaStreamSource(stream);
+
+  // 使用 ScriptProcessorNode (兼容性好) 采集音频
+  const bufSize = 4096;
+  const processor = audioCtx.createScriptProcessor(bufSize, 1, 1);
+  processor.onaudioprocess = (e) => {
+    const float32 = e.inputBuffer.getChannelData(0);
+    // Float32 → Int16 PCM
+    const int16 = new Int16Array(float32.length);
+    for (let i = 0; i < float32.length; i++) {
+      const s = Math.max(-1, Math.min(1, float32[i]));
+      int16[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+    const buf = int16.buffer;
+    if (ready && ws.readyState === 1) {
+      ws.send(buf);
+    } else if (ws.readyState === 0) {
+      pendingChunks.push(buf);
+    }
+  };
+  source.connect(processor);
+  processor.connect(audioCtx.destination);
+
+  _asrState = { ws, audioCtx, source, processor, stream, key, baseText: input.value };
+
+  // UI 更新
+  if (micBtn) {
+    micBtn.innerHTML = _AI_MIC_STOP;
+    micBtn.classList.add('ai-mic-active');
+  }
+  input.placeholder = '正在聆听…';
+}
+
+function _stopASR() {
+  if (!_asrState) return;
+  const { ws, audioCtx, source, processor, stream, key } = _asrState;
+  const state = aiPanels.get(key);
+
+  // 停止音频采集
+  try { processor.disconnect(); } catch(e) {}
+  try { source.disconnect(); } catch(e) {}
+  try { audioCtx.close(); } catch(e) {}
+  stream.getTracks().forEach(t => t.stop());
+
+  // 通知服务端停止
+  if (ws.readyState === 1) {
+    try { ws.send(JSON.stringify({ type: 'stop' })); } catch(e) {}
+    setTimeout(() => { try { ws.close(); } catch(e) {} }, 500);
+  }
+
+  _asrState = null;
+
+  // UI 恢复
+  if (state) {
+    const { input, micBtn } = state.els;
+    if (micBtn) {
+      micBtn.innerHTML = _AI_MIC_ICON;
+      micBtn.classList.remove('ai-mic-active');
+    }
+    input.placeholder = '追问…';
+  }
 }

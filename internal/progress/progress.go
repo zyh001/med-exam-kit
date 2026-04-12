@@ -908,3 +908,45 @@ func GetDueFingerprintsByFP(db *sql.DB, userID string, fps []string, clientDate 
 	}
 	return out
 }
+
+// CleanupStaleUsers deletes all data for users whose last activity
+// was more than maxAgeDays ago. The _legacy user is never deleted.
+// Returns the number of users cleaned up and total rows deleted.
+func CleanupStaleUsers(db *sql.DB, maxAgeDays int) (users int, rows int) {
+	if maxAgeDays <= 0 {
+		maxAgeDays = 7
+	}
+	cutoff := time.Now().Add(-time.Duration(maxAgeDays) * 24 * time.Hour).UnixMilli()
+
+	// Find stale user IDs (last activity older than cutoff)
+	staleRows, err := db.Query(`
+		SELECT user_id, MAX(ts) AS last_ts FROM (
+			SELECT user_id, ts FROM sessions
+			UNION ALL
+			SELECT user_id, ts FROM attempts
+		) GROUP BY user_id
+		HAVING last_ts < ? AND user_id != ?`, cutoff, LegacyUser)
+	if err != nil {
+		return 0, 0
+	}
+	defer staleRows.Close()
+
+	var staleUIDs []string
+	for staleRows.Next() {
+		var uid string
+		var lastTS int64
+		staleRows.Scan(&uid, &lastTS)
+		staleUIDs = append(staleUIDs, uid)
+	}
+
+	for _, uid := range staleUIDs {
+		counts := ClearUserData(db, uid)
+		total := 0
+		for _, n := range counts {
+			total += n
+		}
+		rows += total
+		users++
+	}
+	return
+}

@@ -1457,6 +1457,18 @@ function dismissGroupModal() {
 // Start session
 // ════════════════════════════════════════════
 async function startSession() {
+  const startBtn = document.getElementById('start-btn');
+  const origText = startBtn.textContent;
+
+  // 防止重复点击：按钮变为加载状态
+  startBtn.disabled = true;
+  startBtn.innerHTML = '<span class="btn-spinner"></span> 正在出题…';
+
+  // 超时控制（15 秒）
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
+
+  try {
   const params = new URLSearchParams();
 
   // 章节筛选
@@ -1525,7 +1537,8 @@ async function startSession() {
   // 考试模式：防作弊，服务端不下发答案
   if (S.mode === 'exam') params.set('sealed', '1');
 
-  const data = await apiFetch('/api/questions?' + params + '&' + bankQS()).then(r => r.json());
+  const data = await apiFetch('/api/questions?' + params + '&' + bankQS(), { signal: controller.signal }).then(r => r.json());
+  clearTimeout(timeout);
   if (!data.items.length) { toast('没有符合条件的题目'); return; }
 
   S.questions = data.items;
@@ -1548,6 +1561,18 @@ async function startSession() {
     startQuiz();
     // 考试模式：进入后立即保存初始快照，确保题目有记录
     if (S.mode === 'exam') saveExamSession();
+  }
+
+  } catch (e) {
+    clearTimeout(timeout);
+    if (e.name === 'AbortError') {
+      toast('出题超时，请减少题目数量后重试');
+    } else {
+      toast('出题失败，请刷新页面重试');
+    }
+  } finally {
+    startBtn.disabled = false;
+    startBtn.textContent = origText;
   }
 }
 

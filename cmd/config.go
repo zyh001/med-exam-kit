@@ -27,6 +27,10 @@ type AppConfig struct {
 	AIAPIKey        string `yaml:"ai_api_key"`
 	AIBaseURL       string `yaml:"ai_base_url"`
 	AIEnableThinking *bool `yaml:"ai_thinking"`
+	// ASR (语音识别)
+	ASRAPIKey  string `yaml:"asr_api_key"`
+	ASRModel   string `yaml:"asr_model"`
+	ASRBaseURL string `yaml:"asr_base_url"`
 }
 
 // defaultConfig returns a zero-value config with sensible defaults.

@@ -413,6 +413,12 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .start-btn:active{transform:translateY(0)}
 .start-btn.exam-start{background:linear-gradient(135deg,var(--warning),#e8882a)}
 .start-btn.memo-start{background:linear-gradient(135deg,var(--success),#26a57a)}
+.start-btn:disabled{opacity:.7;cursor:not-allowed;transform:none}
+.btn-spinner{
+  display:inline-block;width:14px;height:14px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.35);border-top-color:#fff;
+  animation:aiSpin .7s linear infinite;vertical-align:middle;
+}
 
 /* ════════════════════════════════════════════
    QUIZ SCREEN
@@ -2085,6 +2091,23 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .ai-send-btn:hover{opacity:.85;transform:scale(1.05)}
 .ai-send-btn:disabled{opacity:.3;cursor:not-allowed;transform:none}
+.ai-mic-btn{
+  width:32px;height:32px;flex-shrink:0;
+  border:none;border-radius:50%;
+  background:transparent;color:var(--muted);
+  cursor:pointer;transition:all .15s;
+  display:flex;align-items:center;justify-content:center;
+  padding:0;
+}
+.ai-mic-btn:hover{color:var(--text);background:var(--surface)}
+.ai-mic-btn.ai-mic-active{
+  color:#fff;background:var(--danger);
+  animation:aiMicPulse 1.5s ease-in-out infinite;
+}
+@keyframes aiMicPulse{
+  0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.4)}
+  50%{box-shadow:0 0 0 6px rgba(239,68,68,0)}
+}
 
 .ai-closed{
   text-align:center;font-size:12px;color:var(--muted);
