@@ -62,6 +62,65 @@ const S = {
 // 返回当前题库的 query string 参数 (bank=N)
 function bankQS() { return 'bank=' + S.bankID; }
 
+// ── 图片灯箱 ──────────────────────────────────────────────────────
+(function() {
+  // 插入灯箱 DOM（懒创建，只执行一次）
+  var _lb = null, _lbImg = null;
+  function _initLightbox() {
+    if (_lb) return;
+    _lb = document.createElement('div');
+    _lb.id = 'img-lightbox';
+    _lb.setAttribute('role', 'dialog');
+    _lb.setAttribute('aria-modal', 'true');
+
+    var closeBtn = document.createElement('button');
+    closeBtn.id = 'img-lightbox-close';
+    closeBtn.setAttribute('aria-label', '关闭');
+    closeBtn.innerHTML = '&#x2715;';
+    closeBtn.onclick = function(e) { e.stopPropagation(); _closeLightbox(); };
+
+    _lbImg = document.createElement('img');
+    _lbImg.alt = '图片预览';
+    _lbImg.onclick = function(e) { e.stopPropagation(); }; // 点图片本身不关闭
+
+    _lb.appendChild(closeBtn);
+    _lb.appendChild(_lbImg);
+    // 点击背景关闭
+    _lb.onclick = function() { _closeLightbox(); };
+    document.body.appendChild(_lb);
+
+    // ESC 关闭
+    document.addEventListener('keydown', function(e) {
+      if (e.key === 'Escape' && _lb.classList.contains('open')) _closeLightbox();
+    });
+  }
+
+  function _openLightbox(src) {
+    _initLightbox();
+    _lbImg.src = src;
+    _lb.classList.add('open');
+    document.body.style.overflow = 'hidden';
+  }
+
+  function _closeLightbox() {
+    if (!_lb) return;
+    _lb.classList.remove('open');
+    document.body.style.overflow = '';
+    setTimeout(function() { if (!_lb.classList.contains('open')) _lbImg.src = ''; }, 200);
+  }
+
+  window._openLightbox = _openLightbox;
+
+  // 事件委托：捕获所有带 data-lb 标记的图片点击
+  // renderHTML 用 data-lb 标记图片（直接 setAttribute onclick 会被 on* sanitizer 清除）
+  document.addEventListener('click', function(e) {
+    var t = e.target;
+    if (t && t.tagName === 'IMG' && t.dataset && t.dataset.lb) {
+      _openLightbox(t.src);
+    }
+  }, true);
+})();
+
 // 安全渲染 HTML：允许 <img> 标签，过滤脚本等危险元素
 function renderHTML(s) {
   if (!s) return '';
@@ -101,6 +160,9 @@ function renderHTML(s) {
     );
     // 记录原始地址方便错误提示
     img.dataset.origSrc = src;
+    // 标记图片可点击放大（onclick 在 sanitizer 之后通过事件委托处理）
+    img.style.cursor = 'zoom-in';
+    img.dataset.lb = '1';
   });
   // 移除所有元素上的事件属性（on*）
   tmp.querySelectorAll('*').forEach(el => {
