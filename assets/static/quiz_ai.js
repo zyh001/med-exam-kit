@@ -41,7 +41,8 @@ function loadAIAssets() {
 
 // ── Mermaid 流程图懒加载 ──────────────────────────────────────────
 // Mermaid (~3MB) 仅在检测到 mermaid 代码块时才加载，避免影响首屏性能
-const MERMAID_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js';
+// 从本地 /static/ 加载，无需外网访问
+const MERMAID_LOCAL = AI_STATIC_BASE + '/mermaid.min.js';
 let _mermaidLoaded = false;
 let _mermaidPromise = null;
 let _mermaidCounter = 0;
@@ -51,7 +52,7 @@ function loadMermaid() {
   if (_mermaidPromise) return _mermaidPromise;
   _mermaidPromise = new Promise((resolve, reject) => {
     const sc = document.createElement('script');
-    sc.src = MERMAID_CDN;
+    sc.src = MERMAID_LOCAL;
     sc.onload = () => {
       _mermaidLoaded = true;
       try {
@@ -64,7 +65,7 @@ function loadMermaid() {
       } catch(e) {}
       resolve();
     };
-    sc.onerror = () => reject(new Error('Mermaid CDN 加载失败，请检查网络连接'));
+    sc.onerror = () => reject(new Error('mermaid.min.js 加载失败'));
     document.body.appendChild(sc);
   });
   return _mermaidPromise;
@@ -89,7 +90,7 @@ async function renderMermaidBlocks(container) {
       const pre = code.closest('pre') || code;
       const warn = document.createElement('p');
       warn.className = 'ai-mermaid-err';
-      warn.textContent = '⚠ 流程图渲染需要网络（Mermaid CDN），当前无法加载';
+      warn.textContent = '⚠ 流程图渲染失败（mermaid.min.js 未能加载）';
       pre.parentNode.insertBefore(warn, pre);
     });
     return;
