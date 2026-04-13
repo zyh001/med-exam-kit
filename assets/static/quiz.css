@@ -1917,40 +1917,85 @@ button,a,[role=button],label{touch-action:manipulation}
 .ck.has-mem{position:relative}
 .ck.has-mem::after{content:'';position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 
-/* ── 高级计算器模式 ── */
-.calc-adv-wrap{padding:8px}
-.cadv-display{
-  background:var(--bg);border-radius:var(--r);padding:12px;min-height:80px;
-  margin-bottom:8px;overflow-x:auto;overflow-y:hidden;
+/* ── 高级计算器模式 (Casio fx-991 风格) ── */
+.calc-adv-wrap{padding:0}
+
+/* LCD 显示屏 */
+.casio-lcd{
+  background:linear-gradient(180deg,#c8d8b0 0%,#b8c8a0 100%);
+  border:2px solid #8a9a78;border-radius:8px;
+  margin:8px 10px;padding:10px 12px 8px;
+  min-height:90px;display:flex;flex-direction:column;
+  font-family:'Courier New',monospace;
+  position:relative;
+  box-shadow:inset 0 1px 4px rgba(0,0,0,.15);
 }
-.cadv-expr{font-size:14px;color:var(--text-light);min-height:20px;overflow-x:auto;margin-bottom:4px}
-.cadv-result{font-size:22px;color:var(--text);font-weight:600;min-height:28px;overflow-x:auto}
-.cadv-result .katex{font-size:22px}
-.cadv-expr .katex{font-size:14px}
-.cadv-input-row{display:flex;gap:6px;margin-bottom:6px}
-.cadv-input{
-  flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:var(--r);
-  background:var(--bg);color:var(--text);font-size:15px;font-family:'Courier New',monospace;
-  outline:none;transition:border-color .2s;
+@media(prefers-color-scheme:dark){
+  .casio-lcd{background:linear-gradient(180deg,#2a3328 0%,#1e261c 100%);border-color:#3a4838}
 }
-.cadv-input:focus{border-color:var(--accent)}
-.cadv-go{
-  width:42px;height:42px;border:none;border-radius:var(--r);
-  background:var(--accent);color:#fff;font-size:20px;font-weight:700;
-  cursor:pointer;flex-shrink:0;transition:transform .1s;
+.casio-lcd-top{
+  display:flex;gap:8px;font-size:10px;color:#556b2f;
+  margin-bottom:4px;min-height:14px;
 }
-.cadv-go:active{transform:scale(.93)}
-.cadv-hint{font-size:11px;color:var(--text-light);margin-bottom:8px;line-height:1.5}
-.cadv-btns{display:flex;flex-wrap:wrap;gap:4px}
-.cb{
-  padding:6px 0;min-width:calc(16.66% - 4px);flex:1 0 calc(16.66% - 4px);
-  border:1px solid var(--border);border-radius:8px;background:var(--surface);
-  color:var(--text);font-size:13px;cursor:pointer;text-align:center;
-  transition:background .15s,transform .1s;
+@media(prefers-color-scheme:dark){.casio-lcd-top{color:#7a9a5a}}
+.casio-ind{opacity:.4;font-weight:700;letter-spacing:.5px}
+.casio-ind.active{opacity:1}
+.casio-expr{
+  font-size:14px;color:#2c3e1a;min-height:22px;
+  overflow-x:auto;white-space:nowrap;text-align:right;
+  margin-bottom:2px;
 }
-.cb:active{transform:scale(.93);background:var(--border)}
-.cb sup{font-size:9px}
-.cadv-err{color:#e74c3c}
+@media(prefers-color-scheme:dark){.casio-expr{color:#a0c880}}
+.casio-expr .katex{font-size:14px}
+.casio-result{
+  font-size:24px;font-weight:700;color:#1a2e0a;
+  text-align:right;min-height:30px;
+  overflow-x:auto;white-space:nowrap;
+}
+@media(prefers-color-scheme:dark){.casio-result{color:#c0e8a0}}
+.casio-result .katex{font-size:24px}
+
+/* 按键区 */
+.casio-keys{
+  display:grid;grid-template-columns:repeat(5,1fr);
+  gap:4px;padding:6px 8px 12px;
+}
+.cx{
+  font-size:13px;font-weight:600;border:none;border-radius:6px;
+  padding:12px 0;cursor:pointer;transition:all .1s;
+  user-select:none;-webkit-tap-highlight-color:transparent;
+  text-align:center;line-height:1.2;
+}
+.cx:active{transform:scale(.92);filter:brightness(.85)}
+.cx sup{font-size:9px;vertical-align:super}
+
+/* 数字键 - 深色 */
+.cx-num{background:#3c3c3c;color:#fff}
+@media(prefers-color-scheme:dark){.cx-num{background:#4a4a4a;color:#eee}}
+
+/* 运算符键 - 强调色 */
+.cx-op{background:var(--accent);color:#fff;font-size:16px;font-weight:700}
+
+/* 功能键 - 浅色 */
+.cx-fn{background:var(--surface);color:var(--text);font-size:12px}
+.cx-fn:active{background:var(--border)}
+
+/* 常量键 */
+.cx-const{background:#5a4a3a;color:#f0d8a0;font-size:14px}
+@media(prefers-color-scheme:dark){.cx-const{background:#5a4a3a;color:#f0d8a0}}
+
+/* 控制键 - SHIFT / DEL / AC */
+.cx-ctrl{background:#8b4513;color:#fff;font-size:11px;font-weight:700;letter-spacing:.5px}
+
+/* SHIFT 激活态 */
+.cx-ctrl.is-shift{background:#d4a520;color:#1a1a1a}
+
+/* = 等号 */
+.cx-eq{background:var(--accent);color:#fff;font-size:20px;font-weight:800}
+.cx-eq:active{background:var(--accent-hover)}
+
+/* hyp 激活态 */
+.cx-fn.is-hyp{background:var(--accent);color:#fff}
 
 /* ════════════════════════════════════════════
    AI 答疑面板
