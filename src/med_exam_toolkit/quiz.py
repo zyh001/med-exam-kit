@@ -226,7 +226,8 @@ def _create_app():
                                 mimetype="text/html")
             return jsonify({"error": "Unauthorized", "auth": False}), 401
 
-        if request.path.startswith("/api/"):
+        # /api/img/proxy 由 <img> 标签直接请求，无法携带自定义 Header，豁免 Token 校验
+        if request.path.startswith("/api/") and request.path != "/api/img/proxy":
             token = request.headers.get("X-Session-Token", "") or request.args.get("token", "")
             if not secrets.compare_digest(token, _session_token):
                 return jsonify({"error": "Unauthorized"}), 401
@@ -1113,6 +1114,56 @@ def api_push_test():
 
     return jsonify({"ok": True, "sent": sent, "failed": failed, "removed": removed})
 
+
+
+
+@app.get("/api/img/proxy")
+def api_img_proxy():
+    """服务端代理外链图片请求，解决前端跨域（CORS）问题。
+    <img> 标签无法携带自定义 Header，因此本路由豁免 Session Token 校验。
+    含 SSRF 防护：拒绝内网地址；只透传 image/* 内容类型。
+    """
+    import urllib.request, urllib.parse, ipaddress, socket
+    raw_url = request.args.get("url", "")
+    if not raw_url:
+        return "missing url", 400
+    lower = raw_url.lower()
+    if not lower.startswith("http://") and not lower.startswith("https://"):
+        return "only http/https allowed", 400
+    # SSRF 防护：解析主机名，拒绝内网 IP
+    try:
+        parsed = urllib.parse.urlparse(raw_url)
+        host = parsed.hostname or ""
+        ip = socket.gethostbyname(host)
+        addr = ipaddress.ip_address(ip)
+        if addr.is_private or addr.is_loopback or addr.is_link_local:
+            return "access to private addresses is not allowed", 403
+    except Exception:
+        return "invalid url", 400
+    try:
+        req = urllib.request.Request(
+            raw_url,
+            headers={
+                "User-Agent": "Mozilla/5.0 (compatible; med-exam-kit-proxy/1.0)",
+                "Referer": f"{parsed.scheme}://{parsed.netloc}/",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            ct = resp.headers.get("Content-Type", "image/jpeg")
+            if not ct.startswith("image/"):
+                return "upstream content is not an image", 502
+            data = resp.read(10 * 1024 * 1024)  # 10MB 上限
+        from flask import Response as FlaskResponse
+        return FlaskResponse(
+            data,
+            content_type=ct,
+            headers={
+                "Cache-Control": "public, max-age=86400",
+                "Access-Control-Allow-Origin": "*",
+            },
+        )
+    except Exception as e:
+        return f"upstream fetch failed: {e}", 502
 
 @app.post("/api/calculate")
 def api_calculate():
