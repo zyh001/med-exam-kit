@@ -87,13 +87,19 @@ function renderHTML(s) {
     img.style.display = 'block';
     // 加载失败时显示提示，避免破碎图标
     if (!img.hasAttribute('alt') || !img.alt) img.alt = '题目图片';
+    // 外链图片通过后端代理转发，解决跨域问题
+    const src = img.getAttribute('src') || '';
+    if (/^https?:\/\//i.test(src)) {
+      img.setAttribute('src', '/api/img/proxy?url=' + encodeURIComponent(src));
+    }
     img.setAttribute('onerror',
       "this.onerror=null;this.style.display='none';" +
       "var p=document.createElement('span');" +
       "p.className='img-load-err';" +
-      "p.textContent='⚠ 图片加载失败：' + (this.src||'').slice(0,60);" +
+      "p.textContent='⚠ 图片加载失败：' + (this.dataset.origSrc||this.src||'').slice(0,60);" +
       "this.parentNode.insertBefore(p,this.nextSibling);"
     );
+    img.dataset.origSrc = src;
   });
   // 移除所有元素上的事件属性（on*）
   tmp.querySelectorAll('*').forEach(el => {
@@ -3087,12 +3093,14 @@ function filterReview(type, tabEl) {
         qEl.style.webkitLineClamp = 'unset';
         qEl.style.overflow = 'visible';
         el.style.maxHeight = el.scrollHeight + 'px';
-        setTimeout(() => { if (el.classList.contains('open')) el.style.maxHeight = el.scrollHeight + 'px'; }, 360);
+        // 动画结束后设为 none，让内部 AI 面板等动态内容可以自由撑高
+        setTimeout(() => { if (el.classList.contains('open')) el.style.maxHeight = 'none'; }, 400);
       } else {
-        // 收起：恢复截断
+        // 收起：先捕获当前实际高度，再动画到 0
         qEl.style.webkitLineClamp = '';
         qEl.style.overflow = '';
-        el.style.maxHeight = '0';
+        el.style.maxHeight = el.scrollHeight + 'px';
+        requestAnimationFrame(() => { el.style.maxHeight = '0'; });
       }
     };
     list.appendChild(item);

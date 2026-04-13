@@ -39,6 +39,91 @@ function loadAIAssets() {
   return _aiAssetsPromise;
 }
 
+// ── Mermaid 流程图懒加载 ──────────────────────────────────────────
+// Mermaid (~3MB) 仅在检测到 mermaid 代码块时才加载，避免影响首屏性能
+// 从本地 /static/ 加载，无需外网访问
+const MERMAID_LOCAL = AI_STATIC_BASE + '/mermaid.min.js';
+let _mermaidLoaded = false;
+let _mermaidPromise = null;
+let _mermaidCounter = 0;
+
+function loadMermaid() {
+  if (_mermaidLoaded) return Promise.resolve();
+  if (_mermaidPromise) return _mermaidPromise;
+  _mermaidPromise = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = MERMAID_LOCAL;
+    sc.onload = () => {
+      _mermaidLoaded = true;
+      try {
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default',
+          securityLevel: 'loose',
+          fontFamily: 'inherit',
+        });
+      } catch(e) {}
+      resolve();
+    };
+    sc.onerror = () => reject(new Error('mermaid.min.js 加载失败'));
+    document.body.appendChild(sc);
+  });
+  return _mermaidPromise;
+}
+
+/**
+ * 渲染容器内所有 mermaid 代码块。
+ * marked 会将 ```mermaid ... ``` 渲染为 <code class="language-mermaid">。
+ * 本函数找到这些节点，用 mermaid.render() 替换为 SVG。
+ * @param {HTMLElement} container
+ */
+async function renderMermaidBlocks(container) {
+  // 检测 language-mermaid 或 lang-mermaid class
+  const codeEls = container.querySelectorAll('code.language-mermaid, code.lang-mermaid');
+  if (codeEls.length === 0) return;
+
+  try {
+    await loadMermaid();
+  } catch(e) {
+    // 网络不可达时降级：显示原始代码 + 提示
+    codeEls.forEach(code => {
+      const pre = code.closest('pre') || code;
+      const warn = document.createElement('p');
+      warn.className = 'ai-mermaid-err';
+      warn.textContent = '⚠ 流程图渲染失败（mermaid.min.js 未能加载）';
+      pre.parentNode.insertBefore(warn, pre);
+    });
+    return;
+  }
+
+  for (const code of codeEls) {
+    const pre = code.closest('pre') || code;
+    const graphDef = code.textContent.trim();
+    if (!graphDef) continue;
+
+    const id = 'mermaid-' + (++_mermaidCounter);
+    try {
+      const { svg } = await mermaid.render(id, graphDef);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'ai-mermaid-wrap';
+      wrapper.innerHTML = svg;
+      // 让 SVG 宽度自适应容器
+      const svgEl = wrapper.querySelector('svg');
+      if (svgEl) {
+        svgEl.style.maxWidth = '100%';
+        svgEl.style.height = 'auto';
+      }
+      pre.replaceWith(wrapper);
+    } catch(e) {
+      // 语法错误时保留原始代码块，添加错误提示
+      const errMsg = document.createElement('p');
+      errMsg.className = 'ai-mermaid-err';
+      errMsg.textContent = '⚠ 流程图语法错误：' + (e.message || String(e)).slice(0, 120);
+      pre.parentNode.insertBefore(errMsg, pre.nextSibling);
+    }
+  }
+}
+
 const AI_MAX_ROUNDS = 3;
 const _AI_SEND_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14V2M8 2L3 7M8 2l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const _AI_MIC_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1z" stroke="currentColor" stroke-width="1.5"/><path d="M4 7v.5a4 4 0 0 0 8 0V7M8 12.5V15M5.5 15h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
@@ -278,6 +363,8 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
         container.innerHTML = markedRender(fullText);
       } catch (e) { /* keep smd output */ }
     }
+    // Post-render: replace mermaid code blocks with SVG diagrams
+    renderMermaidBlocks(container).catch(() => {});
   }
 
   return { push, flush };
@@ -369,9 +456,11 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
       _longPressTriggered = false;
       return;
     }
+    // 短按 → 正常发送（不在这里触发，让 onclick 处理）
   }
   function _onPressCancel() {
     if (_longPressTimer) { clearTimeout(_longPressTimer); _longPressTimer = null; }
+    // 如果已经在录音，手指移出按钮不停止，等 touchend 停止
   }
 
   sendBtn.addEventListener('touchstart', _onPressStart, { passive: false });
@@ -380,6 +469,7 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   sendBtn.addEventListener('mousedown', _onPressStart);
   sendBtn.addEventListener('mouseup', _onPressEnd);
   sendBtn.addEventListener('mouseleave', _onPressCancel);
+  // 防止长按触发 contextmenu
   sendBtn.addEventListener('contextmenu', (e) => { if (_asrEnabled) e.preventDefault(); });
 
   sendBtn.onclick = (e) => {
@@ -389,6 +479,7 @@ function initAIPanel(container, q, sqIdx, userAnswer) {
   input.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendAIMessage(key); }
   };
+  // 自适应高度：随内容增长，最多 4 行
   input.oninput = () => autoResizeTextarea(input);
   inputBox.appendChild(input);
   inputBox.appendChild(sendBtn);
@@ -737,6 +828,8 @@ function sendAIMessage(key) {
  */
 function renderContent(container, text, cursor) {
   container.innerHTML = markedRender(text);
+  // Post-render: replace mermaid code blocks with SVG diagrams
+  renderMermaidBlocks(container).catch(() => {});
   if (cursor) container.appendChild(cursor);
 }
 
@@ -769,10 +862,10 @@ let _scrollPaused = false;   // 用户手动上滑时暂停自动滚动
 let _scrollTarget = null;    // 当前滚动容器引用
 
 function scrollMessages(container) {
-  if (_scrollPaused) return;
+  if (_scrollPaused) return;  // 用户已手动上滑，不自动滚动
   if (_scrollRafId) return;
   function step() {
-    if (_scrollPaused) { _scrollRafId = null; return; }
+    if (_scrollPaused) { _scrollRafId = null; return; }  // 动画中途被打断
     const target = container.scrollHeight - container.clientHeight;
     const diff = target - container.scrollTop;
     if (diff <= 1) {
@@ -786,15 +879,19 @@ function scrollMessages(container) {
   _scrollRafId = requestAnimationFrame(step);
 }
 
+/** 绑定用户滚动检测到 messages 容器 */
 function _bindScrollPause(messagesEl) {
   _scrollTarget = messagesEl;
+  // 触摸/鼠标按下 → 立即暂停自动滚动（消除顿挫感）
   function onPress() {
     _scrollPaused = true;
     if (_scrollRafId) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null; }
   }
   messagesEl.addEventListener('touchstart', onPress, { passive: true });
   messagesEl.addEventListener('mousedown',  onPress);
+  // 触摸/鼠标释放 → 检查是否在底部，在底部则恢复自动滚动
   function onRelease() {
+    // 短延迟等惯性滚动稳定
     setTimeout(() => {
       var atBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 40;
       if (atBottom) _scrollPaused = false;
@@ -802,6 +899,7 @@ function _bindScrollPause(messagesEl) {
   }
   messagesEl.addEventListener('touchend',   onRelease, { passive: true });
   messagesEl.addEventListener('mouseup',    onRelease);
+  // 滚轮事件（桌面端）→ 立即暂停，检查位置
   messagesEl.addEventListener('wheel', () => {
     _scrollPaused = true;
     if (_scrollRafId) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null; }
@@ -812,6 +910,7 @@ function _bindScrollPause(messagesEl) {
   }, { passive: true });
 }
 
+/** 重置滚动状态（新消息开始流式输出时） */
 function _resetScrollPause() {
   _scrollPaused = false;
   if (_scrollRafId) { cancelAnimationFrame(_scrollRafId); _scrollRafId = null; }
@@ -825,21 +924,29 @@ function updateRoundBadge(header, round) {
 // ══════════════════════════════════════════
 // ASR 语音识别
 // ══════════════════════════════════════════
-let _asrState = null;
+let _asrState = null;  // { ws, audioCtx, source, processor, key }
 
 async function _startASR(key) {
   if (_asrState) return;
+
   const state = aiPanels.get(key);
   if (!state) return;
   const { input, sendBtn } = state.els;
+
+  // 请求麦克风权限
   let stream;
   try {
     stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } });
-  } catch (e) { toast('无法访问麦克风，请检查权限设置'); return; }
+  } catch (e) {
+    toast('无法访问麦克风，请检查权限设置');
+    return;
+  }
 
+  // 连接 ASR WebSocket
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   const ws = new WebSocket(`${proto}//${location.host}/api/asr/ws?token=${encodeURIComponent(window.SESSION_TOKEN||'')}`);
   ws.binaryType = 'arraybuffer';
+
   let ready = false;
   const pendingChunks = [];
 
@@ -851,14 +958,22 @@ async function _startASR(key) {
         pendingChunks.forEach(c => ws.send(c));
         pendingChunks.length = 0;
       } else if (msg.type === 'partial') {
-        if (msg.text) { input.value = (_asrState ? _asrState.baseText : '') + msg.text; autoResizeTextarea(input); }
-      } else if (msg.type === 'done') { _stopASR(); }
-      else if (msg.type === 'error') { toast('语音识别错误: ' + (msg.text || '未知')); _stopASR(); }
+        if (msg.text) {
+          input.value = (_asrState ? _asrState.baseText : '') + msg.text;
+          autoResizeTextarea(input);
+        }
+      } else if (msg.type === 'done') {
+        _stopASR();
+      } else if (msg.type === 'error') {
+        toast('语音识别错误: ' + (msg.text || '未知'));
+        _stopASR();
+      }
     } catch (e) {}
   };
   ws.onerror = () => { toast('语音连接失败'); _stopASR(); };
   ws.onclose = () => { if (_asrState) _stopASR(); };
 
+  // Web Audio API: 采集 PCM 16kHz 16-bit mono
   const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: 16000 });
   const source = audioCtx.createMediaStreamSource(stream);
   const bufSize = 4096;
@@ -878,6 +993,8 @@ async function _startASR(key) {
   processor.connect(audioCtx.destination);
 
   _asrState = { ws, audioCtx, source, processor, stream, key, baseText: input.value };
+
+  // UI：发送按钮变为录音状态
   sendBtn.innerHTML = _AI_MIC_ICON;
   sendBtn.classList.add('ai-mic-active');
   input.placeholder = '正在聆听… 松开结束';
@@ -887,12 +1004,20 @@ function _stopASR() {
   if (!_asrState) return;
   const { ws, audioCtx, source, processor, stream, key } = _asrState;
   const state = aiPanels.get(key);
+
   try { processor.disconnect(); } catch(e) {}
   try { source.disconnect(); } catch(e) {}
   try { audioCtx.close(); } catch(e) {}
   stream.getTracks().forEach(t => t.stop());
-  if (ws.readyState === 1) { try { ws.send(JSON.stringify({ type: 'stop' })); } catch(e) {} setTimeout(() => { try { ws.close(); } catch(e) {} }, 500); }
+
+  if (ws.readyState === 1) {
+    try { ws.send(JSON.stringify({ type: 'stop' })); } catch(e) {}
+    setTimeout(() => { try { ws.close(); } catch(e) {} }, 500);
+  }
+
   _asrState = null;
+
+  // UI：发送按钮恢复
   if (state) {
     const { input, sendBtn } = state.els;
     sendBtn.innerHTML = _AI_SEND_ICON;
