@@ -1,5 +1,5 @@
 // Service Worker for 医考练习 PWA
-const CACHE_NAME = 'med-quiz-v36';
+const CACHE_NAME = 'med-quiz-v37';
 
 const STATIC_ASSETS = [
     '/static/common.css',
@@ -30,7 +30,8 @@ self.addEventListener('install', event => {
             }
         })
     );
-    self.skipWaiting();
+    // 不自动 skipWaiting：等用户在页面上确认后才切换，
+    // 避免新 SW 接管时旧页面 JS 与新缓存文件版本不一致。
 });
 
 self.addEventListener('activate', event => {
@@ -40,6 +41,13 @@ self.addEventListener('activate', event => {
         )
     );
     self.clients.claim();
+});
+
+// 页面发来 SKIP_WAITING 消息时才激活新版本
+self.addEventListener('message', event => {
+    if (event.data && event.data.type === 'SKIP_WAITING') {
+        self.skipWaiting();
+    }
 });
 
 // ── Fetch 策略 ──────────────────────────────────────────────────────────

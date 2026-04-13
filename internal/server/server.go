@@ -2782,10 +2782,32 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	host := strings.ToLower(parsed.Hostname())
-	for _, blocked := range []string{"localhost", "127.", "10.", "192.168.", "172.16.", "169.254.", "::1", "[::1]"} {
+	// 封锁所有私网/回环地址，防止 SSRF
+	// RFC1918: 10/8, 172.16/12, 192.168/16
+	// 链路本地: 169.254/16, fe80::/10
+	// 回环: 127/8, ::1, localhost
+	// 特殊: 0.0.0.0, metadata (169.254.169.254)
+	blockedPrefixes := []string{
+		"localhost", "127.", "0.0.0.0",
+		"10.",
+		"192.168.",
+		"169.254.",
+		"::1", "[::1]", "fe80",
+	}
+	for _, blocked := range blockedPrefixes {
 		if strings.HasPrefix(host, blocked) || host == "localhost" {
 			http.Error(w, "access to private addresses is not allowed", http.StatusForbidden)
 			return
+		}
+	}
+	// 172.16.0.0/12 覆盖 172.16.x.x - 172.31.x.x
+	if strings.HasPrefix(host, "172.") {
+		parts := strings.SplitN(host, ".", 3)
+		if len(parts) >= 2 {
+			if second, err := strconv.Atoi(parts[1]); err == nil && second >= 16 && second <= 31 {
+				http.Error(w, "access to private addresses is not allowed", http.StatusForbidden)
+				return
+			}
 		}
 	}
 
