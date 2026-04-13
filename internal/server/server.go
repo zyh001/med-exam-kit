@@ -695,7 +695,8 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 		eid := hex.EncodeToString(func() []byte { b := make([]byte, 16); rand.Read(b); return b }())
 		answers := make(map[string]examAnswer, len(rows))
 		for i := range rows {
-			answers[rows[i].Fingerprint] = examAnswer{Answer: rows[i].Answer, Discuss: rows[i].Discuss}
+			key := fmt.Sprintf("%s:%d", rows[i].Fingerprint, rows[i].SI)
+			answers[key] = examAnswer{Answer: rows[i].Answer, Discuss: rows[i].Discuss}
 			rows[i].Answer = ""
 			rows[i].Discuss = ""
 			rows[i].Unit = "" // 考试模式隐藏章节信息，防止泄露提示
@@ -1651,7 +1652,8 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 		eid = hex.EncodeToString(eidBytes)
 		answers := make(map[string]examAnswer, len(rows))
 		for i := range rows {
-			answers[rows[i].Fingerprint] = examAnswer{Answer: rows[i].Answer, Discuss: rows[i].Discuss}
+			key := fmt.Sprintf("%s:%d", rows[i].Fingerprint, rows[i].SI)
+			answers[key] = examAnswer{Answer: rows[i].Answer, Discuss: rows[i].Discuss}
 			rows[i].Answer = ""
 			rows[i].Discuss = ""
 		}
