@@ -2199,3 +2199,52 @@ button,a,[role=button],label{touch-action:manipulation}
   border-radius: 6px;
   margin: 6px 0;
 }
+
+/* ── 图片灯箱 ── */
+#img-lightbox {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: rgba(0,0,0,.85);
+  align-items: center;
+  justify-content: center;
+  cursor: zoom-out;
+  animation: lbFadeIn .18s ease;
+}
+#img-lightbox.open { display: flex; }
+@keyframes lbFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+#img-lightbox img {
+  max-width: 92vw;
+  max-height: 88vh;
+  border-radius: 8px;
+  box-shadow: 0 8px 48px rgba(0,0,0,.7);
+  cursor: default;
+  animation: lbZoomIn .18s ease;
+  user-select: none;
+}
+@keyframes lbZoomIn {
+  from { transform: scale(.88); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+#img-lightbox-close {
+  position: fixed;
+  top: 16px;
+  right: 20px;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: none;
+  background: rgba(255,255,255,.15);
+  color: #fff;
+  font-size: 20px;
+  line-height: 36px;
+  text-align: center;
+  cursor: pointer;
+  transition: background .15s;
+  z-index: 10000;
+}
+#img-lightbox-close:hover { background: rgba(255,255,255,.3); }
