@@ -4961,27 +4961,27 @@ function cadvToggleDeg() {
 
 function casioDigit(d) {
   _casio.expr += d;
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioOp(op) {
   _casio.expr += op;
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioIns(text) {
   _casio.expr += text;
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioNeg() {
   _casio.expr += '(-';
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioAns() {
   _casio.expr += String(_casio.lastAns);
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioFn(fn) {
@@ -5008,7 +5008,7 @@ function casioFn(fn) {
       _casio.expr += 'simplify(';
       break;
   }
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioDel() {
@@ -5019,31 +5019,91 @@ function casioDel() {
   else if (e.match(/10\^$/)) _casio.expr = e.slice(0, -3);
   else if (e.match(/\*10\^$/)) _casio.expr = e.slice(0, -4);
   else _casio.expr = e.slice(0, -1);
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioAC() {
   _casio.expr = '';
+  var inp = document.getElementById('cadv-input');
+  if (inp) { inp.value = ''; inp.focus(); }
   var exprEl = document.getElementById('cadv-expr');
   var resultEl = document.getElementById('cadv-result');
   if (exprEl) exprEl.innerHTML = '';
   if (resultEl) resultEl.textContent = '0';
 }
 
-function _casioRefresh() {
+// 把按钮操作结果同步回文本输入框并触发预览
+function _cadvSyncInput() {
+  var inp = document.getElementById('cadv-input');
+  if (inp) {
+    inp.value = _casio.expr;
+    inp.selectionStart = inp.selectionEnd = inp.value.length;
+    inp.focus();
+  }
+  _cadvRenderPreview();
+}
+
+// 文本输入框实时输入处理（防抖 80ms）
+var _cadvPreviewTimer = null;
+function _cadvInputChange() {
+  var inp = document.getElementById('cadv-input');
+  if (!inp) return;
+  _casio.expr = inp.value;
+  clearTimeout(_cadvPreviewTimer);
+  _cadvPreviewTimer = setTimeout(function() {
+    _cadvRenderPreview();
+  }, 80);
+}
+
+function _cadvInputKeyDown(e) {
+  if (e.key === 'Enter') { e.preventDefault(); casioEval(); }
+}
+
+// 核心预览渲染：支持不完整表达式的渐进式 LaTeX 渲染
+function _cadvRenderPreview() {
   var exprEl = document.getElementById('cadv-expr');
   if (!exprEl) return;
-  var raw = _casio.expr;
+  var raw = (_casio.expr || '').trim();
   if (!raw) { exprEl.innerHTML = ''; return; }
-  if (typeof math === 'undefined' || typeof katex === 'undefined') { exprEl.textContent = raw; return; }
-  try {
-    var display = _casioToDisplay(raw);
-    var node = math.parse(display);
-    var tex = node.toTex({ parenthesis: 'auto' });
-    katex.render(tex, exprEl, { throwOnError: false, displayMode: false });
-  } catch (e) {
+
+  // 如果库还没加载，触发懒加载后重试
+  if (typeof math === 'undefined' || typeof katex === 'undefined') {
     exprEl.textContent = raw;
+    exprEl.style.opacity = '0.5';
+    _loadAdvAssets().then(function() { _cadvRenderPreview(); });
+    return;
   }
+
+  // 渐进式尝试：原始 → 补 ) → 补 )) → 补 ))) → 补 ,x) → 补 ,x))
+  var candidates = [
+    { s: raw,         alpha: 1.0 },
+    { s: raw + ')',   alpha: 0.60 },
+    { s: raw + '))',  alpha: 0.55 },
+    { s: raw + ')))', alpha: 0.50 },
+    { s: raw + ',x)', alpha: 0.55 },
+  ];
+
+  for (var i = 0; i < candidates.length; i++) {
+    try {
+      var disp = _casioToDisplay(candidates[i].s);
+      var node = math.parse(disp);
+      var tex  = node.toTex({ parenthesis: 'auto' });
+      katex.render(tex, exprEl, { throwOnError: false, displayMode: false });
+      exprEl.style.opacity = String(candidates[i].alpha);
+      return;
+    } catch (_) { /* 继续下一种 */ }
+  }
+
+  // 全部失败：纯文本占位
+  exprEl.textContent = raw;
+  exprEl.style.opacity = '0.45';
+}
+
+function _casioRefresh() {
+  // 按钮触发时：同步输入框，然后调用预览渲染
+  var inp = document.getElementById('cadv-input');
+  if (inp) inp.value = _casio.expr;
+  _cadvRenderPreview();
 }
 
 // Convert internal representation for display (parse-safe)

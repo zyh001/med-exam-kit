@@ -1947,6 +1947,23 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 @media(prefers-color-scheme:dark){.casio-expr{color:#a0c880}}
 .casio-expr .katex{font-size:14px}
+/* 高级模式文本输入框 */
+.cadv-text-input{
+  width:100%;box-sizing:border-box;
+  background:transparent;border:none;outline:none;
+  border-bottom:1px solid rgba(100,140,60,.4);
+  font-family:'Courier New',monospace;font-size:14px;
+  color:#2c3e1a;padding:2px 2px 3px;
+  margin-bottom:3px;
+  caret-color:#3a6020;
+}
+.cadv-text-input::placeholder{color:#8aaa6a;font-style:italic;font-size:12px}
+@media(prefers-color-scheme:dark){
+  .cadv-text-input{color:#a0c880;border-bottom-color:rgba(140,190,80,.35);caret-color:#90d060}
+  .cadv-text-input::placeholder{color:#5a7a45}
+}
+.cadv-preview-row{min-height:22px}
+/* 预览区透明度：完整表达式=1，猜测补全=0.6，纯文本fallback=0.45 */
 .casio-result{
   font-size:24px;font-weight:700;color:#1a2e0a;
   text-align:right;min-height:30px;
