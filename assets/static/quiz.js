@@ -57,6 +57,8 @@ const S = {
   streak: 0,              // 练习模式连续答对计数
   bankID: 0,              // 当前选中的题库索引
   banksInfo: [],          // 所有题库列表（从 /api/banks 获取）
+  questionTimes: {},      // {idx: seconds} 每题实际作答耗时
+  _qStartTime: null,      // 当前题目开始作答的时间戳
 };
 
 // 返回当前题库的 query string 参数 (bank=N)
@@ -608,6 +610,8 @@ async function selectBankAndEnter(idx) {
   S.currentGroupIdx = 0;
   S.caseMaxReached  = {};
   S.streak        = 0;
+  S.questionTimes = {};
+  S._qStartTime   = null;
 
   // ── 持久化选择（刷新后自动恢复）────────────────────
   localStorage.setItem(SELECTED_BANK_KEY, String(idx));
@@ -1626,6 +1630,8 @@ async function startSession() {
   S.examStart = Date.now();
   S.examSubmitted = false;
   S.streak = 0;
+  S.questionTimes = {};
+  S._qStartTime   = Date.now();
   S.modeGroups       = buildModeGroups(S.questions);
   S.currentGroupIdx  = 0;
   S.caseMaxReached   = {};
@@ -1743,6 +1749,16 @@ function _slideQ(dir, buildFn) {
 }
 
 function renderQ(dir = 'none') {
+  // 记录上一题耗时（切题时才记录，初始渲染跳过）
+  if (dir !== 'none' && S._qStartTime != null) {
+    const prev = S.cur - (dir === 'forward' ? 1 : -1);
+    if (prev >= 0 && prev < S.questions.length) {
+      const elapsed = Math.round((Date.now() - S._qStartTime) / 1000);
+      S.questionTimes[prev] = (S.questionTimes[prev] || 0) + elapsed;
+    }
+  }
+  S._qStartTime = Date.now();
+
   // 取消上一题的自动跳转计时器，防止手动导航后计时器仍触发导致跳题或白屏
   if (_autoAdvanceTimer) { clearTimeout(_autoAdvanceTimer); _autoAdvanceTimer = null; }
 
@@ -2232,10 +2248,22 @@ function quitQuiz() {
 // ── Exam timer ──────────────────────────────
 function startTimer(seconds) {
   let rem = seconds;
+  let _warned5min = rem <= 300; // 如果进来时已低于5分钟，不重复提醒
   updateTimerDisp(rem);
   S.timerInterval = setInterval(() => {
     rem--;
     updateTimerDisp(rem);
+    // 5 分钟倒计时提醒（只触发一次）
+    if (rem === 300 && !_warned5min) {
+      _warned5min = true;
+      toast('⏰ 还剩 5 分钟，注意时间！', false, 4000);
+      if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
+    }
+    // 1 分钟再提醒一次
+    if (rem === 60) {
+      toast('⚠️ 还剩 1 分钟！', false, 3000);
+      if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
+    }
     if (rem <= 0) { clearInterval(S.timerInterval); submitExam(); }
   }, 1000);
 }
@@ -2833,6 +2861,21 @@ function calculateResults(origMode) {
     else wrong++;
   });
 
+  // ── 记录最后一题耗时 ────────────────────────────────────────────
+  if (S._qStartTime != null) {
+    const last = S.cur;
+    const elapsed = Math.round((Date.now() - S._qStartTime) / 1000);
+    S.questionTimes[last] = (S.questionTimes[last] || 0) + elapsed;
+    S._qStartTime = null;
+  }
+
+  // ── 最慢5题（耗时 > 5s 才计入，排除点错/忽略的情况）──────────────
+  const slowest = qs
+    .map((q, i) => ({ i, q, sec: S.questionTimes[i] || 0 }))
+    .filter(x => x.sec >= 5)
+    .sort((a, b) => b.sec - a.sec)
+    .slice(0, 5);
+
   S.results = {
     mode: effectiveMode,
     total: qs.length, correct, wrong, skip,
@@ -2841,6 +2884,8 @@ function calculateResults(origMode) {
     byUnit,
     qs, ans,
     scoring: false,
+    questionTimes: { ...S.questionTimes },
+    slowest,
   };
 
   // ── 计分 ──────────────────────────────────────────────────────────
@@ -3025,6 +3070,45 @@ function renderResults() {
     sb.style.display = 'none';
   }
 
+  // ── 最慢5题 ───────────────────────────────────────────────────────
+  let slowBlock = document.getElementById('slowest-block');
+  if (!slowBlock) {
+    slowBlock = document.createElement('div');
+    slowBlock.id = 'slowest-block';
+    slowBlock.className = 'slowest-block';
+    // 插到计分区块后面
+    sb.parentNode.insertBefore(slowBlock, sb.nextSibling);
+  }
+  if (R.slowest && R.slowest.length > 0) {
+    slowBlock.innerHTML = `<h3 class="slowest-title">🐢 耗时最长的题目</h3>` +
+      R.slowest.map(({ i, q, sec }) => {
+        const preview = (q.text || q.stem || '').replace(/<[^>]+>/g, '').trim().slice(0, 60);
+        const min = Math.floor(sec / 60);
+        const s   = sec % 60;
+        const timeStr = min > 0 ? `${min}分${s}秒` : `${s}秒`;
+        const sel = R.ans[i];
+        const isCorrect = (() => {
+          if (!sel || (sel instanceof Set && sel.size === 0)) return null;
+          if (isMultiQ(q)) {
+            const cs = new Set(q.answer.split(''));
+            const ss = sel instanceof Set ? sel : new Set([sel]);
+            return ss.size === cs.size && [...cs].every(l => ss.has(l));
+          }
+          return sel === q.answer;
+        })();
+        const badge = isCorrect === null ? '⬜' : isCorrect ? '✅' : '❌';
+        return `<div class="slowest-row" onclick="_jumpToReviewQ(${i})">
+          <span class="slowest-badge">${badge}</span>
+          <span class="slowest-num">第${i+1}题</span>
+          <span class="slowest-preview">${esc(preview || '（无预览）')}</span>
+          <span class="slowest-time">${timeStr}</span>
+        </div>`;
+      }).join('');
+    slowBlock.style.display = '';
+  } else {
+    slowBlock.style.display = 'none';
+  }
+
   // ── 本次错题按钮：有答错题目时显示 ─────────────────────────────────
   const swBtn = document.getElementById('res-wrongbook-btn');
   if (swBtn) {
@@ -3086,6 +3170,20 @@ function showReview() {
   setTimeout(() => {
     filterReview('all', document.querySelector('.rtab.active') || document.querySelector('.rtab'));
   }, 250);
+}
+
+/** 从最慢题目列表点击跳转：打开解析页并滚动到对应题目 */
+function _jumpToReviewQ(idx) {
+  showReview();
+  setTimeout(() => {
+    const cards = document.querySelectorAll('.review-card');
+    // review-card 的顺序和 R.qs 一致，直接按 idx 定位
+    if (cards[idx]) {
+      cards[idx].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      cards[idx].classList.add('slowest-highlight');
+      setTimeout(() => cards[idx].classList.remove('slowest-highlight'), 2000);
+    }
+  }, 400);
 }
 
 /** 为解析页标签添加数量角标 */
@@ -3400,15 +3498,31 @@ async function startReview() {
 }
 
 /** 开始错题练习（练习模式，仅加载答错过的题目） */
-async function startWrongBookReview() {
+async function startWrongBookReview(filterUnit) {
   try {
     const res = await apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json());
-    const fps = (res.items || []).map(it => it.fingerprint);
-    if (!fps.length) { toast('暂时没有错题记录 👍'); return; }
-    // 最多取 100 道最高频错题
-    const topFps = fps.slice(0, 100);
+    const allItems = res.items || [];
+    if (!allItems.length) { toast('暂时没有错题记录 👍'); return; }
+
+    // 如果没有指定 unit，且错题跨多个章节，弹出选择面板
+    if (filterUnit === undefined) {
+      const units = [...new Set(allItems.map(it => it.unit).filter(Boolean))];
+      if (units.length > 1) {
+        _showWbUnitPicker(units, allItems);
+        return;
+      }
+    }
+
+    // 按 unit 过滤（filterUnit='__all__' 或未指定单章节时全选）
+    const items = (filterUnit && filterUnit !== '__all__')
+      ? allItems.filter(it => it.unit === filterUnit)
+      : allItems;
+
+    const fps = items.map(it => it.fingerprint).slice(0, 100);
+    if (!fps.length) { toast('该章节暂无错题'); return; }
+
     const data = await apiFetch(
-        '/api/questions?shuffle=1&fingerprints=' + topFps.join(',') + '&' + bankQS()
+        '/api/questions?shuffle=1&fingerprints=' + fps.join(',') + '&' + bankQS()
     ).then(r => r.json());
     if (!data.items || !data.items.length) { toast('找不到对应题目'); return; }
     S.mode      = 'practice';
@@ -3419,9 +3533,38 @@ async function startWrongBookReview() {
     S.currentGroupIdx = 0; S.caseMaxReached = {};
     S.practiceSessionId = String(Date.now());
     S.streak = 0;
-    toast(`📕 错题模式：共 ${data.items.length} 题`);
+    const label = (filterUnit && filterUnit !== '__all__') ? `【${filterUnit}】` : '';
+    toast(`📕 错题模式${label}：共 ${data.items.length} 题`);
     startQuiz();
   } catch(e) { toast('加载错题失败'); }
+}
+
+/** 弹出章节选择面板，让用户选择要重做的错题章节 */
+function _showWbUnitPicker(units, allItems) {
+  const old = document.getElementById('wb-unit-picker');
+  if (old) old.remove();
+
+  const panel = document.createElement('div');
+  panel.id = 'wb-unit-picker';
+  panel.className = 'wb-unit-picker-overlay';
+  panel.innerHTML = `
+    <div class="wb-unit-picker-box">
+      <div class="wb-unit-picker-title">选择章节重做错题</div>
+      <div class="wb-unit-picker-list">
+        <button class="wb-unit-chip wb-unit-chip-all" onclick="document.getElementById('wb-unit-picker').remove(); startWrongBookReview('__all__')">
+          全部章节（${allItems.length} 题）
+        </button>
+        ${units.map(u => {
+          const cnt = allItems.filter(it => it.unit === u).length;
+          return `<button class="wb-unit-chip" onclick="document.getElementById('wb-unit-picker').remove(); startWrongBookReview(${JSON.stringify(u)})">
+            ${esc(u)}<span class="wb-unit-chip-cnt">${cnt}</span>
+          </button>`;
+        }).join('')}
+      </div>
+      <button class="wb-unit-picker-cancel" onclick="document.getElementById('wb-unit-picker').remove()">取消</button>
+    </div>`;
+  panel.addEventListener('click', e => { if (e.target === panel) panel.remove(); });
+  document.body.appendChild(panel);
 }
 
 /** 只练习本次答错的题目 */
@@ -4498,6 +4641,10 @@ function loadTheme() {
 // Keyboard shortcuts
 // ════════════════════════════════════════════
 document.addEventListener('keydown', e => {
+  // 输入框/文本域内不触发快捷键
+  const tag = document.activeElement && document.activeElement.tagName;
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+
   const active = document.querySelector('.screen.active')?.id;
   if (active === 's-quiz') {
     if ('1234'.includes(e.key)) {
@@ -4518,7 +4665,22 @@ document.addEventListener('keydown', e => {
       const btn = document.getElementById('btn-prev');
       if (!btn.disabled) btn.click();
     }
+    // M 或 Space → 标记/取消标记
+    if (e.key === 'm' || e.key === 'M' || e.key === ' ') {
+      e.preventDefault();
+      toggleFlag();
+    }
+    // F → 同 M（保持向后兼容）
     if (e.key === 'f' || e.key === 'F') toggleFlag();
+    // E → 展开/滚动到解析区
+    if (e.key === 'e' || e.key === 'E') {
+      const explain = document.getElementById('explain-panel');
+      if (explain) {
+        explain.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        // 若解析是折叠的（有 hidden 类），展开它
+        explain.classList.remove('hidden');
+      }
+    }
   }
   if (active === 's-memo') {
     if (e.key === ' ' || e.key === 'Enter') {
@@ -5394,6 +5556,22 @@ function _showStreakCelebration(count) {
   const old = document.getElementById('streak-overlay');
   if (old) old.remove();
 
+  // 计算本次练习实时正确率
+  const answered = Object.keys(S.ans).length;
+  const correctSoFar = Object.entries(S.ans).filter(([i, sel]) => {
+    const q = S.questions[parseInt(i)];
+    if (!q || !sel) return false;
+    if (sel instanceof Set && sel.size === 0) return false;
+    if (isMultiQ(q)) {
+      const cs = new Set(q.answer.split(''));
+      const ss = sel instanceof Set ? sel : new Set([sel]);
+      return ss.size === cs.size && [...cs].every(l => ss.has(l));
+    }
+    return sel === q.answer;
+  }).length;
+  const accPct = answered > 0 ? Math.round(correctSoFar / answered * 100) : 0;
+  const accText = answered > 0 ? `本次正确率 ${accPct}%（${correctSoFar}/${answered}题）` : '';
+
   const emojis = ['🔥','⚡','🎯','💪','🏆','✨','🌟','💫'];
   const emoji = count >= 20 ? '🏆' : count >= 15 ? '💪' : count >= 10 ? '⚡' : '🔥';
   const texts = count >= 20 ? '太强了！' : count >= 15 ? '势不可挡！' : count >= 10 ? '超级棒！' : '继续保持！';
@@ -5406,6 +5584,7 @@ function _showStreakCelebration(count) {
       <div class="streak-emoji">${emoji}</div>
       <div class="streak-count">连对 ${count} 题</div>
       <div class="streak-text">${texts}</div>
+      ${accText ? `<div class="streak-acc">${accText}</div>` : ''}
     </div>`;
   document.body.appendChild(overlay);
 
