@@ -350,7 +350,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// /api/debug 只需访问码，无需 Session Token（调试用，不含敏感操作）
-	if strings.HasPrefix(r.URL.Path, "/api/") && r.URL.Path != "/api/debug" {
+	// /api/img/proxy 由 <img> 标签直接请求，无法携带自定义 Header，豁免 Token 校验
+	if strings.HasPrefix(r.URL.Path, "/api/") &&
+		r.URL.Path != "/api/debug" &&
+		r.URL.Path != "/api/img/proxy" {
 		tok := r.Header.Get("X-Session-Token")
 		// WebSocket 无法设置自定义 Header，从 query param 获取 token
 		if tok == "" {
