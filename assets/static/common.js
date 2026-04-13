@@ -68,11 +68,11 @@ function _showAuthExpiredBanner(saveMsg) {
 
 /** Toast 通知（err=true 时显示红色错误样式）*/
 let toastTimer;
-function toast(msg, err = false) {
+function toast(msg, err = false, duration = 2800) {
   const t = document.getElementById('toast');
   if (!t) return;
   t.textContent = msg;
   t.className = 'show' + (err ? ' err' : '');
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { t.className = ''; }, 2800);
+  toastTimer = setTimeout(() => { t.className = ''; }, duration);
 }

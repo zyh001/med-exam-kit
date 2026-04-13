@@ -204,15 +204,13 @@ func updateSM2(tx *sql.Tx, userID, fp string, quality int, today string) error {
 
 	if quality < 3 {
 		reps = 0
-		interval = 0
+		interval = 1 // 答错：明天再复习（原为 0，会导致当天反复出现）
 	} else {
 		switch reps {
 		case 0:
-			interval = 0
+			interval = 1 // 第1次答对：明天复习
 		case 1:
-			interval = 1
-		case 2:
-			interval = 6
+			interval = 6 // 第2次答对：6天后
 		default:
 			interval = int(math.Round(float64(interval) * ef))
 		}
