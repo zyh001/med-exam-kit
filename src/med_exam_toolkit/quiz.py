@@ -1122,48 +1122,86 @@ def api_img_proxy():
     """服务端代理外链图片请求，解决前端跨域（CORS）问题。
     <img> 标签无法携带自定义 Header，因此本路由豁免 Session Token 校验。
     含 SSRF 防护：拒绝内网地址；只透传 image/* 内容类型。
+    若配置了 S3，优先从 S3 内网地址取图后回传（MinIO 无需开放公网端口）。
     """
-    import urllib.request, urllib.parse, ipaddress, socket
+    import urllib.request, urllib.parse, ipaddress, socket, hashlib, os
+    from flask import Response as FlaskResponse
+
     raw_url = request.args.get("url", "")
     if not raw_url:
         return "missing url", 400
     lower = raw_url.lower()
     if not lower.startswith("http://") and not lower.startswith("https://"):
         return "only http/https allowed", 400
-    # SSRF 防护：解析主机名，拒绝内网 IP
+
+    def _fetch_and_return(url, check_ssrf=True):
+        if check_ssrf:
+            try:
+                parsed2 = urllib.parse.urlparse(url)
+                ip = socket.gethostbyname(parsed2.hostname or "")
+                addr = ipaddress.ip_address(ip)
+                if addr.is_private or addr.is_loopback or addr.is_link_local:
+                    return None
+            except Exception:
+                return None
+        try:
+            parsed2 = urllib.parse.urlparse(url)
+            req = urllib.request.Request(
+                url,
+                headers={
+                    "User-Agent": "Mozilla/5.0 (compatible; med-exam-kit-proxy/1.0)",
+                    "Referer": f"{parsed2.scheme}://{parsed2.netloc}/",
+                },
+            )
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                ct = resp.headers.get("Content-Type", "image/jpeg")
+                if not ct.startswith("image/"):
+                    return None
+                data = resp.read(10 * 1024 * 1024)
+            return FlaskResponse(data, content_type=ct, headers={
+                "Cache-Control": "public, max-age=86400",
+                "Access-Control-Allow-Origin": "*",
+            })
+        except Exception:
+            return None
+
+    # 若配置了 S3，优先从 S3 内网取图（桶无需公开，9000 端口无需对外暴露）
+    s3_endpoint = app.config.get("S3_ENDPOINT", "") or os.environ.get("S3_ENDPOINT", "")
+    s3_bucket   = app.config.get("S3_BUCKET",   "") or os.environ.get("S3_BUCKET",   "")
+    if s3_endpoint and s3_bucket:
+        key_hash = hashlib.sha256(raw_url.encode()).hexdigest()[:16]
+        ext = _img_ext_from_url(raw_url)
+        s3_url = s3_endpoint.rstrip("/") + "/" + s3_bucket + "/images/" + key_hash + ext
+        result = _fetch_and_return(s3_url, check_ssrf=False)
+        if result is not None:
+            return result
+        # S3 中未找到，降级代理原始 URL
+
+    # 直接代理原始外链图片
     try:
         parsed = urllib.parse.urlparse(raw_url)
-        host = parsed.hostname or ""
-        ip = socket.gethostbyname(host)
+        ip = socket.gethostbyname(parsed.hostname or "")
         addr = ipaddress.ip_address(ip)
         if addr.is_private or addr.is_loopback or addr.is_link_local:
             return "access to private addresses is not allowed", 403
     except Exception:
         return "invalid url", 400
-    try:
-        req = urllib.request.Request(
-            raw_url,
-            headers={
-                "User-Agent": "Mozilla/5.0 (compatible; med-exam-kit-proxy/1.0)",
-                "Referer": f"{parsed.scheme}://{parsed.netloc}/",
-            },
-        )
-        with urllib.request.urlopen(req, timeout=20) as resp:
-            ct = resp.headers.get("Content-Type", "image/jpeg")
-            if not ct.startswith("image/"):
-                return "upstream content is not an image", 502
-            data = resp.read(10 * 1024 * 1024)  # 10MB 上限
-        from flask import Response as FlaskResponse
-        return FlaskResponse(
-            data,
-            content_type=ct,
-            headers={
-                "Cache-Control": "public, max-age=86400",
-                "Access-Control-Allow-Origin": "*",
-            },
-        )
-    except Exception as e:
-        return f"upstream fetch failed: {e}", 502
+    result = _fetch_and_return(raw_url, check_ssrf=False)
+    if result is not None:
+        return result
+    return "upstream fetch failed", 502
+
+
+def _img_ext_from_url(url: str) -> str:
+    lower = url.lower()
+    for ext in (".png", ".gif", ".webp", ".svg", ".avif", ".jpeg", ".jpg"):
+        idx = lower.find(ext)
+        if idx < 0:
+            continue
+        after = lower[idx + len(ext):]
+        if not after or after[0] in ("?", "#"):
+            return ext
+    return ".jpg"
 
 @app.post("/api/calculate")
 def api_calculate():
