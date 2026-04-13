@@ -31,6 +31,12 @@ type AppConfig struct {
 	ASRAPIKey  string `yaml:"asr_api_key"`
 	ASRModel   string `yaml:"asr_model"`
 	ASRBaseURL string `yaml:"asr_base_url"`
+	// S3 图片存储（可选）
+	S3Endpoint   string `yaml:"s3_endpoint"`
+	S3Bucket     string `yaml:"s3_bucket"`
+	S3AccessKey  string `yaml:"s3_access_key"`
+	S3SecretKey  string `yaml:"s3_secret_key"`
+	S3PublicBase string `yaml:"s3_public_base"`
 }
 
 // defaultConfig returns a zero-value config with sensible defaults.
@@ -133,6 +139,22 @@ func loadConfig(path string) (AppConfig, error) {
 			} else if val == "false" {
 				cfg.AIEnableThinking = boolPtr(false)
 			}
+		case "asr_api_key":
+			cfg.ASRAPIKey = val
+		case "asr_model":
+			cfg.ASRModel = val
+		case "asr_base_url":
+			cfg.ASRBaseURL = val
+		case "s3_endpoint":
+			cfg.S3Endpoint = val
+		case "s3_bucket":
+			cfg.S3Bucket = val
+		case "s3_access_key":
+			cfg.S3AccessKey = val
+		case "s3_secret_key":
+			cfg.S3SecretKey = val
+		case "s3_public_base":
+			cfg.S3PublicBase = val
 		case "banks":
 			// inline single value: banks: exam.mqb
 			bankList = append(bankList, val)
@@ -202,6 +224,23 @@ ai_model:              # 留空使用 provider 默认模型
 ai_api_key:            # API 密钥（必填，ollama 留空即可）
 ai_base_url:           # 自定义 API 地址（留空使用 provider 默认地址）
 ai_thinking:           # true=强制开启思考 / false=强制关闭 / 留空=自动检测
+
+# --- ASR 语音识别（可选）----------------------------------------
+asr_api_key:           # 语音识别 API 密钥
+asr_model:             # 语音识别模型（留空使用默认）
+asr_base_url:          # 自定义 ASR 地址
+
+# ─── S3 图片对象存储（可选）──────────────────────────────────────
+# 用于存储从题库外链下载的图片，解决图片跨域和外链失效问题。
+# 使用步骤：
+#   1. 启动 MinIO/RustFS：docker run -p 9000:9000 -p 9001:9001 minio/minio server /data --console-address ":9001"
+#   2. 迁移图片：med-exam-kit img-migrate -b exam.mqb --endpoint http://localhost:9000 --bucket med-images --access-key minioadmin --secret-key minioadmin
+#   3. 填写下方配置，重启服务后图片将通过 S3 加载
+s3_endpoint:           # MinIO/RustFS 地址，例：http://localhost:9000
+s3_bucket:             # 存储桶名称，例：med-images
+s3_access_key:         # Access Key，例：minioadmin
+s3_secret_key:         # Secret Key，例：minioadmin
+s3_public_base:        # 公开访问 base URL（留空则使用 s3_endpoint/s3_bucket）
 `
 
 var configCmd = &cobra.Command{

@@ -2188,3 +2188,22 @@ button,a,[role=button],label{touch-action:manipulation}
   text-align:center;font-size:12px;color:var(--muted);
   padding:6px 0;margin-top:4px;
 }
+
+/* ── Mermaid 流程图 ── */
+.ai-mermaid-wrap {
+  margin: 10px 0;
+  overflow-x: auto;
+  background: var(--surface2, #161b22);
+  border-radius: 8px;
+  padding: 12px;
+  text-align: center;
+}
+.ai-mermaid-wrap svg { max-width: 100%; height: auto; }
+.ai-mermaid-err {
+  color: var(--warn, #e3a000);
+  font-size: 12px;
+  padding: 6px 10px;
+  background: rgba(227,160,0,.08);
+  border-radius: 6px;
+  margin: 6px 0;
+}

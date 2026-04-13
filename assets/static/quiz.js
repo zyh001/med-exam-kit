@@ -79,6 +79,11 @@ function renderHTML(s) {
     Array.from(img.attributes).forEach(attr => {
       if (!allowed.includes(attr.name.toLowerCase())) img.removeAttribute(attr.name);
     });
+    // 外链图片通过后端代理转发，解决跨域问题
+    const src = img.getAttribute('src') || '';
+    if (/^https?:\/\//i.test(src)) {
+      img.setAttribute('src', '/api/img/proxy?url=' + encodeURIComponent(src));
+    }
     // 响应式样式
     img.style.maxWidth = '100%';
     img.style.height = 'auto';
@@ -91,9 +96,11 @@ function renderHTML(s) {
       "this.onerror=null;this.style.display='none';" +
       "var p=document.createElement('span');" +
       "p.className='img-load-err';" +
-      "p.textContent='⚠ 图片加载失败：' + (this.src||'').slice(0,60);" +
+      "p.textContent='⚠ 图片加载失败：' + (this.dataset.origSrc||this.src||'').slice(0,60);" +
       "this.parentNode.insertBefore(p,this.nextSibling);"
     );
+    // 记录原始地址方便错误提示
+    img.dataset.origSrc = src;
   });
   // 移除所有元素上的事件属性（on*）
   tmp.querySelectorAll('*').forEach(el => {
