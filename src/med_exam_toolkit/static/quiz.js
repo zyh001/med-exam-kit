@@ -2282,7 +2282,7 @@ async function submitExam() {
         const { answers } = await res.json();
         // 将答案填回题目
         S.questions.forEach(q => {
-          const a = answers[q.fingerprint];
+          const a = answers[q.fingerprint + ':' + q.si];
           if (a) { q.answer = a.answer; q.discuss = a.discuss; }
         });
         S.examId = null;
@@ -4601,6 +4601,8 @@ function setCalcMode(mode) {
   document.getElementById('calc-keys-simple').style.display = mode === 'simple' ? '' : 'none';
   document.getElementById('calc-keys-sci').style.display    = mode === 'sci'    ? '' : 'none';
   document.getElementById('calc-keys-adv').style.display    = mode === 'adv'    ? '' : 'none';
+  var sharedDisp = document.querySelector('.calc-display');
+  if (sharedDisp) sharedDisp.style.display = mode === 'adv' ? 'none' : '';
   document.getElementById('calc-mode-simple').classList.toggle('active', mode === 'simple');
   document.getElementById('calc-mode-sci').classList.toggle('active', mode === 'sci');
   document.getElementById('calc-mode-adv').classList.toggle('active', mode === 'adv');
@@ -4839,33 +4841,97 @@ function _loadAdvAssets() {
   return tasks.length ? Promise.all(tasks) : Promise.resolve();
 }
 
-function cadvIns(text) {
-  var inp = document.getElementById('cadv-input');
-  if (!inp) return;
-  var start = inp.selectionStart, end = inp.selectionEnd;
-  var val = inp.value;
-  inp.value = val.slice(0, start) + text + val.slice(end);
-  var cursor = start + text.length;
-  inp.setSelectionRange(cursor, cursor);
-  inp.focus();
-  _cadvPreview();
+// ── Casio fx-991 风格高级计算器 ──
+var _casio = { expr: '', lastAns: 0, shift: false, hyp: false };
+
+function casioShift() {
+  _casio.shift = !_casio.shift;
+  var btn = document.getElementById('casio-shift');
+  var ind = document.getElementById('casio-shift-ind');
+  if (btn) btn.classList.toggle('is-shift', _casio.shift);
+  if (ind) { ind.textContent = _casio.shift ? 'SHIFT' : ''; ind.classList.toggle('active', _casio.shift); }
+  _casioUpdateLabels();
+}
+
+function casioHyp() {
+  _casio.hyp = !_casio.hyp;
+  var btn = document.getElementById('casio-hyp');
+  if (btn) btn.classList.toggle('is-hyp', _casio.hyp);
+}
+
+function _casioUpdateLabels() {
+  var s = _casio.shift;
+  var el;
+  el = document.getElementById('casio-sin'); if(el) el.textContent = s ? 'sin⁻¹' : 'sin';
+  el = document.getElementById('casio-cos'); if(el) el.textContent = s ? 'cos⁻¹' : 'cos';
+  el = document.getElementById('casio-tan'); if(el) el.textContent = s ? 'tan⁻¹' : 'tan';
+  el = document.getElementById('casio-log'); if(el) el.textContent = s ? '10ˣ' : 'log';
+  el = document.getElementById('casio-ln');  if(el) el.textContent = s ? 'eˣ' : 'ln';
 }
 
 function cadvToggleDeg() {
   _advDeg = !_advDeg;
-  var el = document.getElementById('cadv-deg');
+  var el = document.getElementById('casio-deg-btn');
+  var ind = document.getElementById('casio-deg-ind');
   if (el) el.textContent = _advDeg ? 'DEG' : 'RAD';
+  if (ind) ind.textContent = _advDeg ? 'DEG' : 'RAD';
 }
 
-function _cadvPreview() {
-  var inp = document.getElementById('cadv-input');
+function casioDigit(d) { _casio.expr += d; _casioRefresh(); }
+function casioOp(op) { _casio.expr += op; _casioRefresh(); }
+function casioIns(text) { _casio.expr += text; _casioRefresh(); }
+function casioNeg() { _casio.expr += '(-'; _casioRefresh(); }
+function casioAns() { _casio.expr += String(_casio.lastAns); _casioRefresh(); }
+
+function casioFn(fn) {
+  var s = _casio.shift;
+  var h = _casio.hyp;
+  if (s) { _casio.shift = false; var btn=document.getElementById('casio-shift'); if(btn) btn.classList.remove('is-shift'); var ind=document.getElementById('casio-shift-ind'); if(ind){ind.textContent='';ind.classList.remove('active');} _casioUpdateLabels(); }
+  if (h) { _casio.hyp = false; var hb=document.getElementById('casio-hyp'); if(hb) hb.classList.remove('is-hyp'); }
+
+  switch(fn) {
+    case 'sin': _casio.expr += (h ? (s ? 'asinh(' : 'sinh(') : (s ? 'asin(' : 'sin(')); break;
+    case 'cos': _casio.expr += (h ? (s ? 'acosh(' : 'cosh(') : (s ? 'acos(' : 'cos(')); break;
+    case 'tan': _casio.expr += (h ? (s ? 'atanh(' : 'tanh(') : (s ? 'atan(' : 'tan(')); break;
+    case 'log': _casio.expr += s ? '10^(' : 'log10('; break;
+    case 'ln':  _casio.expr += s ? 'e^(' : 'log('; break;
+    case 'sqrt': _casio.expr += s ? 'cbrt(' : 'sqrt('; break;
+    case 'pow': _casio.expr += '^'; break;
+    case 'abs': _casio.expr += 'abs('; break;
+    case 'factorial': _casio.expr += '!'; break;
+    case 'exp': _casio.expr += '*10^'; break;
+    case 'diff': _casio.expr += 'diff('; break;
+    case 'simplify': _casio.expr += 'simplify('; break;
+  }
+  _casioRefresh();
+}
+
+function casioDel() {
+  var e = _casio.expr;
+  var fm = e.match(/(asinh|acosh|atanh|sinh|cosh|tanh|asin|acos|atan|sin|cos|tan|sqrt|cbrt|log10|log|abs|diff|simplify)\($/);
+  if (fm) _casio.expr = e.slice(0, -fm[0].length);
+  else if (e.match(/10\^$/)) _casio.expr = e.slice(0, -3);
+  else if (e.match(/\*10\^$/)) _casio.expr = e.slice(0, -4);
+  else _casio.expr = e.slice(0, -1);
+  _casioRefresh();
+}
+
+function casioAC() {
+  _casio.expr = '';
   var exprEl = document.getElementById('cadv-expr');
-  if (!inp || !exprEl) return;
-  var raw = inp.value.trim();
+  var resultEl = document.getElementById('cadv-result');
+  if (exprEl) exprEl.innerHTML = '';
+  if (resultEl) resultEl.textContent = '0';
+}
+
+function _casioRefresh() {
+  var exprEl = document.getElementById('cadv-expr');
+  if (!exprEl) return;
+  var raw = _casio.expr;
   if (!raw) { exprEl.innerHTML = ''; return; }
-  if (typeof math === 'undefined' || typeof katex === 'undefined') return;
+  if (typeof math === 'undefined' || typeof katex === 'undefined') { exprEl.textContent = raw; return; }
   try {
-    var node = math.parse(_cadvPreprocess(raw));
+    var node = math.parse(raw);
     var tex = node.toTex({ parenthesis: 'auto' });
     katex.render(tex, exprEl, { throwOnError: false, displayMode: false });
   } catch (e) {
@@ -4873,125 +4939,56 @@ function _cadvPreview() {
   }
 }
 
-// Preprocess: implicit multiplication, ln→log, lg→log10, deg wrappers
-function _cadvPreprocess(expr) {
-  var s = expr;
-  // ln(x) → log(x) (math.js uses log for natural log)
-  s = s.replace(/\bln\(/g, 'log(');
-  // lg(x) → log10(x)
-  s = s.replace(/\blg\(/g, 'log10(');
-  // Degree wrapping for trig: if DEG mode, wrap sin(x) → sin(x * pi/180)
-  // We do this at evaluation time, not in preprocess
-  return s;
-}
-
-function cadvEval() {
-  var inp = document.getElementById('cadv-input');
+function casioEval() {
   var exprEl = document.getElementById('cadv-expr');
   var resultEl = document.getElementById('cadv-result');
-  if (!inp) return;
-  var raw = inp.value.trim();
+  var raw = _casio.expr.trim();
   if (!raw) return;
 
   _loadAdvAssets().then(function() {
-    var processed = _cadvPreprocess(raw);
+    var processed = raw;
+    processed = processed.replace(/\bln\(/g, 'log(');
     var resultTex = '', exprTex = '';
 
     try {
       var node = math.parse(processed);
       exprTex = node.toTex({ parenthesis: 'auto' });
-    } catch (e) {
-      exprTex = raw;
-    }
+    } catch (e) { exprTex = raw; }
 
     try {
       var result;
-      // Check if this is a diff() call
       if (/^diff\(/.test(processed)) {
-        // diff(expr, var) → symbolic derivative
         var m = processed.match(/^diff\((.+),\s*([a-z])\)$/i);
-        if (m) {
-          result = math.derivative(m[1], m[2]);
-          resultTex = result.toTex({ parenthesis: 'auto' });
-        } else {
-          // diff(expr) default to x
-          var inner = processed.slice(5, -1);
-          result = math.derivative(inner, 'x');
-          resultTex = result.toTex({ parenthesis: 'auto' });
-        }
+        if (m) { result = math.derivative(m[1], m[2]); resultTex = result.toTex({ parenthesis: 'auto' }); }
+        else { var inner = processed.slice(5, -1); result = math.derivative(inner, 'x'); resultTex = result.toTex({ parenthesis: 'auto' }); }
       } else if (/^simplify\(/.test(processed)) {
-        var inner = processed.slice(9, -1);
-        result = math.simplify(inner);
-        resultTex = result.toTex({ parenthesis: 'auto' });
+        var inner = processed.slice(9, -1); result = math.simplify(inner); resultTex = result.toTex({ parenthesis: 'auto' });
       } else {
-        // Try numeric evaluation first
         var scope = {};
-        // Degree mode: override trig functions
         if (_advDeg) {
-          var toRad = Math.PI / 180;
-          var fromRad = 180 / Math.PI;
-          scope = {
-            sin: function(x) { return Math.sin(x * toRad); },
-            cos: function(x) { return Math.cos(x * toRad); },
-            tan: function(x) { return Math.tan(x * toRad); },
-            asin: function(x) { return Math.asin(x) * fromRad; },
-            acos: function(x) { return Math.acos(x) * fromRad; },
-            atan: function(x) { return Math.atan(x) * fromRad; },
-          };
+          var toRad = Math.PI / 180, fromRad = 180 / Math.PI;
+          scope = { sin:function(x){return Math.sin(x*toRad)}, cos:function(x){return Math.cos(x*toRad)}, tan:function(x){return Math.tan(x*toRad)}, asin:function(x){return Math.asin(x)*fromRad}, acos:function(x){return Math.acos(x)*fromRad}, atan:function(x){return Math.atan(x)*fromRad} };
         }
         result = math.evaluate(processed, scope);
-
         if (typeof result === 'number') {
-          // Handle special values
-          if (result === Infinity) { resultTex = '\\infty'; }
-          else if (result === -Infinity) { resultTex = '-\\infty'; }
-          else if (isNaN(result)) { resultTex = '\\text{Error}'; }
-          else if (Number.isInteger(result) && Math.abs(result) < 1e15) {
-            resultTex = String(result);
-          } else {
-            resultTex = parseFloat(result.toPrecision(12)).toString();
-          }
-          // Store for memory
-          _calc.input = resultTex;
-          _calc.done = true;
-        } else if (result && result.toTex) {
-          resultTex = result.toTex({ parenthesis: 'auto' });
-        } else {
-          resultTex = String(result);
-        }
+          if (result === Infinity) resultTex = '\\infty';
+          else if (result === -Infinity) resultTex = '-\\infty';
+          else if (isNaN(result)) resultTex = '\\text{Error}';
+          else if (Number.isInteger(result) && Math.abs(result) < 1e15) resultTex = String(result);
+          else resultTex = parseFloat(result.toPrecision(12)).toString();
+          _casio.lastAns = result; _calc.input = resultTex; _calc.done = true;
+        } else if (result && result.toTex) { resultTex = result.toTex({ parenthesis: 'auto' }); }
+        else { resultTex = String(result); }
       }
-    } catch (e) {
-      resultTex = '\\color{red}{\\text{Error: ' + (e.message || e).replace(/[{}]/g, '') + '}}';
-    }
+    } catch (e) { resultTex = '\\color{red}{\\text{' + (e.message||e).replace(/[{}\\]/g,'').substring(0,40) + '}}'; }
 
-    // Render LaTeX
     if (typeof katex !== 'undefined') {
-      try {
-        katex.render(exprTex + ' =', exprEl, { throwOnError: false, displayMode: false });
-      } catch(e) { exprEl.textContent = raw + ' ='; }
-      try {
-        katex.render(resultTex, resultEl, { throwOnError: false, displayMode: false });
-      } catch(e) { resultEl.textContent = resultTex; }
-    } else {
-      exprEl.textContent = raw + ' =';
-      resultEl.textContent = resultTex;
-    }
-  }).catch(function(e) {
-    resultEl.textContent = 'Error: ' + e.message;
-  });
+      try { katex.render(exprTex + ' =', exprEl, { throwOnError:false, displayMode:false }); } catch(e) { exprEl.textContent = raw + ' ='; }
+      try { katex.render(resultTex, resultEl, { throwOnError:false, displayMode:false }); } catch(e) { resultEl.textContent = resultTex; }
+    } else { exprEl.textContent = raw + ' ='; resultEl.textContent = resultTex; }
+    _casio.expr = '';
+  }).catch(function(e) { if(resultEl) resultEl.textContent = 'Error: ' + e.message; });
 }
-
-// Wire up Enter key and live preview
-(function() {
-  document.addEventListener('DOMContentLoaded', function() {
-    var inp = document.getElementById('cadv-input');
-    if (!inp) return;
-    inp.addEventListener('keydown', function(e) {
-      if (e.key === 'Enter') { e.preventDefault(); cadvEval(); }
-    });
-    inp.addEventListener('input', function() { _cadvPreview(); });
-  });
-})();
 
 function _showCalcBtn(show) {
   var btn = document.getElementById('calc-toggle-btn');

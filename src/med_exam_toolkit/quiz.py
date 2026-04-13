@@ -67,7 +67,7 @@ _rate_buckets: dict[str, deque] = defaultdict(deque)
 _rate_lock   = threading.Lock()
 
 # ── 考试防作弊：sealed 模式答案暂存 ──
-_exam_sessions: dict[str, dict] = {}   # exam_id -> {fingerprint: {answer, discuss}, ts}
+_exam_sessions: dict[str, dict] = {}   # exam_id -> {"fingerprint:si": {answer, discuss}, ts}
 _exam_lock = threading.Lock()
 
 # ── 试卷分享令牌（内存存储，7天有效，服务重启后失效）──
@@ -722,7 +722,7 @@ def api_exam_join():
     eid = None
     if is_exam_mode and rows:
         eid = secrets.token_hex(16)
-        answers = {r["fingerprint"]: {"answer": r["answer"], "discuss": r["discuss"]} for r in rows}
+        answers = {f'{r["fingerprint"]}:{r["si"]}': {"answer": r["answer"], "discuss": r["discuss"]} for r in rows}
         for r in rows:
             r["answer"] = ""
             r["discuss"] = ""

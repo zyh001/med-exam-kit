@@ -740,36 +740,58 @@
         <button class="ck" onclick="calcDigit('.')">.</button>
         <button class="ck eq" onclick="calcEval()">=</button>
       </div>
-      <!-- 高级模式 (LaTeX + math.js) -->
+      <!-- 高级模式 (Casio fx-991 风格 · LaTeX + math.js) -->
       <div class="calc-adv-wrap" id="calc-keys-adv" style="display:none">
-        <div class="cadv-display">
-          <div class="cadv-expr" id="cadv-expr"></div>
-          <div class="cadv-result" id="cadv-result"></div>
+        <div class="casio-lcd">
+          <div class="casio-lcd-top">
+            <span class="casio-ind" id="casio-shift-ind"></span>
+            <span class="casio-ind" id="casio-deg-ind">DEG</span>
+            <span class="casio-ind" id="casio-m-ind"></span>
+          </div>
+          <div class="casio-expr" id="cadv-expr"></div>
+          <div class="casio-result" id="cadv-result">0</div>
         </div>
-        <div class="cadv-input-row">
-          <input type="text" class="cadv-input" id="cadv-input" placeholder="输入表达式，如 2x^2+3x-5" autocomplete="off" spellcheck="false">
-          <button class="cadv-go" id="cadv-go" onclick="cadvEval()">=</button>
-        </div>
-        <div class="cadv-hint" id="cadv-hint">隐式乘法: 2x → 2·x &#160; diff(x^2,x) → 求导 &#160; x! → 阶乘</div>
-        <div class="cadv-btns">
-          <button class="cb" id="cadv-deg" onclick="cadvToggleDeg()">DEG</button>
-          <button class="cb" onclick="cadvIns('sin(')">sin</button>
-          <button class="cb" onclick="cadvIns('cos(')">cos</button>
-          <button class="cb" onclick="cadvIns('tan(')">tan</button>
-          <button class="cb" onclick="cadvIns('asin(')">asin</button>
-          <button class="cb" onclick="cadvIns('acos(')">acos</button>
-          <button class="cb" onclick="cadvIns('atan(')">atan</button>
-          <button class="cb" onclick="cadvIns('log(')">log</button>
-          <button class="cb" onclick="cadvIns('ln(')">ln</button>
-          <button class="cb" onclick="cadvIns('sqrt(')">√</button>
-          <button class="cb" onclick="cadvIns('^')">x<sup>y</sup></button>
-          <button class="cb" onclick="cadvIns('!')">n!</button>
-          <button class="cb" onclick="cadvIns('pi')">π</button>
-          <button class="cb" onclick="cadvIns('e')">e</button>
-          <button class="cb" onclick="cadvIns('x')">x</button>
-          <button class="cb" onclick="cadvIns('abs(')">|x|</button>
-          <button class="cb" onclick="cadvIns('diff(')">d/dx</button>
-          <button class="cb" onclick="cadvIns('simplify(')">化简</button>
+        <div class="casio-keys">
+          <button class="cx cx-ctrl" id="casio-shift" onclick="casioShift()">SHIFT</button>
+          <button class="cx cx-fn" id="casio-deg-btn" onclick="cadvToggleDeg()">DEG</button>
+          <button class="cx cx-fn" id="casio-hyp" onclick="casioHyp()">hyp</button>
+          <button class="cx cx-fn" onclick="casioFn('diff')">d/dx</button>
+          <button class="cx cx-fn" onclick="casioFn('simplify')">化简</button>
+          <button class="cx cx-fn" id="casio-sin" onclick="casioFn('sin')">sin</button>
+          <button class="cx cx-fn" id="casio-cos" onclick="casioFn('cos')">cos</button>
+          <button class="cx cx-fn" id="casio-tan" onclick="casioFn('tan')">tan</button>
+          <button class="cx cx-fn" onclick="casioFn('pow')">x<sup>y</sup></button>
+          <button class="cx cx-fn" onclick="casioFn('sqrt')">√</button>
+          <button class="cx cx-fn" id="casio-log" onclick="casioFn('log')">log</button>
+          <button class="cx cx-fn" id="casio-ln" onclick="casioFn('ln')">ln</button>
+          <button class="cx cx-fn" onclick="casioFn('abs')">|x|</button>
+          <button class="cx cx-fn" onclick="casioFn('factorial')">x!</button>
+          <button class="cx cx-fn" onclick="casioIns('x')">x</button>
+          <button class="cx cx-fn" onclick="casioIns('(')">(</button>
+          <button class="cx cx-fn" onclick="casioIns(')')">)</button>
+          <button class="cx cx-const" onclick="casioIns('pi')">π</button>
+          <button class="cx cx-const" onclick="casioIns('e')">e</button>
+          <button class="cx cx-fn" onclick="casioAns()">Ans</button>
+          <button class="cx cx-num" onclick="casioDigit('7')">7</button>
+          <button class="cx cx-num" onclick="casioDigit('8')">8</button>
+          <button class="cx cx-num" onclick="casioDigit('9')">9</button>
+          <button class="cx cx-ctrl" onclick="casioDel()">DEL</button>
+          <button class="cx cx-ctrl" onclick="casioAC()">AC</button>
+          <button class="cx cx-num" onclick="casioDigit('4')">4</button>
+          <button class="cx cx-num" onclick="casioDigit('5')">5</button>
+          <button class="cx cx-num" onclick="casioDigit('6')">6</button>
+          <button class="cx cx-op" onclick="casioOp('*')">×</button>
+          <button class="cx cx-op" onclick="casioOp('/')">÷</button>
+          <button class="cx cx-num" onclick="casioDigit('1')">1</button>
+          <button class="cx cx-num" onclick="casioDigit('2')">2</button>
+          <button class="cx cx-num" onclick="casioDigit('3')">3</button>
+          <button class="cx cx-op" onclick="casioOp('+')">+</button>
+          <button class="cx cx-op" onclick="casioOp('-')">−</button>
+          <button class="cx cx-num" onclick="casioDigit('0')">0</button>
+          <button class="cx cx-num" onclick="casioDigit('.')">.</button>
+          <button class="cx cx-fn" onclick="casioFn('exp')">×10<sup>x</sup></button>
+          <button class="cx cx-fn" onclick="casioNeg()">(−)</button>
+          <button class="cx cx-eq" onclick="casioEval()">=</button>
         </div>
       </div>
     </div>
