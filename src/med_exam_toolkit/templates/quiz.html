@@ -34,9 +34,50 @@
   <script>window.ASSET_VER = "{{ASSET_VER}}";</script>
   <script src="/static/common.js"></script>
   <script>
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js').catch(function(){});
+    // ── PWA 更新横幅 ──────────────────────────────────────────────
+    // 新版本 SW 安装完成（waiting 状态）时弹出，用户点击才切换，
+    // 避免新 SW 接管时旧 JS 与新缓存文件版本不一致造成白屏/错误。
+    var _swWaiting = null;
+    function _swShowUpdateBar() {
+      var bar = document.getElementById('sw-update-bar');
+      if (bar) bar.style.display = 'flex';
     }
+    function _swActivateUpdate() {
+      if (_swWaiting) { _swWaiting.postMessage({ type: 'SKIP_WAITING' }); }
+    }
+    function _swDismissBar() {
+      var bar = document.getElementById('sw-update-bar');
+      if (bar) bar.style.display = 'none';
+    }
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.register('/sw.js').then(function(reg) {
+        // 情形1：页面加载时已有 waiting SW（上次关闭前就更新好了）
+        if (reg.waiting) { _swWaiting = reg.waiting; _swShowUpdateBar(); }
+
+        // 情形2：本次页面打开期间发现新版本
+        reg.addEventListener('updatefound', function() {
+          var nw = reg.installing;
+          nw.addEventListener('statechange', function() {
+            // installed = 新缓存写好、进入 waiting 状态
+            if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+              _swWaiting = nw;
+              _swShowUpdateBar();
+            }
+          });
+        });
+
+        // 定期轮询（30 分钟）检测新版本，适合长时间打开的场景
+        setInterval(function() { reg.update(); }, 30 * 60 * 1000);
+      }).catch(function(){});
+
+      // 新 SW 激活（controller 切换）后强制刷新页面，确保 JS/CSS 均为新版
+      var _refreshing = false;
+      navigator.serviceWorker.addEventListener('controllerchange', function() {
+        if (!_refreshing) { _refreshing = true; window.location.reload(); }
+      });
+    }
+
     // PWA 安装提示
     window._pwaPrompt = null;
     window.addEventListener('beforeinstallprompt', function(e) {
@@ -151,6 +192,19 @@
   </script>
 </head>
 <body>
+<!-- SW 更新横幅：新版本就绪时显示，用户点击才切换，避免新旧文件混用 -->
+<div id="sw-update-bar" style="display:none;position:fixed;top:0;left:0;right:0;
+  background:#4f46e5;color:#fff;padding:10px 16px;z-index:99999;
+  font-size:14px;align-items:center;justify-content:center;gap:10px;
+  box-shadow:0 2px 8px rgba(0,0,0,.25)">
+  📦 新版本已就绪
+  <button onclick="_swActivateUpdate()" style="background:#fff;color:#4f46e5;
+    border:none;border-radius:6px;padding:4px 14px;cursor:pointer;
+    font-weight:700;font-size:13px">立即更新</button>
+  <button onclick="_swDismissBar()" style="background:transparent;border:none;
+    color:rgba(255,255,255,.7);cursor:pointer;font-size:20px;line-height:1;
+    padding:0 4px" title="稍后再说">✕</button>
+</div>
 <div id="app">
 
   <!-- ═══ BANK SELECT ═════════════════════════════════════════════════════ -->
