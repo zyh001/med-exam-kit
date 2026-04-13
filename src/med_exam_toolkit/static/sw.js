@@ -1,5 +1,5 @@
 // Service Worker for 医考练习 PWA
-const CACHE_NAME = 'med-quiz-v31';
+const CACHE_NAME = 'med-quiz-v36';
 
 const STATIC_ASSETS = [
     '/static/common.css',
@@ -47,6 +47,10 @@ self.addEventListener('fetch', event => {
     const url = new URL(event.request.url);
 
     if (url.pathname.startsWith('/api/')) {
+        // SSE/streaming requests must not be intercepted (cannot clone stream body)
+        const accept = event.request.headers.get('accept') || '';
+        if (accept.includes('text/event-stream') || event.request.method !== 'GET') return;
+
         event.respondWith(
             fetch(event.request).catch(() => new Response('{"error":"offline"}', {
                 headers: { 'Content-Type': 'application/json' }
