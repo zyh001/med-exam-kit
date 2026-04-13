@@ -320,6 +320,8 @@ function saveExamSession() {
     scoring:        !!CFG.scoring,
     scorePerMode:   CFG.scorePerMode   || {},
     multiScoreMode: CFG.multiScoreMode || 'strict',
+    // 分享考试的密封 exam_id：刷新后仍能向服务端取回答案
+    exam_id:        S.examId || null,
   };
   try {
     localStorage.setItem(examSessionKey(), JSON.stringify(session));
@@ -419,6 +421,8 @@ function restoreSession() {
   if (s.scoring != null)      CFG.scoring        = !!s.scoring;
   if (s.scorePerMode)         CFG.scorePerMode   = s.scorePerMode;
   if (s.multiScoreMode)       CFG.multiScoreMode = s.multiScoreMode;
+  // 恢复密封考试的 exam_id，刷新后仍可向服务端取回答案
+  S.examId = s.exam_id || null;
   // 同步 CFG.examTime，使后续"重新考"的默认时间也一致
   if (S.examLimit) CFG.examTime = Math.round(S.examLimit / 60);
   // examStart 反推，让计时器正确
