@@ -190,11 +190,10 @@ def _update_sm2(c, user_id: str, fingerprint: str, quality: int, today: str) -> 
     reps     = int(row["reps"])     if row else 0
 
     if quality < 3:
-        reps = 0; interval = 0
+        reps = 0; interval = 1   # 答错：明天再复习（原为 0，会导致当天反复出现）
     else:
-        if   reps == 0: interval = 0
-        elif reps == 1: interval = 1
-        elif reps == 2: interval = 6
+        if   reps == 0: interval = 1   # 第1次答对：明天复习
+        elif reps == 1: interval = 6   # 第2次答对：6天后
         else:           interval = round(interval * ef)
         reps += 1
     ef = max(_MIN_EF, ef + 0.1 - (5-quality)*(0.08 + (5-quality)*0.02))
