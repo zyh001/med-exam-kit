@@ -2733,15 +2733,39 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 若已配置 S3，将原始 URL 映射为 S3 公开地址后直接 302 重定向
-	// 这样浏览器直接访问 S3，节省服务器带宽
-	if s.cfg.S3PublicBase != "" && s.cfg.S3Bucket != "" {
+	// 若已配置 S3，服务端从 S3 取图后回传给浏览器
+	// 好处：MinIO/RustFS 无需对外暴露端口（9000 只对本机开放即可）
+	if s.cfg.S3Endpoint != "" && s.cfg.S3Bucket != "" {
 		h := sha256.Sum256([]byte(rawURL))
 		keyHash := hex.EncodeToString(h[:8])
 		ext := imgExtFromURL(rawURL)
-		s3URL := strings.TrimRight(s.cfg.S3PublicBase, "/") + "/images/" + keyHash + ext
-		http.Redirect(w, r, s3URL, http.StatusFound)
-		return
+		s3URL := strings.TrimRight(s.cfg.S3Endpoint, "/") + "/" + s.cfg.S3Bucket + "/images/" + keyHash + ext
+
+		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+		defer cancel()
+		s3Req, err := http.NewRequestWithContext(ctx, http.MethodGet, s3URL, nil)
+		if err == nil {
+			s3Resp, err := imgProxyClient.Do(s3Req)
+			if err == nil && s3Resp.StatusCode == http.StatusOK {
+				defer s3Resp.Body.Close()
+				ct := s3Resp.Header.Get("Content-Type")
+				if ct == "" {
+					ct = "image/jpeg"
+				}
+				w.Header().Set("Content-Type", ct)
+				w.Header().Set("Cache-Control", "public, max-age=86400")
+				w.Header().Set("Access-Control-Allow-Origin", "*")
+				if cl := s3Resp.Header.Get("Content-Length"); cl != "" {
+					w.Header().Set("Content-Length", cl)
+				}
+				io.Copy(w, s3Resp.Body)
+				return
+			}
+			if s3Resp != nil {
+				s3Resp.Body.Close()
+			}
+		}
+		// S3 中未找到该图片，降级到直接代理原始 URL
 	}
 
 	// 只允许 http / https，防止 SSRF 读取内部文件
