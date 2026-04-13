@@ -602,16 +602,15 @@ func (s *Store) ClearUserData(ctx context.Context, userID string, bankID int) ma
 	if userID == "" {
 		userID = "_legacy"
 	}
-	counts := map[string]int{}
-	for _, tbl := range []string{"attempts", "sessions", "sm2"} {
-		res, _ := s.pool.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id=$1 AND bank_id=$2", tbl), userID, int64(bankID))
-		counts[tbl] = int(res.RowsAffected())
-	}
-	// Return with consistent key names matching SQLite
+	// 显式写出每张表的 DELETE，避免 fmt.Sprintf 拼接表名（防御纵深）
+	uid, bid := userID, int64(bankID)
+	rA, _ := s.pool.Exec(ctx, "DELETE FROM attempts WHERE user_id=$1 AND bank_id=$2", uid, bid)
+	rS, _ := s.pool.Exec(ctx, "DELETE FROM sessions WHERE user_id=$1 AND bank_id=$2", uid, bid)
+	rM, _ := s.pool.Exec(ctx, "DELETE FROM sm2     WHERE user_id=$1 AND bank_id=$2", uid, bid)
 	return map[string]int{
-		"attempts":  counts["attempts"],
-		"sessions":  counts["sessions"],
-		"sm2_cards": counts["sm2"],
+		"attempts":  int(rA.RowsAffected()),
+		"sessions":  int(rS.RowsAffected()),
+		"sm2_cards": int(rM.RowsAffected()),
 	}
 }
 
@@ -639,10 +638,10 @@ func (s *Store) MigrateUserData(ctx context.Context, fromUID, toUID string) (map
 		INSERT INTO sm2 SELECT $1,fingerprint,ef,interval,reps,next_due,updated_at
 		FROM sm2 WHERE user_id=$2 ON CONFLICT DO NOTHING`, toUID, fromUID)
 	counts["sm2_cards"] = int(r.RowsAffected())
-	// delete source
-	for _, tbl := range []string{"attempts", "sessions", "sm2"} {
-		tx.Exec(ctx, fmt.Sprintf("DELETE FROM %s WHERE user_id=$1", tbl), fromUID)
-	}
+	// delete source — 显式列出每张表，不用 fmt.Sprintf 拼表名
+	tx.Exec(ctx, "DELETE FROM attempts WHERE user_id=$1", fromUID)
+	tx.Exec(ctx, "DELETE FROM sessions WHERE user_id=$1", fromUID)
+	tx.Exec(ctx, "DELETE FROM sm2      WHERE user_id=$1", fromUID)
 	return counts, tx.Commit(ctx)
 }
 

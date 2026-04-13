@@ -2509,13 +2509,13 @@ async function _processPendingReveals() {
         matched = true;
         // 将答案填入 qs 并重新统计正确率
         let correct = 0;
-        const newQs = (c.qs || []).map(q => {
+        const newQs = (c.qs || []).map((q, idx) => {
           const key = (q.fingerprint || '') + ':' + (q.si ?? 0);
           const a = answers[key];
           if (a && a.answer) {
             const newQ = Object.assign({}, q, { answer: a.answer, discuss: a.discuss || q.discuss });
-            // 判断该题是否答对，更新 correct 计数
-            const sel = c.ans ? c.ans[c.qs.indexOf(q)] : undefined;
+            // 判断该题是否答对，更新 correct 计数（用 idx 而非 indexOf，避免对象引用比较失效）
+            const sel = c.ans ? c.ans[idx] : undefined;
             const selVal = (sel && sel.__set) ? new Set(sel.v) : sel;
             if (selVal) {
               const isMulti = (a.answer.length > 1);
