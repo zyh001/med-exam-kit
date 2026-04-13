@@ -39,6 +39,90 @@ function loadAIAssets() {
   return _aiAssetsPromise;
 }
 
+// ── Mermaid 流程图懒加载 ──────────────────────────────────────────
+// Mermaid (~3MB) 仅在检测到 mermaid 代码块时才加载，避免影响首屏性能
+const MERMAID_CDN = 'https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js';
+let _mermaidLoaded = false;
+let _mermaidPromise = null;
+let _mermaidCounter = 0;
+
+function loadMermaid() {
+  if (_mermaidLoaded) return Promise.resolve();
+  if (_mermaidPromise) return _mermaidPromise;
+  _mermaidPromise = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = MERMAID_CDN;
+    sc.onload = () => {
+      _mermaidLoaded = true;
+      try {
+        mermaid.initialize({
+          startOnLoad: false,
+          theme: document.documentElement.getAttribute('data-theme') === 'dark' ? 'dark' : 'default',
+          securityLevel: 'loose',
+          fontFamily: 'inherit',
+        });
+      } catch(e) {}
+      resolve();
+    };
+    sc.onerror = () => reject(new Error('Mermaid CDN 加载失败，请检查网络连接'));
+    document.body.appendChild(sc);
+  });
+  return _mermaidPromise;
+}
+
+/**
+ * 渲染容器内所有 mermaid 代码块。
+ * marked 会将 ```mermaid ... ``` 渲染为 <code class="language-mermaid">。
+ * 本函数找到这些节点，用 mermaid.render() 替换为 SVG。
+ * @param {HTMLElement} container
+ */
+async function renderMermaidBlocks(container) {
+  // 检测 language-mermaid 或 lang-mermaid class
+  const codeEls = container.querySelectorAll('code.language-mermaid, code.lang-mermaid');
+  if (codeEls.length === 0) return;
+
+  try {
+    await loadMermaid();
+  } catch(e) {
+    // 网络不可达时降级：显示原始代码 + 提示
+    codeEls.forEach(code => {
+      const pre = code.closest('pre') || code;
+      const warn = document.createElement('p');
+      warn.className = 'ai-mermaid-err';
+      warn.textContent = '⚠ 流程图渲染需要网络（Mermaid CDN），当前无法加载';
+      pre.parentNode.insertBefore(warn, pre);
+    });
+    return;
+  }
+
+  for (const code of codeEls) {
+    const pre = code.closest('pre') || code;
+    const graphDef = code.textContent.trim();
+    if (!graphDef) continue;
+
+    const id = 'mermaid-' + (++_mermaidCounter);
+    try {
+      const { svg } = await mermaid.render(id, graphDef);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'ai-mermaid-wrap';
+      wrapper.innerHTML = svg;
+      // 让 SVG 宽度自适应容器
+      const svgEl = wrapper.querySelector('svg');
+      if (svgEl) {
+        svgEl.style.maxWidth = '100%';
+        svgEl.style.height = 'auto';
+      }
+      pre.replaceWith(wrapper);
+    } catch(e) {
+      // 语法错误时保留原始代码块，添加错误提示
+      const errMsg = document.createElement('p');
+      errMsg.className = 'ai-mermaid-err';
+      errMsg.textContent = '⚠ 流程图语法错误：' + (e.message || String(e)).slice(0, 120);
+      pre.parentNode.insertBefore(errMsg, pre.nextSibling);
+    }
+  }
+}
+
 const AI_MAX_ROUNDS = 3;
 const _AI_SEND_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 14V2M8 2L3 7M8 2l5 5" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const _AI_MIC_ICON = '<svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 1a2.5 2.5 0 0 0-2.5 2.5v4a2.5 2.5 0 0 0 5 0v-4A2.5 2.5 0 0 0 8 1z" stroke="currentColor" stroke-width="1.5"/><path d="M4 7v.5a4 4 0 0 0 8 0V7M8 12.5V15M5.5 15h5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>';
@@ -278,6 +362,8 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
         container.innerHTML = markedRender(fullText);
       } catch (e) { /* keep smd output */ }
     }
+    // Post-render: replace mermaid code blocks with SVG diagrams
+    renderMermaidBlocks(container).catch(() => {});
   }
 
   return { push, flush };
@@ -741,6 +827,8 @@ function sendAIMessage(key) {
  */
 function renderContent(container, text, cursor) {
   container.innerHTML = markedRender(text);
+  // Post-render: replace mermaid code blocks with SVG diagrams
+  renderMermaidBlocks(container).catch(() => {});
   if (cursor) container.appendChild(cursor);
 }
 

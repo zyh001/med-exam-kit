@@ -219,12 +219,20 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		ASRAPIKey:        fileCfg.ASRAPIKey,
 		ASRModel:         fileCfg.ASRModel,
 		ASRBaseURL:       fileCfg.ASRBaseURL,
+		S3Endpoint:      fileCfg.S3Endpoint,
+		S3Bucket:        fileCfg.S3Bucket,
+		S3AccessKey:     fileCfg.S3AccessKey,
+		S3SecretKey:     fileCfg.S3SecretKey,
+		S3PublicBase:    fileCfg.S3PublicBase,
 	}
 	cfg.Assets = Assets
 
 	fmt.Printf("\n🌐  服务地址：http://%s\n", net.JoinHostPort(host, fmt.Sprint(port)))
 	if pg != nil {
 		fmt.Printf("🗄  数据库模式：题库和记录均存储在 PostgreSQL\n")
+	}
+	if fileCfg.S3Endpoint != "" {
+		fmt.Printf("🪣  S3 图片存储：%s / %s\n", fileCfg.S3Endpoint, fileCfg.S3Bucket)
 	}
 	if host != "127.0.0.1" {
 		auth.PrintPublicWarning(port)

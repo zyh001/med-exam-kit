@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
@@ -99,6 +100,13 @@ type Config struct {
 	ASRAPIKey  string
 	ASRModel   string
 	ASRBaseURL string
+
+	// S3 图片存储（可选）— 配置后 /api/img/proxy 优先从 S3 重定向
+	S3Endpoint   string
+	S3Bucket     string
+	S3AccessKey  string
+	S3SecretKey  string
+	S3PublicBase string
 
 	// Legacy single-bank fields kept for editor command compatibility.
 	// When Banks is set, these are ignored.
@@ -435,6 +443,8 @@ func (s *Server) registerRoutes() {
 	// AI Q&A
 	m.HandleFunc("POST /api/ai/chat", s.handleAIChat)
 	m.HandleFunc("GET /api/asr/ws", s.handleASRWebSocket)
+	// Image proxy (cross-origin fix)
+	m.HandleFunc("GET /api/img/proxy", s.handleImgProxy)
 }
 
 // ── Bank selection ────────────────────────────────────────────────────
@@ -2681,4 +2691,120 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 		"uid_is_legacy": uid == "_legacy" || uid == "",
 		"banks":         banks,
 	})
+}
+
+// ── Image proxy ───────────────────────────────────────────────────────────────
+// imgExtFromURL 从 URL 中推断图片扩展名（用于 S3 key 生成）
+func imgExtFromURL(u string) string {
+	lower := strings.ToLower(u)
+	for _, ext := range []string{".png", ".gif", ".webp", ".svg", ".avif", ".jpeg", ".jpg"} {
+		idx := strings.Index(lower, ext)
+		if idx < 0 {
+			continue
+		}
+		after := lower[idx+len(ext):]
+		if after == "" || after[0] == '?' || after[0] == '#' {
+			return ext
+		}
+	}
+	return ".jpg"
+}
+
+// GET /api/img/proxy?url=<encoded>
+// 服务端代理外链图片请求，解决前端跨域（CORS）问题。
+// 支持缓存头（Cache-Control: public, max-age=86400），可被 CDN / 浏览器缓存。
+var imgProxyClient = &http.Client{
+	Timeout: 20 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("too many redirects")
+		}
+		return nil
+	},
+}
+
+func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
+	rawURL := r.URL.Query().Get("url")
+	if rawURL == "" {
+		http.Error(w, "missing url parameter", http.StatusBadRequest)
+		return
+	}
+
+	// 若已配置 S3，将原始 URL 映射为 S3 公开地址后直接 302 重定向
+	// 这样浏览器直接访问 S3，节省服务器带宽
+	if s.cfg.S3PublicBase != "" && s.cfg.S3Bucket != "" {
+		h := sha256.Sum256([]byte(rawURL))
+		keyHash := hex.EncodeToString(h[:8])
+		ext := imgExtFromURL(rawURL)
+		s3URL := strings.TrimRight(s.cfg.S3PublicBase, "/") + "/images/" + keyHash + ext
+		http.Redirect(w, r, s3URL, http.StatusFound)
+		return
+	}
+
+	// 只允许 http / https，防止 SSRF 读取内部文件
+	lower := strings.ToLower(rawURL)
+	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
+		http.Error(w, "only http/https URLs are allowed", http.StatusBadRequest)
+		return
+	}
+
+	// 解析 URL，拒绝内网地址（简单 SSRF 防护）
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		http.Error(w, "invalid url", http.StatusBadRequest)
+		return
+	}
+	host := strings.ToLower(parsed.Hostname())
+	for _, blocked := range []string{"localhost", "127.", "10.", "192.168.", "172.16.", "169.254.", "::1", "[::1]"} {
+		if strings.HasPrefix(host, blocked) || host == "localhost" {
+			http.Error(w, "access to private addresses is not allowed", http.StatusForbidden)
+			return
+		}
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
+	if err != nil {
+		http.Error(w, "invalid url", http.StatusBadRequest)
+		return
+	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; med-exam-kit-proxy/1.0)")
+	// 有些站点需要 Referer 才肯返回图片
+	req.Header.Set("Referer", parsed.Scheme+"://"+parsed.Host+"/")
+
+	resp, err := imgProxyClient.Do(req)
+	if err != nil {
+		http.Error(w, "upstream fetch failed: "+err.Error(), http.StatusBadGateway)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		http.Error(w, fmt.Sprintf("upstream returned %d", resp.StatusCode), http.StatusBadGateway)
+		return
+	}
+
+	// 透传 Content-Type；若上游未提供则默认 image/jpeg
+	ct := resp.Header.Get("Content-Type")
+	if ct == "" {
+		ct = "image/jpeg"
+	}
+	// 只允许图片类型，防止代理被滥用获取任意内容
+	if !strings.HasPrefix(ct, "image/") {
+		http.Error(w, "upstream content is not an image", http.StatusBadGateway)
+		return
+	}
+
+	w.Header().Set("Content-Type", ct)
+	w.Header().Set("Cache-Control", "public, max-age=86400") // 浏览器缓存 1 天
+	w.Header().Set("Access-Control-Allow-Origin", "*")
+	if cl := resp.Header.Get("Content-Length"); cl != "" {
+		w.Header().Set("Content-Length", cl)
+	}
+
+	if _, err := io.Copy(w, resp.Body); err != nil {
+		log.Printf("[img-proxy] copy error for %s: %v", rawURL, err)
+	}
 }
