@@ -3097,12 +3097,14 @@ function filterReview(type, tabEl) {
         qEl.style.webkitLineClamp = 'unset';
         qEl.style.overflow = 'visible';
         el.style.maxHeight = el.scrollHeight + 'px';
-        setTimeout(() => { if (el.classList.contains('open')) el.style.maxHeight = el.scrollHeight + 'px'; }, 360);
+        // 动画结束后设为 none，让内部 AI 面板等动态内容可以自由撑高
+        setTimeout(() => { if (el.classList.contains('open')) el.style.maxHeight = 'none'; }, 400);
       } else {
-        // 收起：恢复截断
+        // 收起：先捕获当前实际高度，再动画到 0
         qEl.style.webkitLineClamp = '';
         qEl.style.overflow = '';
-        el.style.maxHeight = '0';
+        el.style.maxHeight = el.scrollHeight + 'px';
+        requestAnimationFrame(() => { el.style.maxHeight = '0'; });
       }
     };
     list.appendChild(item);
