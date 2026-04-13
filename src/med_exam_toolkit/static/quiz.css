@@ -1947,6 +1947,23 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 @media(prefers-color-scheme:dark){.casio-expr{color:#a0c880}}
 .casio-expr .katex{font-size:14px}
+/* 高级模式文本输入框 */
+.cadv-text-input{
+  width:100%;box-sizing:border-box;
+  background:transparent;border:none;outline:none;
+  border-bottom:1px solid rgba(100,140,60,.4);
+  font-family:'Courier New',monospace;font-size:14px;
+  color:#2c3e1a;padding:2px 2px 3px;
+  margin-bottom:3px;
+  caret-color:#3a6020;
+}
+.cadv-text-input::placeholder{color:#8aaa6a;font-style:italic;font-size:12px}
+@media(prefers-color-scheme:dark){
+  .cadv-text-input{color:#a0c880;border-bottom-color:rgba(140,190,80,.35);caret-color:#90d060}
+  .cadv-text-input::placeholder{color:#5a7a45}
+}
+.cadv-preview-row{min-height:22px}
+/* 预览区透明度：完整表达式=1，猜测补全=0.6，纯文本fallback=0.45 */
 .casio-result{
   font-size:24px;font-weight:700;color:#1a2e0a;
   text-align:right;min-height:30px;
@@ -1969,24 +1986,32 @@ button,a,[role=button],label{touch-action:manipulation}
 .cx:active{transform:scale(.92);filter:brightness(.85)}
 .cx sup{font-size:9px;vertical-align:super}
 
+/* 数字键 - 深色 */
 .cx-num{background:#3c3c3c;color:#fff}
 @media(prefers-color-scheme:dark){.cx-num{background:#4a4a4a;color:#eee}}
 
+/* 运算符键 - 强调色 */
 .cx-op{background:var(--accent);color:#fff;font-size:16px;font-weight:700}
 
+/* 功能键 - 浅色 */
 .cx-fn{background:var(--surface);color:var(--text);font-size:12px}
 .cx-fn:active{background:var(--border)}
 
+/* 常量键 */
 .cx-const{background:#5a4a3a;color:#f0d8a0;font-size:14px}
 @media(prefers-color-scheme:dark){.cx-const{background:#5a4a3a;color:#f0d8a0}}
 
+/* 控制键 - SHIFT / DEL / AC */
 .cx-ctrl{background:#8b4513;color:#fff;font-size:11px;font-weight:700;letter-spacing:.5px}
 
+/* SHIFT 激活态 */
 .cx-ctrl.is-shift{background:#d4a520;color:#1a1a1a}
 
+/* = 等号 */
 .cx-eq{background:var(--accent);color:#fff;font-size:20px;font-weight:800}
 .cx-eq:active{background:var(--accent-hover)}
 
+/* hyp 激活态 */
 .cx-fn.is-hyp{background:var(--accent);color:#fff}
 
 /* ════════════════════════════════════════════

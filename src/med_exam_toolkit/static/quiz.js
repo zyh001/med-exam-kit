@@ -64,6 +64,7 @@ function bankQS() { return 'bank=' + S.bankID; }
 
 // ── 图片灯箱 ──────────────────────────────────────────────────────
 (function() {
+  // 插入灯箱 DOM（懒创建，只执行一次）
   var _lb = null, _lbImg = null;
   function _initLightbox() {
     if (_lb) return;
@@ -80,13 +81,15 @@ function bankQS() { return 'bank=' + S.bankID; }
 
     _lbImg = document.createElement('img');
     _lbImg.alt = '图片预览';
-    _lbImg.onclick = function(e) { e.stopPropagation(); };
+    _lbImg.onclick = function(e) { e.stopPropagation(); }; // 点图片本身不关闭
 
     _lb.appendChild(closeBtn);
     _lb.appendChild(_lbImg);
+    // 点击背景关闭
     _lb.onclick = function() { _closeLightbox(); };
     document.body.appendChild(_lb);
 
+    // ESC 关闭
     document.addEventListener('keydown', function(e) {
       if (e.key === 'Escape' && _lb.classList.contains('open')) _closeLightbox();
     });
@@ -135,6 +138,11 @@ function renderHTML(s) {
     Array.from(img.attributes).forEach(attr => {
       if (!allowed.includes(attr.name.toLowerCase())) img.removeAttribute(attr.name);
     });
+    // 外链图片通过后端代理转发，解决跨域问题
+    const src = img.getAttribute('src') || '';
+    if (/^https?:\/\//i.test(src)) {
+      img.setAttribute('src', '/api/img/proxy?url=' + encodeURIComponent(src));
+    }
     // 响应式样式
     img.style.maxWidth = '100%';
     img.style.height = 'auto';
@@ -143,11 +151,6 @@ function renderHTML(s) {
     img.style.display = 'block';
     // 加载失败时显示提示，避免破碎图标
     if (!img.hasAttribute('alt') || !img.alt) img.alt = '题目图片';
-    // 外链图片通过后端代理转发，解决跨域问题
-    const src = img.getAttribute('src') || '';
-    if (/^https?:\/\//i.test(src)) {
-      img.setAttribute('src', '/api/img/proxy?url=' + encodeURIComponent(src));
-    }
     img.setAttribute('onerror',
       "this.onerror=null;this.style.display='none';" +
       "var p=document.createElement('span');" +
@@ -155,6 +158,7 @@ function renderHTML(s) {
       "p.textContent='⚠ 图片加载失败：' + (this.dataset.origSrc||this.src||'').slice(0,60);" +
       "this.parentNode.insertBefore(p,this.nextSibling);"
     );
+    // 记录原始地址方便错误提示
     img.dataset.origSrc = src;
     // 标记图片可点击放大（onclick 在 sanitizer 之后通过事件委托处理）
     img.style.cursor = 'zoom-in';
@@ -1524,8 +1528,12 @@ function dismissGroupModal() {
 async function startSession() {
   const startBtn = document.getElementById('start-btn');
   const origText = startBtn.textContent;
+
+  // 防止重复点击：按钮变为加载状态
   startBtn.disabled = true;
   startBtn.innerHTML = '<span class="btn-spinner"></span> 正在出题…';
+
+  // 超时控制（15 秒）
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -1620,6 +1628,7 @@ async function startSession() {
   if (S.mode === 'memo') startMemo();
   else {
     startQuiz();
+    // 考试模式：进入后立即保存初始快照，确保题目有记录
     if (S.mode === 'exam') saveExamSession();
   }
 
@@ -1642,6 +1651,7 @@ async function startSession() {
 function startQuiz(remainingSeconds) {
   const isExam = S.mode === 'exam';
   clearInterval(S.timerInterval);
+  if (typeof clearAICache === 'function') clearAICache();
 
   const timer = document.getElementById('quiz-timer');
   const gridToggle = document.getElementById('grid-toggle');
@@ -2196,6 +2206,7 @@ function toggleFlag() {
 
 function quitQuiz() {
   clearInterval(S.timerInterval);
+  if (typeof clearAICache === 'function') clearAICache();
   if (S.mode === 'exam') {
     if (!confirm('确认退出考试？本次记录不会保存')) {
       const elapsed = Math.floor((Date.now() - S.examStart) / 1000);
@@ -2370,10 +2381,6 @@ async function submitExam() {
   clearExamSession();
   calculateResults(origMode);
   showScreen('s-results');
-  // 分享锁定模式：结果页展示 2 秒后进入终端锁定页
-  if (S.sharedLocked) {
-    setTimeout(() => { _showSharedLockEndScreen(); }, 2500);
-  }
 }
 function retryQuiz() {
   // 如果题目还在内存，直接重置状态重新做一遍
@@ -2936,10 +2943,10 @@ function highlightInductiveWords(html) {
   // 不需要按长度手动排序——算法会自动处理
   const keywords = [
     '不恰当', '不合适', '不正确', '不包括', '不属于', '不常见',
-    '不得不', '不适用', '不对的', '错误的',
+    '不得不', '不适用', '不对的', '错误的', '不符合',
     '不可能', '排除', '除外', '除了', '不是', '无需', '不必',
     '禁止', '不得', '不应', '不可', '不宜', '欠妥', '不妥',
-    '不当', '相反', '例外', '无关', '不含', '无效'
+    '不当', '相反', '例外', '无关', '不含', '无效', '不符'
   ];
 
   // 核心思路：把 HTML 拆成「标签」和「纯文字」交替的片段，
@@ -3443,11 +3450,12 @@ async function _checkShareToken() {
     if (S.mode === 'exam' || S.mode === 'exam_done') {
       S.mode = 'exam';
       S.examLimit = d.time_limit || 90 * 60;
+      CFG.examTime       = Math.round(S.examLimit / 60);
       // 恢复分享者的计分配置，让接收方体验完全一致
       CFG.scoring        = !!d.scoring;
       CFG.scorePerMode   = d.score_per_mode   || {};
       CFG.multiScoreMode = d.multi_score_mode || 'strict';
-      startQuiz();
+      startQuiz(S.examLimit);
       saveExamSession();
     } else {
       // 练习模式保持默认逻辑，不复制计分配置
@@ -3469,15 +3477,12 @@ function _applySharedLockUI() {
     st = document.createElement('style');
     st.id = 'shared-lock-style';
     st.textContent = `
-      body.shared-locked .back-btn,
       body.shared-locked #brand,
-      body.shared-locked .quiz-header .back-btn,
       body.shared-locked #share-quiz-btn,
       body.shared-locked #s-home,
       body.shared-locked #s-stats,
       body.shared-locked #s-wb,
       body.shared-locked .bottom-nav { display: none !important; }
-      body.shared-locked .quiz-header .back-btn { visibility: hidden !important; }
     `;
     document.head.appendChild(st);
   }
@@ -4460,19 +4465,22 @@ function getSwipeDir(dx, dy){
   return dx>0?'right':'left';
 }
 
-// ── 做题区：左右滑动切题 ─────────────────────
 // ── 检查触摸起点是否在可横向滚动的容器内 ─────────────────────
+// 用于避免代码块等横向滚动区域被误判为切题手势
 function _isTouchInHScrollable(el) {
   while (el && el !== document.body) {
     const tag = el.tagName;
+    // pre / code blocks are always considered h-scrollable
     if (tag === 'PRE' || tag === 'CODE') return true;
-    const ox = window.getComputedStyle(el).overflowX;
+    const style = window.getComputedStyle(el);
+    const ox = style.overflowX;
     if ((ox === 'auto' || ox === 'scroll') && el.scrollWidth > el.clientWidth + 2) return true;
     el = el.parentElement;
   }
   return false;
 }
 
+// ── 做题区：左右滑动切题 ─────────────────────
 (function setupQuizSwipe(){
   const THRESHOLD=70, VELOCITY=0.32, RESIST=0.35;
   let tx=0,ty=0,t0=0,locked=null,dragging=false,touchTarget=null;
@@ -4523,7 +4531,8 @@ function _isTouchInHScrollable(el) {
     const t=e.touches[0], dx=t.clientX-tx, dy=t.clientY-ty;
     if(!locked){ const d=getSwipeDir(dx,dy); if(!d) return;
       if(d!=='vertical'&&_isTouchInHScrollable(touchTarget)){locked='vertical';return;}
-      locked=d; }
+      locked=d;
+    }
     if(locked==='vertical') return;
     e.preventDefault();
     dragging=true;
@@ -4668,6 +4677,7 @@ function setCalcMode(mode) {
   document.getElementById('calc-keys-simple').style.display = mode === 'simple' ? '' : 'none';
   document.getElementById('calc-keys-sci').style.display    = mode === 'sci'    ? '' : 'none';
   document.getElementById('calc-keys-adv').style.display    = mode === 'adv'    ? '' : 'none';
+  // 高级模式有独立 LCD 显示区，隐藏共享的 calc-display
   var sharedDisp = document.querySelector('.calc-display');
   if (sharedDisp) sharedDisp.style.display = mode === 'adv' ? 'none' : '';
   document.getElementById('calc-mode-simple').classList.toggle('active', mode === 'simple');
@@ -4763,9 +4773,13 @@ function _calcLocalEval(raw, deg) {
   var s = raw;
   s = s.replace(/×/g, '*').replace(/÷/g, '/').replace(/−/g, '-');
   s = s.replace(/π/g, 'pi');
+  // lg(x) → log10(x)
   s = s.replace(/\blg\(/g, 'log10(');
+  // 10^(...) → 10^(...)  — math.js handles ^ natively
   s = s.replace(/10\^/g, '10^');
+  // e^(...) → e^(...)
   s = s.replace(/\be\^/g, 'e^');
+  // % → /100
   s = s.replace(/%/g, '/100');
 
   var scope = {};
@@ -4887,7 +4901,7 @@ function _loadScript(url) {
 // 仅加载 math.js（简易/科学模式按 = 时调用）
 function _ensureMathJS() {
   if (_mathJSLoaded || typeof math !== 'undefined') { _mathJSLoaded = true; return Promise.resolve(); }
-  return _loadScript('https://cdnjs.cloudflare.com/ajax/libs/mathjs/13.2.2/math.min.js')
+  return _loadScript('/static/math.min.js')
     .then(function() { _mathJSLoaded = true; });
 }
 
@@ -4917,6 +4931,7 @@ function casioShift() {
   var ind = document.getElementById('casio-shift-ind');
   if (btn) btn.classList.toggle('is-shift', _casio.shift);
   if (ind) { ind.textContent = _casio.shift ? 'SHIFT' : ''; ind.classList.toggle('active', _casio.shift); }
+  // Update button labels for shift variants
   _casioUpdateLabels();
 }
 
@@ -4944,16 +4959,35 @@ function cadvToggleDeg() {
   if (ind) ind.textContent = _advDeg ? 'DEG' : 'RAD';
 }
 
-function casioDigit(d) { _casio.expr += d; _casioRefresh(); }
-function casioOp(op) { _casio.expr += op; _casioRefresh(); }
-function casioIns(text) { _casio.expr += text; _casioRefresh(); }
-function casioNeg() { _casio.expr += '(-'; _casioRefresh(); }
-function casioAns() { _casio.expr += String(_casio.lastAns); _casioRefresh(); }
+function casioDigit(d) {
+  _casio.expr += d;
+  _cadvSyncInput();
+}
+
+function casioOp(op) {
+  _casio.expr += op;
+  _cadvSyncInput();
+}
+
+function casioIns(text) {
+  _casio.expr += text;
+  _cadvSyncInput();
+}
+
+function casioNeg() {
+  _casio.expr += '(-';
+  _cadvSyncInput();
+}
+
+function casioAns() {
+  _casio.expr += String(_casio.lastAns);
+  _cadvSyncInput();
+}
 
 function casioFn(fn) {
   var s = _casio.shift;
   var h = _casio.hyp;
-  if (s) { _casio.shift = false; var btn=document.getElementById('casio-shift'); if(btn) btn.classList.remove('is-shift'); var ind=document.getElementById('casio-shift-ind'); if(ind){ind.textContent='';ind.classList.remove('active');} _casioUpdateLabels(); }
+  if (s) { _casio.shift = false; casioShift(); _casio.shift = false; var btn=document.getElementById('casio-shift'); if(btn) btn.classList.remove('is-shift'); var ind=document.getElementById('casio-shift-ind'); if(ind){ind.textContent='';ind.classList.remove('active');} _casioUpdateLabels(); }
   if (h) { _casio.hyp = false; var hb=document.getElementById('casio-hyp'); if(hb) hb.classList.remove('is-hyp'); }
 
   switch(fn) {
@@ -4967,43 +5001,116 @@ function casioFn(fn) {
     case 'abs': _casio.expr += 'abs('; break;
     case 'factorial': _casio.expr += '!'; break;
     case 'exp': _casio.expr += '*10^'; break;
-    case 'diff': _casio.expr += 'diff('; break;
-    case 'simplify': _casio.expr += 'simplify('; break;
+    case 'diff':
+      _casio.expr += 'diff(';
+      break;
+    case 'simplify':
+      _casio.expr += 'simplify(';
+      break;
   }
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioDel() {
   var e = _casio.expr;
+  // Remove trailing function names like 'sin(' , 'asin(' , 'log10(' , etc.
   var fm = e.match(/(asinh|acosh|atanh|sinh|cosh|tanh|asin|acos|atan|sin|cos|tan|sqrt|cbrt|log10|log|abs|diff|simplify)\($/);
   if (fm) _casio.expr = e.slice(0, -fm[0].length);
   else if (e.match(/10\^$/)) _casio.expr = e.slice(0, -3);
   else if (e.match(/\*10\^$/)) _casio.expr = e.slice(0, -4);
   else _casio.expr = e.slice(0, -1);
-  _casioRefresh();
+  _cadvSyncInput();
 }
 
 function casioAC() {
   _casio.expr = '';
+  var inp = document.getElementById('cadv-input');
+  if (inp) { inp.value = ''; inp.focus(); }
   var exprEl = document.getElementById('cadv-expr');
   var resultEl = document.getElementById('cadv-result');
   if (exprEl) exprEl.innerHTML = '';
   if (resultEl) resultEl.textContent = '0';
 }
 
-function _casioRefresh() {
+// 把按钮操作结果同步回文本输入框并触发预览
+function _cadvSyncInput() {
+  var inp = document.getElementById('cadv-input');
+  if (inp) {
+    inp.value = _casio.expr;
+    inp.selectionStart = inp.selectionEnd = inp.value.length;
+    inp.focus();
+  }
+  _cadvRenderPreview();
+}
+
+// 文本输入框实时输入处理（防抖 80ms）
+var _cadvPreviewTimer = null;
+function _cadvInputChange() {
+  var inp = document.getElementById('cadv-input');
+  if (!inp) return;
+  _casio.expr = inp.value;
+  clearTimeout(_cadvPreviewTimer);
+  _cadvPreviewTimer = setTimeout(function() {
+    _cadvRenderPreview();
+  }, 80);
+}
+
+function _cadvInputKeyDown(e) {
+  if (e.key === 'Enter') { e.preventDefault(); casioEval(); }
+}
+
+// 核心预览渲染：支持不完整表达式的渐进式 LaTeX 渲染
+function _cadvRenderPreview() {
   var exprEl = document.getElementById('cadv-expr');
   if (!exprEl) return;
-  var raw = _casio.expr;
+  var raw = (_casio.expr || '').trim();
   if (!raw) { exprEl.innerHTML = ''; return; }
-  if (typeof math === 'undefined' || typeof katex === 'undefined') { exprEl.textContent = raw; return; }
-  try {
-    var node = math.parse(raw);
-    var tex = node.toTex({ parenthesis: 'auto' });
-    katex.render(tex, exprEl, { throwOnError: false, displayMode: false });
-  } catch (e) {
+
+  // 如果库还没加载，触发懒加载后重试
+  if (typeof math === 'undefined' || typeof katex === 'undefined') {
     exprEl.textContent = raw;
+    exprEl.style.opacity = '0.5';
+    _loadAdvAssets().then(function() { _cadvRenderPreview(); });
+    return;
   }
+
+  // 渐进式尝试：原始 → 补 ) → 补 )) → 补 ))) → 补 ,x) → 补 ,x))
+  var candidates = [
+    { s: raw,         alpha: 1.0 },
+    { s: raw + ')',   alpha: 0.60 },
+    { s: raw + '))',  alpha: 0.55 },
+    { s: raw + ')))', alpha: 0.50 },
+    { s: raw + ',x)', alpha: 0.55 },
+  ];
+
+  for (var i = 0; i < candidates.length; i++) {
+    try {
+      var disp = _casioToDisplay(candidates[i].s);
+      var node = math.parse(disp);
+      var tex  = node.toTex({ parenthesis: 'auto' });
+      katex.render(tex, exprEl, { throwOnError: false, displayMode: false });
+      exprEl.style.opacity = String(candidates[i].alpha);
+      return;
+    } catch (_) { /* 继续下一种 */ }
+  }
+
+  // 全部失败：纯文本占位
+  exprEl.textContent = raw;
+  exprEl.style.opacity = '0.45';
+}
+
+function _casioRefresh() {
+  // 按钮触发时：同步输入框，然后调用预览渲染
+  var inp = document.getElementById('cadv-input');
+  if (inp) inp.value = _casio.expr;
+  _cadvRenderPreview();
+}
+
+// Convert internal representation for display (parse-safe)
+function _casioToDisplay(expr) {
+  var s = expr;
+  s = s.replace(/\blog10\(/g, 'log('); // math.js: log10 → we'll handle separately
+  return s;
 }
 
 function casioEval() {
@@ -5014,47 +5121,90 @@ function casioEval() {
 
   _loadAdvAssets().then(function() {
     var processed = raw;
+    // ln → log (math.js natural log)
+    // log10 stays as log10
     processed = processed.replace(/\bln\(/g, 'log(');
+
     var resultTex = '', exprTex = '';
 
+    // Build expression TeX
     try {
-      var node = math.parse(processed);
+      var dispExpr = processed;
+      var node = math.parse(dispExpr);
       exprTex = node.toTex({ parenthesis: 'auto' });
-    } catch (e) { exprTex = raw; }
+    } catch (e) {
+      exprTex = raw;
+    }
 
     try {
       var result;
       if (/^diff\(/.test(processed)) {
         var m = processed.match(/^diff\((.+),\s*([a-z])\)$/i);
-        if (m) { result = math.derivative(m[1], m[2]); resultTex = result.toTex({ parenthesis: 'auto' }); }
-        else { var inner = processed.slice(5, -1); result = math.derivative(inner, 'x'); resultTex = result.toTex({ parenthesis: 'auto' }); }
+        if (m) {
+          result = math.derivative(m[1], m[2]);
+          resultTex = result.toTex({ parenthesis: 'auto' });
+        } else {
+          var inner = processed.slice(5, -1);
+          result = math.derivative(inner, 'x');
+          resultTex = result.toTex({ parenthesis: 'auto' });
+        }
       } else if (/^simplify\(/.test(processed)) {
-        var inner = processed.slice(9, -1); result = math.simplify(inner); resultTex = result.toTex({ parenthesis: 'auto' });
+        var inner = processed.slice(9, -1);
+        result = math.simplify(inner);
+        resultTex = result.toTex({ parenthesis: 'auto' });
       } else {
         var scope = {};
         if (_advDeg) {
-          var toRad = Math.PI / 180, fromRad = 180 / Math.PI;
-          scope = { sin:function(x){return Math.sin(x*toRad)}, cos:function(x){return Math.cos(x*toRad)}, tan:function(x){return Math.tan(x*toRad)}, asin:function(x){return Math.asin(x)*fromRad}, acos:function(x){return Math.acos(x)*fromRad}, atan:function(x){return Math.atan(x)*fromRad} };
+          var toRad = Math.PI / 180;
+          var fromRad = 180 / Math.PI;
+          scope = {
+            sin: function(x) { return Math.sin(x * toRad); },
+            cos: function(x) { return Math.cos(x * toRad); },
+            tan: function(x) { return Math.tan(x * toRad); },
+            asin: function(x) { return Math.asin(x) * fromRad; },
+            acos: function(x) { return Math.acos(x) * fromRad; },
+            atan: function(x) { return Math.atan(x) * fromRad; },
+          };
         }
         result = math.evaluate(processed, scope);
+
         if (typeof result === 'number') {
-          if (result === Infinity) resultTex = '\\infty';
-          else if (result === -Infinity) resultTex = '-\\infty';
-          else if (isNaN(result)) resultTex = '\\text{Error}';
-          else if (Number.isInteger(result) && Math.abs(result) < 1e15) resultTex = String(result);
-          else resultTex = parseFloat(result.toPrecision(12)).toString();
-          _casio.lastAns = result; _calc.input = resultTex; _calc.done = true;
-        } else if (result && result.toTex) { resultTex = result.toTex({ parenthesis: 'auto' }); }
-        else { resultTex = String(result); }
+          if (result === Infinity) { resultTex = '\\infty'; }
+          else if (result === -Infinity) { resultTex = '-\\infty'; }
+          else if (isNaN(result)) { resultTex = '\\text{Error}'; }
+          else if (Number.isInteger(result) && Math.abs(result) < 1e15) {
+            resultTex = String(result);
+          } else {
+            resultTex = parseFloat(result.toPrecision(12)).toString();
+          }
+          _casio.lastAns = result;
+          _calc.input = resultTex;
+          _calc.done = true;
+        } else if (result && result.toTex) {
+          resultTex = result.toTex({ parenthesis: 'auto' });
+        } else {
+          resultTex = String(result);
+        }
       }
-    } catch (e) { resultTex = '\\color{red}{\\text{' + (e.message||e).replace(/[{}\\]/g,'').substring(0,40) + '}}'; }
+    } catch (e) {
+      resultTex = '\\color{red}{\\text{' + (e.message || e).replace(/[{}\\]/g, '').substring(0, 40) + '}}';
+    }
 
     if (typeof katex !== 'undefined') {
-      try { katex.render(exprTex + ' =', exprEl, { throwOnError:false, displayMode:false }); } catch(e) { exprEl.textContent = raw + ' ='; }
-      try { katex.render(resultTex, resultEl, { throwOnError:false, displayMode:false }); } catch(e) { resultEl.textContent = resultTex; }
-    } else { exprEl.textContent = raw + ' ='; resultEl.textContent = resultTex; }
+      try { katex.render(exprTex + ' =', exprEl, { throwOnError: false, displayMode: false }); }
+      catch(e) { exprEl.textContent = raw + ' ='; }
+      try { katex.render(resultTex, resultEl, { throwOnError: false, displayMode: false }); }
+      catch(e) { resultEl.textContent = resultTex; }
+    } else {
+      exprEl.textContent = raw + ' =';
+      resultEl.textContent = resultTex;
+    }
+
+    // 计算完成后清空输入，准备下一次计算
     _casio.expr = '';
-  }).catch(function(e) { if(resultEl) resultEl.textContent = 'Error: ' + e.message; });
+  }).catch(function(e) {
+    if (resultEl) resultEl.textContent = 'Error: ' + e.message;
+  });
 }
 
 function _showCalcBtn(show) {
@@ -5295,7 +5445,8 @@ init();
     const dx = t.clientX - tx, dy = t.clientY - ty;
     if (!locked){ const d = getSwipeDir(dx, dy); if (!d) return;
       if(d!=='vertical'&&_isTouchInHScrollable(touchTarget)){locked='vertical';return;}
-      locked = d; }
+      locked = d;
+    }
     if (locked === 'vertical') return;
     e.preventDefault();
     dragging = true;
