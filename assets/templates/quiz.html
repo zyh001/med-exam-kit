@@ -750,7 +750,13 @@
             <span class="casio-ind" id="casio-deg-ind">DEG</span>
             <span class="casio-ind" id="casio-m-ind"></span>
           </div>
-          <div class="casio-expr" id="cadv-expr"></div>
+          <input type="text" id="cadv-input" class="cadv-text-input"
+            placeholder="直接输入表达式，如 sin(pi/3) …"
+            oninput="_cadvInputChange()" onkeydown="_cadvInputKeyDown(event)"
+            autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+          <div class="cadv-preview-row">
+            <div class="casio-expr" id="cadv-expr"></div>
+          </div>
           <div class="casio-result" id="cadv-result">0</div>
         </div>
         <div class="casio-keys">
