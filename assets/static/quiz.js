@@ -642,6 +642,9 @@ async function selectBankAndEnter(idx) {
     // 检查 URL hash 是否包含分享试卷令牌
     _checkShareToken();
 
+    // 尝试补取上次网络异常时未能取回的密封答案
+    _processPendingReveals();
+
     // 多题库时，让左上角题库名称变成可点击的切换入口
     _updateBrandClickable();
   } catch(e) {
@@ -2368,16 +2371,31 @@ async function submitExam() {
         S.examId = null;
       } else {
         // 离线或服务端异常：提示稍后获取
-        toast('⚠ 无法获取答案，请联网后在历史记录中查看解析', true);
+        toast('⚠ 无法获取答案，请联网后重新打开应用自动补取', true);
         // 存储 examId 到 localStorage，供后续联网获取
         try {
           const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
-          pending.push({ examId: S.examId, ts: Date.now(), qs: S.questions.map(q => q.fingerprint) });
+          pending.push({
+            examId:  S.examId,
+            bankID:  S.bankID,
+            ts:      Date.now(),
+            fps:     S.questions.map(q => q.fingerprint + ':' + q.si),
+          });
           localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
         } catch(e) {}
       }
     } catch(e) {
-      toast('⚠ 网络异常，答案待联网后获取', true);
+      toast('⚠ 网络异常，答案待联网后自动补取', true);
+      try {
+        const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
+        pending.push({
+          examId:  S.examId,
+          bankID:  S.bankID,
+          ts:      Date.now(),
+          fps:     S.questions.map(q => q.fingerprint + ':' + q.si),
+        });
+        localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
+      } catch(e2) {}
     }
   }
 
@@ -2392,6 +2410,7 @@ function retryQuiz() {
     // 恢复原始模式（submitExam 将 mode 设为 'exam_done'）
     if (S.mode === 'exam_done' && S.results) S.mode = S.results.mode || 'exam';
     S.examSubmitted = false; // 重置提交标记
+    S.examId = null;         // 清除密封 ID，重试不再走 reveal 流程（答案已填回）
     S.cur = 0;
     S.ans = {};
     S.revealed = new Set();
@@ -2410,6 +2429,94 @@ function retryQuiz() {
   } else {
     // 题目已被清理，回到配置页重新出题
     openConfig(S.mode || 'practice');
+  }
+}
+
+/**
+ * 处理离线时未能取回的密封答案（pending_exam_reveals）。
+ * 页面加载 / 题库切换后调用，遍历待处理队列，逐一向服务端请求答案，
+ * 取回后填入对应的复盘缓存条目并重新统计正确率，最后更新本地历史记录。
+ */
+async function _processPendingReveals() {
+  let pending;
+  try {
+    pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
+  } catch(e) { return; }
+  if (!pending.length) return;
+
+  const now = Date.now();
+  // 服务端 examSession 24 小时过期，超时条目直接丢弃
+  const alive = pending.filter(p => now - p.ts < 23 * 3600 * 1000);
+  const toProcess = alive.filter(p => p.bankID === S.bankID);
+  const others    = alive.filter(p => p.bankID !== S.bankID);
+
+  if (!toProcess.length) {
+    localStorage.setItem('pending_exam_reveals', JSON.stringify(alive));
+    return;
+  }
+
+  const remaining = [...others];
+  let recovered = 0;
+
+  for (const entry of toProcess) {
+    try {
+      const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(entry.examId) + '&bank=' + entry.bankID);
+      if (!res.ok) continue; // 已过期或服务端无此记录，直接丢弃
+      const { answers } = await res.json();
+      if (!answers || !Object.keys(answers).length) continue;
+
+      // 找到对应的复盘缓存条目（按 fps 集合匹配）
+      const cacheKey = 'quiz-review-cache-b' + entry.bankID;
+      let cache;
+      try { cache = JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch(e) { continue; }
+
+      // 用 entry.fps（"fp:si" 数组）匹配缓存里的题目
+      const entryFpSet = new Set(entry.fps || []);
+      let matched = false;
+      cache = cache.map(c => {
+        if (matched) return c;
+        const cFps = (c.qs || []).map(q => (q.fingerprint || '') + ':' + (q.si ?? 0));
+        const overlap = cFps.filter(f => entryFpSet.has(f)).length;
+        if (overlap < entryFpSet.size * 0.9) return c; // 不是同一场考试
+        matched = true;
+        // 将答案填入 qs 并重新统计正确率
+        let correct = 0;
+        const newQs = (c.qs || []).map(q => {
+          const key = (q.fingerprint || '') + ':' + (q.si ?? 0);
+          const a = answers[key];
+          if (a && a.answer) {
+            const newQ = Object.assign({}, q, { answer: a.answer, discuss: a.discuss || q.discuss });
+            // 判断该题是否答对，更新 correct 计数
+            const sel = c.ans ? c.ans[c.qs.indexOf(q)] : undefined;
+            const selVal = (sel && sel.__set) ? new Set(sel.v) : sel;
+            if (selVal) {
+              const isMulti = (a.answer.length > 1);
+              if (isMulti) {
+                const cs = new Set(a.answer.split(''));
+                const ss = selVal instanceof Set ? selVal : new Set([selVal]);
+                if (ss.size === cs.size && [...cs].every(l => ss.has(l))) correct++;
+              } else {
+                if (selVal === a.answer) correct++;
+              }
+            }
+            return newQ;
+          }
+          return q;
+        });
+        return Object.assign({}, c, { qs: newQs, _answersRecovered: true });
+      });
+
+      try { localStorage.setItem(cacheKey, JSON.stringify(cache)); } catch(e) {}
+      recovered++;
+    } catch(e) {
+      // 网络仍不通，保留在队列里下次重试
+      remaining.push(entry);
+    }
+  }
+
+  localStorage.setItem('pending_exam_reveals', JSON.stringify(remaining));
+  if (recovered > 0) {
+    toast(`✅ 已补取 ${recovered} 份试卷答案，可在历史记录中查看解析`);
   }
 }
 
@@ -2694,14 +2801,10 @@ function calculateResults(origMode) {
   const effectiveMode = origMode || S.mode;
   // 深拷贝题目数据，防止后续修改影响结果页面
   const qs = JSON.parse(JSON.stringify(S.questions));
-  // 深拷贝答案数据
+  // 深拷贝答案数据（多选题保持 Set，避免后续 instanceof Set 判断失效导致多选全部判错）
   const ans = {};
   for (const [k, v] of Object.entries(S.ans)) {
-    if (v instanceof Set) {
-      ans[k] = { __set: true, v: [...v] };
-    } else {
-      ans[k] = v;
-    }
+    ans[k] = (v instanceof Set) ? new Set(v) : v;
   }
 
   let correct = 0, wrong = 0, skip = 0;
