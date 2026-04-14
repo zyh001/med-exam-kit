@@ -3383,6 +3383,156 @@ function renderResults() {
   if (shareBtn) {
     shareBtn.style.display = (R.qs && R.qs.length > 0) ? '' : 'none';
   }
+  // ── AI 分析报告按钮（考试模式 + AI 已配置时显示）──────────────
+  const aiReportBtn = document.getElementById('res-ai-report-btn');
+  if (aiReportBtn) {
+    const isExamDone = R.mode === 'exam' || R.mode === 'exam_done';
+    const aiOk = S.bankInfo && S.bankInfo.ai_enabled;
+    aiReportBtn.style.display = (isExamDone && aiOk) ? '' : 'none';
+  }
+  // 重置报告容器（重做后隐藏旧报告）
+  const rptBox = document.getElementById('ai-report-container');
+  if (rptBox) { rptBox.style.display = 'none'; rptBox.innerHTML = ''; }
+}
+
+/** 生成并流式显示 AI 考试分析报告 */
+async function showAIReport() {
+  const R = S.results;
+  if (!R) return;
+
+  const btn = document.getElementById('res-ai-report-btn');
+  const container = document.getElementById('ai-report-container');
+  if (!container) return;
+
+  // 如果已生成过，切换显示/隐藏
+  if (container.dataset.done === '1') {
+    container.style.display = container.style.display === 'none' ? '' : 'none';
+    btn && (btn.textContent = container.style.display === 'none' ? '🤖 AI 分析报告' : '🤖 收起报告');
+    return;
+  }
+
+  // 构建传给后端的数据
+  const byUnit = Object.entries(R.byUnit || {}).map(([unit, v]) => ({
+    unit, correct: v.correct, total: v.total,
+  }));
+
+  // 收集错题明细（最多 30 条）
+  const wrongItems = [];
+  (R.qs || []).forEach((q, i) => {
+    if (wrongItems.length >= 30) return;
+    const sel = R.ans[i];
+    const empty = !sel || (sel instanceof Set && sel.size === 0);
+    if (empty) return;
+    const isMulti = typeof isMultiQ === 'function' ? isMultiQ(q) : false;
+    let isCorrect = false;
+    if (isMulti) {
+      const cs = new Set(q.answer.split(''));
+      const ss = sel instanceof Set ? sel : new Set([sel]);
+      isCorrect = ss.size === cs.size && [...cs].every(l => ss.has(l));
+    } else {
+      isCorrect = sel === q.answer;
+    }
+    if (!isCorrect) {
+      wrongItems.push({
+        unit:     q.unit || '',
+        mode:     q.mode || '',
+        text:     (q.text || q.stem || '').slice(0, 80),
+        answer:   q.answer || '',
+        user_ans: sel instanceof Set ? [...sel].join('') : (sel || ''),
+      });
+    }
+  });
+
+  const payload = {
+    total:    R.total,
+    correct:  R.correct,
+    wrong:    R.wrong,
+    skip:     R.skip,
+    time_sec: R.timeSec || 0,
+    score:    R.totalEarned || 0,
+    max_score: R.totalScore || 0,
+    by_unit:  byUnit,
+    wrong_items: wrongItems,
+  };
+
+  // 显示容器，loading 状态
+  container.style.display = '';
+  container.innerHTML = '<div class="ai-report-loading"><span class="ai-spinner"></span> AI 正在分析考试报告，请稍候…</div>';
+  if (btn) { btn.textContent = '🤖 收起报告'; btn.disabled = true; }
+
+  const controller = new AbortController();
+
+  try {
+    const uid = typeof _getUIDCookie === 'function' ? _getUIDCookie() : '';
+    const headers = {
+      'Content-Type': 'application/json',
+      'X-Session-Token': window.SESSION_TOKEN || '',
+    };
+    if (uid) headers['X-User-ID'] = uid;
+
+    const res = await fetch('/api/ai/report?' + bankQS(), {
+      method: 'POST', headers,
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+    container.innerHTML = '';
+    const reportEl = document.createElement('div');
+    reportEl.className = 'ai-report-content';
+    container.appendChild(reportEl);
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '', fullText = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop();
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = line.slice(6);
+        if (data === '[DONE]') break;
+        try {
+          const obj = JSON.parse(data);
+          if (obj.error) throw new Error(obj.error);
+          if (obj.content) {
+            fullText += obj.content;
+            // 流式渲染 markdown
+            if (typeof marked !== 'undefined' && marked.parse) {
+              reportEl.innerHTML = marked.parse(fullText, { async: false });
+            } else {
+              reportEl.textContent = fullText;
+            }
+          }
+          if (obj.truncated) {
+            const notice = document.createElement('p');
+            notice.className = 'ai-report-truncated';
+            notice.textContent = '⚠ 报告已达输出上限，可通过 --ai-max-tokens 参数增大限制后重新生成。';
+            container.appendChild(notice);
+          }
+        } catch (e) { /* ignore */ }
+      }
+    }
+    // 最终渲染一次确保完整
+    if (typeof marked !== 'undefined' && marked.parse) {
+      reportEl.innerHTML = marked.parse(fullText, { async: false });
+    }
+    // 渲染 mermaid 流程图（如报告中含有）
+    if (typeof renderMermaidBlocks === 'function') {
+      renderMermaidBlocks(container).catch(() => {});
+    }
+    container.dataset.done = '1';
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      container.innerHTML = '<p class="ai-report-error">⚠ 报告生成失败：' + (e.message || '网络错误') + '</p>';
+    }
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 // ════════════════════════════════════════════

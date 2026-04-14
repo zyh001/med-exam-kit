@@ -472,7 +472,8 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("POST /api/exam/share", s.handleExamShare)
 	m.HandleFunc("GET /api/exam/join", s.handleExamJoin)
 	// AI Q&A
-	m.HandleFunc("POST /api/ai/chat", s.handleAIChat)
+	m.HandleFunc("POST /api/ai/chat",   s.handleAIChat)
+	m.HandleFunc("POST /api/ai/report", s.handleAIReport)
 	m.HandleFunc("GET /api/asr/ws", s.handleASRWebSocket)
 	// Image proxy (cross-origin fix)
 	m.HandleFunc("GET /api/img/proxy", s.handleImgProxy)
@@ -1852,7 +1853,200 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// loadShareFromPG 尝试从 PostgreSQL 读取 share token（服务重启后恢复）。
+// POST /api/ai/report — 根据考试结果生成流式 AI 分析报告
+func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
+	if s.aiClient == nil {
+		jsonError(w, "AI 功能未配置", http.StatusServiceUnavailable)
+		return
+	}
+
+	var body struct {
+		Total    int     `json:"total"`
+		Correct  int     `json:"correct"`
+		Wrong    int     `json:"wrong"`
+		Skip     int     `json:"skip"`
+		TimeSec  int     `json:"time_sec"`
+		Score    float64 `json:"score"`
+		MaxScore float64 `json:"max_score"`
+		ByUnit   []struct {
+			Unit    string `json:"unit"`
+			Correct int    `json:"correct"`
+			Total   int    `json:"total"`
+		} `json:"by_unit"`
+		WrongItems []struct {
+			Unit    string `json:"unit"`
+			Mode    string `json:"mode"`
+			Text    string `json:"text"`
+			Answer  string `json:"answer"`
+			UserAns string `json:"user_ans"`
+		} `json:"wrong_items"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	pct := 0
+	if body.Total > 0 {
+		pct = body.Correct * 100 / body.Total
+	}
+
+	// 构造章节分析摘要
+	unitSummary := ""
+	for _, u := range body.ByUnit {
+		rate := 0
+		if u.Total > 0 {
+			rate = u.Correct * 100 / u.Total
+		}
+		unitSummary += fmt.Sprintf("  - %s：%d/%d 题正确（正确率 %d%%）\n", u.Unit, u.Correct, u.Total, rate)
+	}
+	if unitSummary == "" {
+		unitSummary = "  （无章节数据）\n"
+	}
+
+	// 列出答错的题目（最多 30 题，超过截断）
+	wrongSummary := ""
+	limit := 30
+	if len(body.WrongItems) < limit {
+		limit = len(body.WrongItems)
+	}
+	for i, w := range body.WrongItems[:limit] {
+		wrongSummary += fmt.Sprintf(
+			"  %d. [%s/%s] %s（正确答案：%s，你的答案：%s）\n",
+			i+1, w.Unit, w.Mode,
+			truncateStr(w.Text, 60), w.Answer, w.UserAns,
+		)
+	}
+	if len(body.WrongItems) > 30 {
+		wrongSummary += fmt.Sprintf("  ...（另有 %d 道错题未列出）\n", len(body.WrongItems)-30)
+	}
+	if wrongSummary == "" {
+		wrongSummary = "  （全部答对！）\n"
+	}
+
+	scoreStr := ""
+	if body.MaxScore > 0 {
+		scoreStr = fmt.Sprintf("得分：%.1f / %.1f 分\n", body.Score, body.MaxScore)
+	}
+
+	prompt := fmt.Sprintf(`你是一位经验丰富的医学考试辅导老师。学生刚完成了一次模拟考试，请根据以下成绩数据，为他生成一份详细的考试分析报告。
+
+## 考试概况
+总题数：%d 题
+答对：%d 题（正确率 %d%%）
+答错：%d 题
+未答：%d 题
+用时：%s
+%s
+## 章节正确率分布
+%s
+## 答错题目明细
+%s
+## 请完成以下分析报告
+
+请按以下结构输出（使用 Markdown 格式）：
+
+### 📊 总体评价
+[对整体表现做简短评价，指出优势和不足]
+
+### 🔍 薄弱章节分析
+[列出正确率低于 60%% 的章节，分析可能的知识薄弱点]
+
+### ❌ 错题规律分析
+[归纳答错题目的规律：是概念混淆、题型不熟、还是某类知识点集中薄弱]
+
+### 📚 针对性复习建议
+[给出 3-5 条具体的复习建议，按优先级排列]
+
+### 💪 下一步学习计划
+[建议接下来 1-2 周的具体学习安排]
+
+请用鼓励且专业的语气，分析要具体，避免泛泛而谈。`,
+		body.Total, body.Correct, pct, body.Wrong, body.Skip,
+		fmtDuration(body.TimeSec), scoreStr,
+		unitSummary, wrongSummary,
+	)
+
+	messages := []ai.ChatMessage{
+		{Role: "user", Content: prompt},
+	}
+
+	maxTokens := s.cfg.AIMaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 4096 // 报告需要更多 token
+	}
+	ch, err := s.aiClient.ChatCompletionStream(r.Context(), messages, 0.7, maxTokens)
+	if err != nil {
+		jsonError(w, fmt.Sprintf("AI 请求失败: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		jsonError(w, "streaming not supported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(200)
+	flusher.Flush()
+
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
+	for {
+		select {
+		case <-heartbeat.C:
+			fmt.Fprintf(w, ": heartbeat\n\n")
+			flusher.Flush()
+		case chunk, ok := <-ch:
+			if !ok {
+				return
+			}
+			if chunk.Err != nil {
+				data, _ := json.Marshal(map[string]string{"error": chunk.Err.Error()})
+				fmt.Fprintf(w, "data: %s\n\n", data)
+				flusher.Flush()
+				return
+			}
+			if chunk.Done {
+				if chunk.Truncated {
+					td, _ := json.Marshal(map[string]any{"truncated": true})
+					fmt.Fprintf(w, "data: %s\n\n", td)
+					flusher.Flush()
+				}
+				fmt.Fprintf(w, "data: [DONE]\n\n")
+				flusher.Flush()
+				return
+			}
+			data, _ := json.Marshal(map[string]string{"content": chunk.Content})
+			fmt.Fprintf(w, "data: %s\n\n", data)
+			flusher.Flush()
+		case <-r.Context().Done():
+			return
+		}
+	}
+}
+
+// truncateStr 截断字符串到指定字符数
+func truncateStr(s string, n int) string {
+	runes := []rune(s)
+	if len(runes) <= n {
+		return s
+	}
+	return string(runes[:n]) + "…"
+}
+
+// fmtDuration 将秒数格式化为 hh:mm:ss 或 mm:ss
+func fmtDuration(sec int) string {
+	h := sec / 3600
+	m := (sec % 3600) / 60
+	s := sec % 60
+	if h > 0 {
+		return fmt.Sprintf("%d:%02d:%02d", h, m, s)
+	}
+	return fmt.Sprintf("%d:%02d", m, s)
+}
 func (s *Server) loadShareFromPG(ctx context.Context, token string) *shareConfig {
 	for i := range s.cfg.Banks {
 		if b := &s.cfg.Banks[i]; b.PgStore != nil {
