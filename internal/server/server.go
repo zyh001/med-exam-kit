@@ -448,6 +448,9 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/asr/ws", s.handleASRWebSocket)
 	// Image proxy (cross-origin fix)
 	m.HandleFunc("GET /api/img/proxy", s.handleImgProxy)
+	// Image upload to S3 + private serve (editor use)
+	m.HandleFunc("POST /api/img/upload",    s.handleImgUpload)
+	m.HandleFunc("GET /api/img/local/",     s.handleImgLocal)
 }
 
 // ── Bank selection ────────────────────────────────────────────────────
@@ -650,6 +653,7 @@ func (s *Server) handleInfo(w http.ResponseWriter, r *http.Request) {
 		"record_enabled": b.RecordEnabled,
 			"ai_enabled":     s.aiClient != nil,
 			"asr_enabled":    s.cfg.ASRAPIKey != "",
+			"s3_enabled":     s.cfg.S3Endpoint != "" && s.cfg.S3Bucket != "" && s.cfg.S3AccessKey != "",
 	})
 }
 

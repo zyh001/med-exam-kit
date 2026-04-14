@@ -262,3 +262,14 @@ textarea.field-input.tall{min-height:120px}
   #themeMenu{right:12px}
 }
 @media(min-width:1200px){:root{--sidebar-w:340px}}
+/* ── 图片上传按钮 ───────────────────────────────────────────────── */
+.img-upload-btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  width:22px;height:22px;border-radius:5px;
+  border:1px solid var(--border);background:var(--card);
+  cursor:pointer;font-size:13px;line-height:1;
+  transition:background .15s,border-color .15s;
+  vertical-align:middle;flex-shrink:0;
+}
+.img-upload-btn:hover{background:var(--accent);border-color:var(--accent);filter:brightness(1.1)}
+.img-upload-btn:disabled{opacity:.5;cursor:wait}
