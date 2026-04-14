@@ -4939,102 +4939,173 @@ var _calc = { input: '', done: false, is2nd: false, isDeg: true, history: [], me
 
 function toggleCalc() {
   var m = document.getElementById('calc-modal');
-  m.style.display = m.style.display === 'flex' ? 'none' : 'flex';
+  var opening = m.style.display !== 'flex';
+  m.style.display = opening ? 'flex' : 'none';
+  if (opening) {
+    // 打开时聚焦输入框，显示光标
+    setTimeout(function() {
+      var inp = document.getElementById('calc-result');
+      if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
+    }, 50);
+  }
 }
 
 function setCalcMode(mode) {
   document.getElementById('calc-keys-simple').style.display = mode === 'simple' ? '' : 'none';
   document.getElementById('calc-keys-sci').style.display    = mode === 'sci'    ? '' : 'none';
   document.getElementById('calc-keys-adv').style.display    = mode === 'adv'    ? '' : 'none';
-  // 高级模式有独立 LCD 显示区，隐藏共享的 calc-display
   var sharedDisp = document.querySelector('.calc-display');
   if (sharedDisp) sharedDisp.style.display = mode === 'adv' ? 'none' : '';
   document.getElementById('calc-mode-simple').classList.toggle('active', mode === 'simple');
   document.getElementById('calc-mode-sci').classList.toggle('active', mode === 'sci');
   document.getElementById('calc-mode-adv').classList.toggle('active', mode === 'adv');
   if (mode === 'adv') _loadAdvAssets();
+  if (mode !== 'adv') {
+    setTimeout(function() {
+      var inp = document.getElementById('calc-result');
+      if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
+    }, 30);
+  }
+}
+
+// ── 光标感知的核心工具函数 ──────────────────────────────────────────
+
+/** 在光标处插入文本，光标移到插入内容末尾 */
+function _calcInsert(text) {
+  var inp = document.getElementById('calc-result');
+  if (!inp) { _calc.input += text; return; }
+  if (_calc.done) {
+    // 计算完成后按数字/函数键：清空重新开始
+    if (/^[\d.(π e]/.test(text)) {
+      inp.value = ''; _calc.input = ''; _calc.done = false;
+    } else {
+      // 按运算符：延续结果继续运算
+      _calc.done = false;
+    }
+  }
+  var s = inp.selectionStart, e = inp.selectionEnd;
+  var v = inp.value;
+  inp.value = v.slice(0, s) + text + v.slice(e);
+  inp.selectionStart = inp.selectionEnd = s + text.length;
+  _calc.input = inp.value;
+  inp.focus();
+}
+
+/** 在光标处向前删除一个"词元"（匹配函数名括号作为整体删除） */
+function _calcDelAt() {
+  var inp = document.getElementById('calc-result');
+  if (!inp || _calc.done) return;
+  var s = inp.selectionStart, e = inp.selectionEnd, v = inp.value;
+  if (s !== e) {
+    // 有选区：删除选区
+    inp.value = v.slice(0, s) + v.slice(e);
+    inp.selectionStart = inp.selectionEnd = s;
+  } else if (s > 0) {
+    var before = v.slice(0, s);
+    var fm = before.match(/(asin|acos|atan|sin|cos|tan|sqrt|lg|ln|10\^|e\^)\($/);
+    var del = fm ? fm[0].length : 1;
+    inp.value = v.slice(0, s - del) + v.slice(s);
+    inp.selectionStart = inp.selectionEnd = s - del;
+  }
+  _calc.input = inp.value;
+  inp.focus();
+}
+
+/** 直接在 input 里打字时同步到 _calc.input */
+function _calcSyncFromInput() {
+  var inp = document.getElementById('calc-result');
+  if (inp) _calc.input = inp.value;
+  // 如果用户手动清空，重置 done 状态
+  if (!_calc.input) _calc.done = false;
+}
+
+/** input 键盘事件：Enter = 计算，Escape = AC */
+function _calcInputKeydown(e) {
+  if (e.key === 'Enter') { e.preventDefault(); calcEval(); }
+  if (e.key === 'Escape') { e.preventDefault(); calcAC(); }
 }
 
 function _calcRefresh() {
-  document.getElementById('calc-expr').textContent  = '';
-  document.getElementById('calc-result').textContent = _calc.input || '0';
+  // 仅在外部（非用户输入路径）强制同步 DOM
+  var inp = document.getElementById('calc-result');
+  if (inp) inp.value = _calc.input || '0';
+  document.getElementById('calc-expr').textContent = '';
 }
 
+// ── 按键函数（全部改为 _calcInsert 插入到光标处）─────────────────────
+
 function calcDigit(d) {
-  if (_calc.done) { _calc.input = ''; _calc.done = false; }
   if (d === '.') {
-    var lastSeg = (_calc.input.match(/[\d.]*$/) || [''])[0];
-    if (lastSeg.includes('.')) return;
+    // 防止同一数字段重复小数点
+    var inp = document.getElementById('calc-result');
+    var pos = inp ? inp.selectionStart : _calc.input.length;
+    var before = (inp ? inp.value : _calc.input).slice(0, pos);
+    var seg = (before.match(/[\d.]*$/) || [''])[0];
+    if (seg.includes('.')) return;
   }
-  _calc.input += d;
-  _calcRefresh();
+  _calcInsert(d);
 }
 
 function calcOp(op) {
+  if (op === '(' || op === ')') { _calcInsert(op); return; }
   if (_calc.done) _calc.done = false;
-  if (op === '(' || op === ')') { _calc.input += op; _calcRefresh(); return; }
-  _calc.input = _calc.input.replace(/\s*[+\-×÷]\s*$/, '');
-  _calc.input += ' ' + op + ' ';
-  _calcRefresh();
+  // 替换末尾已有的运算符（避免连续输入运算符产生乱码）
+  var inp = document.getElementById('calc-result');
+  if (inp) {
+    inp.value = inp.value.replace(/\s*[+\-×÷]\s*$/, '');
+    _calc.input = inp.value;
+    inp.selectionStart = inp.selectionEnd = inp.value.length;
+  }
+  _calcInsert(' ' + op + ' ');
 }
 
 function calcAC() {
   _calc.input = ''; _calc.done = false;
+  var inp = document.getElementById('calc-result');
+  if (inp) { inp.value = '0'; inp.focus(); inp.select(); }
   document.getElementById('calc-expr').textContent = '';
-  document.getElementById('calc-result').textContent = '0';
   _calc.history = [];
   var hEl = document.getElementById('calc-history');
   if (hEl) hEl.innerHTML = '';
 }
 
-function calcDel() {
-  if (_calc.done) return;
-  _calc.input = _calc.input.replace(/\s+$/, '');
-  var fm = _calc.input.match(/(asin|acos|atan|sin|cos|tan|sqrt|lg|ln|10\^|e\^)\($/);
-  if (fm) _calc.input = _calc.input.slice(0, -fm[0].length);
-  else _calc.input = _calc.input.slice(0, -1);
-  _calcRefresh();
-}
+function calcDel() { _calcDelAt(); }
 
 function calcFunc(fn) {
-  if (_calc.done) { _calc.input = ''; _calc.done = false; }
+  if (_calc.done) { _calc.done = false; }
   var map2 = { sin:'asin(', cos:'acos(', tan:'atan(', lg:'10^(', ln:'e^(', '√':'(' };
   var map1 = { sin:'sin(', cos:'cos(', tan:'tan(', lg:'lg(', ln:'ln(', '√':'sqrt(' };
-  if (fn === '!') { _calc.input += '!'; }
-  else if (fn === '1/x') { _calc.input = '1 ÷ (' + _calc.input + ')'; }
-  else { _calc.input += _calc.is2nd ? (map2[fn] || fn + '(') : (map1[fn] || fn + '('); }
-  _calcRefresh();
+  if (fn === '!') { _calcInsert('!'); }
+  else if (fn === '1/x') {
+    var inp = document.getElementById('calc-result');
+    if (inp) { inp.value = '1 ÷ (' + inp.value + ')'; inp.selectionStart = inp.selectionEnd = inp.value.length; _calc.input = inp.value; inp.focus(); }
+  }
+  else { _calcInsert(_calc.is2nd ? (map2[fn] || fn + '(') : (map1[fn] || fn + '(')); }
 }
 
-function calcPow() {
-  if (_calc.done) _calc.done = false;
-  _calc.input += '^';
-  _calcRefresh();
-}
+function calcPow() { if (_calc.done) _calc.done = false; _calcInsert('^'); }
 
-function calcConst(c) {
-  if (_calc.done) { _calc.input = ''; _calc.done = false; }
-  _calc.input += c;
-  _calcRefresh();
-}
+function calcConst(c) { _calcInsert(c); }
 
 async function calcEval() {
-  var expr = _calc.input;
-  if (!expr) return;
+  var inp = document.getElementById('calc-result');
+  var expr = inp ? inp.value.trim() : _calc.input.trim();
+  if (!expr || expr === '0') return;
   document.getElementById('calc-expr').textContent = expr + ' =';
-  document.getElementById('calc-result').textContent = '…';
+  if (inp) inp.value = '…';
   try {
     await _ensureMathJS();
     var val = _calcLocalEval(expr, _calc.isDeg);
-    document.getElementById('calc-result').textContent = val;
+    if (inp) { inp.value = val; inp.select(); }
+    _calc.input = val;
     _calc.history.push({ expr: expr, val: val });
     _calcRenderHistory();
-    _calc.input = val === 'Error' ? '' : val;
   } catch (e) {
-    document.getElementById('calc-result').textContent = 'Error';
+    if (inp) inp.value = 'Error';
     _calc.input = '';
   }
   _calc.done = true;
+  if (inp) inp.focus();
 }
 
 // 本地计算（math.js）— 简易/科学模式共用
@@ -5106,12 +5177,11 @@ function calcToggleDeg() {
 
 function calcMemory() {
   if (_calcMemLongFired) { _calcMemLongFired = false; return; }
-  var val = document.getElementById('calc-result').textContent;
+  var inp = document.getElementById('calc-result');
+  var val = inp ? inp.value : _calc.input;
   if (_calc.mem !== null) {
-    // Recall: insert memory value into input
-    if (_calc.done) { _calc.input = ''; _calc.done = false; }
-    _calc.input += _calc.mem;
-    _calcRefresh();
+    // Recall: insert memory value at cursor
+    _calcInsert(_calc.mem);
   } else {
     // Store current result
     if (val && val !== '0' && val !== 'Error' && val !== '…') {
