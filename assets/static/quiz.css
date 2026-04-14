@@ -2402,3 +2402,51 @@ button,a,[role=button],label{touch-action:manipulation}
   z-index: 10002;
 }
 #lb-zoom-ind.visible { opacity: 1; }
+
+/* ── iOS PWA 安装引导（底部弹层）────────────────────────────────── */
+#ios-pwa-guide{
+  position:fixed;inset:0;z-index:99998;
+  display:flex;align-items:flex-end;justify-content:center;
+  background:rgba(0,0,0,.45);
+  animation:fadeIn .2s ease;
+}
+#ios-pwa-guide-box{
+  width:100%;max-width:420px;
+  background:var(--surface);
+  border-radius:18px 18px 0 0;
+  padding:20px 20px max(20px,env(safe-area-inset-bottom)) 20px;
+  position:relative;
+  box-shadow:0 -4px 24px rgba(0,0,0,.2);
+  animation:slideUp .25s cubic-bezier(.4,0,.2,1);
+}
+@keyframes slideUp{from{transform:translateY(100%)}to{transform:translateY(0)}}
+#ios-pwa-close{
+  position:absolute;top:14px;right:16px;
+  background:var(--bg);border:none;border-radius:50%;
+  width:28px;height:28px;font-size:14px;
+  cursor:pointer;color:var(--muted);
+  display:flex;align-items:center;justify-content:center;
+}
+#ios-pwa-title{
+  font-size:17px;font-weight:700;color:var(--text);
+  margin-bottom:12px;padding-right:32px;
+}
+#ios-pwa-desc{
+  font-size:14px;color:var(--muted);line-height:1.7;
+}
+#ios-pwa-share-icon{
+  display:inline-flex;align-items:center;
+  vertical-align:middle;
+  width:18px;height:18px;color:var(--accent);
+  margin:0 2px;
+}
+#ios-pwa-share-icon svg{width:100%;height:100%}
+#ios-pwa-arrow{
+  text-align:center;font-size:22px;color:var(--accent);
+  margin-top:14px;
+  animation:bounce .8s ease infinite;
+}
+@keyframes bounce{
+  0%,100%{transform:translateY(0)}
+  50%{transform:translateY(5px)}
+}
