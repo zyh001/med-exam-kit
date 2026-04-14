@@ -56,6 +56,8 @@ func init() {
 	quizCmd.Flags().String("db", "", "PostgreSQL DSN（postgres://user:pass@host/db）\n留空使用本地 SQLite（默认）")
 	quizCmd.Flags().Int64Slice("bank-id", nil, "从 PostgreSQL 加载的题库 ID（配合 --db 使用）")
 	quizCmd.Flags().String("config", "", "配置文件路径（默认自动查找 med-exam-kit.yaml）")
+	quizCmd.Flags().Int("cleanup-days", 0, "不活跃用户数据保留天数（0=使用配置文件值，默认 7 天）")
+	quizCmd.Flags().Int("ai-max-tokens", 0, "AI 单次回复最大 token 数（0=使用配置文件值，默认 2048）")
 }
 
 func runQuiz(cmd *cobra.Command, args []string) error {
@@ -98,6 +100,14 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 
 	customPin, _ := cmd.Flags().GetString("pin")
 	if !cmd.Flags().Changed("pin") { customPin = fileCfg.Pin }
+
+	cleanupDays, _ := cmd.Flags().GetInt("cleanup-days")
+	if !cmd.Flags().Changed("cleanup-days") { cleanupDays = fileCfg.CleanupDays }
+	if cleanupDays <= 0 { cleanupDays = 7 } // 默认 7 天
+
+	aiMaxTokens, _ := cmd.Flags().GetInt("ai-max-tokens")
+	if !cmd.Flags().Changed("ai-max-tokens") { aiMaxTokens = fileCfg.AIMaxTokens }
+	if aiMaxTokens <= 0 { aiMaxTokens = 2048 } // 默认 2048
 
 	pgDSN, _ := cmd.Flags().GetString("db")
 	if !cmd.Flags().Changed("db") { pgDSN = fileCfg.DB }
@@ -216,6 +226,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		AIAPIKey:        fileCfg.AIAPIKey,
 		AIBaseURL:       fileCfg.AIBaseURL,
 		AIEnableThinking: fileCfg.AIEnableThinking,
+		AIMaxTokens:     aiMaxTokens,
 		ASRAPIKey:        fileCfg.ASRAPIKey,
 		ASRModel:         fileCfg.ASRModel,
 		ASRBaseURL:       fileCfg.ASRBaseURL,
@@ -224,6 +235,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		S3AccessKey:     fileCfg.S3AccessKey,
 		S3SecretKey:     fileCfg.S3SecretKey,
 		S3PublicBase:    fileCfg.S3PublicBase,
+		CleanupDays:     cleanupDays,
 	}
 	cfg.Assets = Assets
 
