@@ -3806,27 +3806,123 @@ function _showWbUnitPicker(units, allItems) {
   const old = document.getElementById('wb-unit-picker');
   if (old) old.remove();
 
+  // 已选中的章节集合（空 = 未选）
+  const selected = new Set();
+
   const panel = document.createElement('div');
   panel.id = 'wb-unit-picker';
   panel.className = 'wb-unit-picker-overlay';
-  panel.innerHTML = `
-    <div class="wb-unit-picker-box">
-      <div class="wb-unit-picker-title">选择章节重做错题</div>
-      <div class="wb-unit-picker-list">
-        <button class="wb-unit-chip wb-unit-chip-all" onclick="document.getElementById('wb-unit-picker').remove(); startWrongBookReview('__all__')">
-          全部章节（${allItems.length} 题）
-        </button>
-        ${units.map(u => {
-          const cnt = allItems.filter(it => it.unit === u).length;
-          return `<button class="wb-unit-chip" onclick="document.getElementById('wb-unit-picker').remove(); startWrongBookReview(${JSON.stringify(u)})">
-            ${esc(u)}<span class="wb-unit-chip-cnt">${cnt}</span>
-          </button>`;
-        }).join('')}
-      </div>
-      <button class="wb-unit-picker-cancel" onclick="document.getElementById('wb-unit-picker').remove()">取消</button>
-    </div>`;
+
+  const box = document.createElement('div');
+  box.className = 'wb-unit-picker-box';
+
+  // ── 标题 ──
+  const title = document.createElement('div');
+  title.className = 'wb-unit-picker-title';
+  title.textContent = '选择章节重做错题';
+
+  // ── 副标题提示 ──
+  const hint = document.createElement('div');
+  hint.className = 'wb-unit-picker-hint';
+  hint.textContent = '可多选，不选则练习全部章节';
+
+  // ── 章节列表（可滚动）──
+  const list = document.createElement('div');
+  list.className = 'wb-unit-picker-list';
+
+  // 全部章节按钮（单独一行，选中时高亮）
+  const allBtn = document.createElement('button');
+  allBtn.className = 'wb-unit-chip wb-unit-chip-all';
+  allBtn.innerHTML = `全部章节 <span class="wb-unit-chip-cnt">${allItems.length}</span>`;
+  allBtn.addEventListener('click', () => {
+    // 点全部：清空其他选择，直接开始
+    panel.remove();
+    startWrongBookReview('__all__');
+  });
+  list.appendChild(allBtn);
+
+  // 各章节按钮
+  units.forEach(u => {
+    const cnt = allItems.filter(it => it.unit === u).length;
+    const btn = document.createElement('button');
+    btn.className = 'wb-unit-chip';
+    btn.innerHTML = `${esc(u)} <span class="wb-unit-chip-cnt">${cnt}</span>`;
+    btn.addEventListener('click', () => {
+      if (selected.has(u)) {
+        selected.delete(u);
+        btn.classList.remove('selected');
+      } else {
+        selected.add(u);
+        btn.classList.add('selected');
+      }
+      // 更新确认按钮文字
+      confirmBtn.textContent = selected.size > 0
+        ? `开始练习（已选 ${selected.size} 章）`
+        : '开始练习（全部章节）';
+    });
+    list.appendChild(btn);
+  });
+
+  // ── 底部操作按钮 ──
+  const footer = document.createElement('div');
+  footer.className = 'wb-unit-picker-footer';
+
+  const cancelBtn = document.createElement('button');
+  cancelBtn.className = 'wb-unit-picker-cancel';
+  cancelBtn.textContent = '取消';
+  cancelBtn.addEventListener('click', () => panel.remove());
+
+  const confirmBtn = document.createElement('button');
+  confirmBtn.className = 'wb-unit-picker-confirm';
+  confirmBtn.textContent = '开始练习（全部章节）';
+  confirmBtn.addEventListener('click', () => {
+    panel.remove();
+    if (selected.size === 0) {
+      startWrongBookReview('__all__');
+    } else if (selected.size === 1) {
+      startWrongBookReview([...selected][0]);
+    } else {
+      startWrongBookReviewMulti([...selected]);
+    }
+  });
+
+  footer.appendChild(cancelBtn);
+  footer.appendChild(confirmBtn);
+  box.appendChild(title);
+  box.appendChild(hint);
+  box.appendChild(list);
+  box.appendChild(footer);
+  panel.appendChild(box);
+
+  // 点背景关闭
   panel.addEventListener('click', e => { if (e.target === panel) panel.remove(); });
   document.body.appendChild(panel);
+}
+
+/** 多章节同时重做错题 */
+async function startWrongBookReviewMulti(unitList) {
+  try {
+    const res = await apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json());
+    const allItems = res.items || [];
+    const unitSet = new Set(unitList);
+    const items = allItems.filter(it => unitSet.has(it.unit));
+    const fps = items.map(it => it.fingerprint).slice(0, 100);
+    if (!fps.length) { toast('所选章节暂无错题'); return; }
+    const data = await apiFetch(
+        '/api/questions?shuffle=1&fingerprints=' + fps.join(',') + '&' + bankQS()
+    ).then(r => r.json());
+    if (!data.items || !data.items.length) { toast('找不到对应题目'); return; }
+    S.mode = 'practice';
+    S.questions = data.items;
+    S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
+    S.examStart = Date.now();
+    S.modeGroups = buildModeGroups(data.items);
+    S.currentGroupIdx = 0; S.caseMaxReached = {};
+    S.practiceSessionId = String(Date.now());
+    S.streak = 0;
+    toast(`📕 错题模式【${unitList.length}章】：共 ${data.items.length} 题`);
+    startQuiz();
+  } catch(e) { toast('加载错题失败'); }
 }
 
 /** 只练习本次答错的题目 */
