@@ -2035,25 +2035,42 @@ func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
 }
 
 // sortModeOrder 按医学考试标准题型顺序对 modeOrder 原地排序：
-// A1 → A2 → A3/A4 → B → 案例分析 → 其他
+// A1 → A1/A2 → A2 → A3/A4 → B → 案例分析 → X型/不定项 → 其他
+// 支持"A1/A2型"、"A3/A4型"等合并写法
 func sortModeOrder(modes []string) {
 	rank := func(m string) int {
 		mu := strings.ToUpper(m)
+		// 先处理常见合并写法
 		switch {
-		case strings.HasPrefix(mu, "A1"):  return 1
-		case strings.HasPrefix(mu, "A2"):  return 2
-		case strings.HasPrefix(mu, "A3"):  return 3
-		case strings.HasPrefix(mu, "A4"):  return 3
-		case strings.HasPrefix(mu, "B"):   return 4
-		case strings.Contains(mu, "案例"): return 5
-		case strings.Contains(mu, "X型"):  return 6
-		case strings.Contains(mu, "不定项"): return 6
-		default:                           return 7
+		case strings.Contains(mu, "A1") && strings.Contains(mu, "A2"):
+			return 2 // A1/A2合并型，排A1之后A2同位
+		case strings.Contains(mu, "A3") && strings.Contains(mu, "A4"):
+			return 3 // A3/A4合并型
+		case strings.HasPrefix(mu, "A1"):
+			return 1
+		case strings.HasPrefix(mu, "A2"):
+			return 2
+		case strings.HasPrefix(mu, "A3"):
+			return 3
+		case strings.HasPrefix(mu, "A4"):
+			return 3
+		case strings.HasPrefix(mu, "B"):
+			return 4
+		case strings.Contains(mu, "案例"):
+			return 5
+		case strings.Contains(mu, "X型"):
+			return 6
+		case strings.Contains(mu, "不定项"):
+			return 6
+		default:
+			return 7
 		}
 	}
 	sort.SliceStable(modes, func(i, j int) bool {
 		ri, rj := rank(modes[i]), rank(modes[j])
-		if ri != rj { return ri < rj }
+		if ri != rj {
+			return ri < rj
+		}
 		return modes[i] < modes[j]
 	})
 }
