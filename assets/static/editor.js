@@ -153,7 +153,9 @@ function renderEditor(data, activeSi=0) {
   const hasSharedOpts = Array.isArray(data.shared_options) && data.shared_options.length > 0;
   // 共享题干：多子题 OR 已有内容时才显示
   const stemHtml = (isMultiSub || hasStem) ? `
-    <div class="field-group" style="margin-top:10px"><span class="field-label">共享题干</span>
+    <div class="field-group" style="margin-top:10px"><span class="field-label">共享题干
+      ${''/* 图片上传按钮由 JS 在渲染后插入，避免 esc() 转义 onclick */}
+    </span>
       <textarea class="field-input" id="f_stem" oninput="markFormDirty()" placeholder="（输入共享题干）">${esc(data.stem||'')}</textarea>
     </div>` : `<input type="hidden" id="f_stem" value="">`;
 
@@ -260,6 +262,13 @@ function renderEditor(data, activeSi=0) {
     <div class="preview-pane" id="previewPane"></div>
   </div>`;
   ed.appendChild(actDiv);
+
+  // 挂载图片上传按钮（仅在 S3 已配置时）
+  if (info.s3_enabled) {
+    _mountImgUploadBtn('f_stem',    '题干');
+    _mountImgUploadBtn('f_text',    '题目文字');
+    _mountImgUploadBtn('f_discuss', '解析');
+  }
 }
 
 function buildOptRow(o, i) {
@@ -480,11 +489,11 @@ function updatePreview(){
     return `<div class="preview-opt ${cor?'correct':'normal'}"><span class="preview-opt-lbl">${lbl}</span><span>${esc(o)}</span></div>`;
   }).join('');
   pane.innerHTML=`<div class="preview-title">题目预览</div>
-    ${stem?`<div class="preview-stem">${esc(stem)}</div>`:''}
-    <div class="preview-q">${esc(text)}</div>
+    ${stem?`<div class="preview-stem">${escWithImg(stem)}</div>`:''}
+    <div class="preview-q">${escWithImg(text)}</div>
     ${optsHtml}
     ${answer?`<div class="preview-ans">✓ 答案：${answer}</div>`:''}
-    ${discuss?`<div class="preview-discuss">📝 ${esc(discuss.slice(0,150))}${discuss.length>150?'…':''}</div>`:''}`;
+    ${discuss?`<div class="preview-discuss">📝 ${escWithImg(discuss.slice(0,300))}${discuss.length>300?'…':''}</div>`:''}`;
 }
 
 // Replace
@@ -571,6 +580,19 @@ async function doSave(){
 
 function esc(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;'); }
 
+/** 转义文本供预览，但安全还原本站 /api/img/local/ 图片标签（防 XSS）*/
+function escWithImg(s) {
+  if (!s) return '';
+  // esc() 先把所有 HTML 实体化；再把符合白名单路径的 img 标签还原为真实 <img>
+  var escaped = esc(s);
+  return escaped.replace(
+    /&lt;img src=&quot;(\/api\/img\/local\/[a-zA-Z0-9\-_.]{10,80})&quot;(?:[^>]*)?&gt;/g,
+    function(_, src) {
+      return '<img src="' + src + '" alt="图片" style="max-width:100%;height:auto;border-radius:6px;margin:6px 0;display:block">';
+    }
+  );
+}
+
 
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
@@ -581,5 +603,94 @@ document.addEventListener('keydown', e => {
 });
 
 window.addEventListener('beforeunload', e => { if(info.dirty||formDirty){ e.preventDefault(); e.returnValue=''; } });
+
+// ── 图片上传（仅 S3 配置时可用）──────────────────────────────────────
+
+/**
+ * 在 id=fieldId 的 textarea 旁插入「📷 插入图片」按钮。
+ * 点击后弹出文件选择，上传成功后在光标处插入 <img> 标签。
+ */
+function _mountImgUploadBtn(fieldId, label) {
+  const ta = document.getElementById(fieldId);
+  if (!ta) return;
+
+  // 找到包裹该 textarea 的 .field-group，在 .field-label 里追加按钮
+  const group = ta.closest('.field-group');
+  if (!group) return;
+  const lbl = group.querySelector('.field-label');
+  if (!lbl) return;
+
+  // 避免重复挂载
+  if (lbl.querySelector('.img-upload-btn')) return;
+
+  const btn = document.createElement('button');
+  btn.className = 'img-upload-btn';
+  btn.type = 'button';
+  btn.title = '上传图片到 S3 并在光标处插入';
+  btn.innerHTML = '📷';
+
+  // 隐藏 file input
+  const inp = document.createElement('input');
+  inp.type = 'file';
+  inp.accept = 'image/*';
+  inp.style.display = 'none';
+  inp.addEventListener('change', () => _doImgUpload(inp, ta));
+  document.body.appendChild(inp);
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    inp.value = ''; // 允许重复选同一文件
+    inp.click();
+  });
+
+  lbl.appendChild(btn);
+}
+
+/** 执行上传并在 textarea 光标处插入 <img> 标签 */
+async function _doImgUpload(inp, ta) {
+  const file = inp.files[0];
+  if (!file) return;
+
+  if (file.size > 10 * 1024 * 1024) {
+    toast('图片不能超过 10 MB', true);
+    return;
+  }
+  if (!file.type.startsWith('image/')) {
+    toast('只支持图片格式', true);
+    return;
+  }
+
+  // 找到对应按钮，显示 loading 状态
+  const btn = ta.closest('.field-group')?.querySelector('.img-upload-btn');
+  const origText = btn ? btn.innerHTML : '';
+  if (btn) { btn.innerHTML = '⏳'; btn.disabled = true; }
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+
+    const res = await apiFetch('/api/img/upload', { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `HTTP ${res.status}`);
+    }
+    const { url } = await res.json();
+
+    // 在光标处插入 <img> 标签
+    const tag = `<img src="${url}" alt="图片">`;
+    const start = ta.selectionStart ?? ta.value.length;
+    const end   = ta.selectionEnd   ?? ta.value.length;
+    ta.value = ta.value.slice(0, start) + tag + ta.value.slice(end);
+    ta.selectionStart = ta.selectionEnd = start + tag.length;
+    ta.focus();
+    markFormDirty();
+    updatePreview();
+    toast('✓ 图片已上传并插入');
+  } catch (e) {
+    toast('上传失败：' + e.message, true);
+  } finally {
+    if (btn) { btn.innerHTML = origText; btn.disabled = false; }
+  }
+}
 
 init();
