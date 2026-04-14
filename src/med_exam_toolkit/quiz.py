@@ -1651,13 +1651,15 @@ def api_ai_report():
     time_sec = int(data.get("time_sec", 0))
     score    = float(data.get("score", 0))
     max_score = float(data.get("max_score", 0))
-    by_unit  = data.get("by_unit", [])
+    by_unit     = data.get("by_unit", [])
     wrong_items = data.get("wrong_items", [])
+    total_units = int(data.get("total_units", len(by_unit)))
 
     pct = (correct * 100 // total) if total > 0 else 0
 
-    # 章节分析摘要
-    unit_summary = ""
+    # 章节分析摘要（前端只传最差15个）
+    unit_note = f"（仅显示正确率最低的 {len(by_unit)} 个章节，共 {total_units} 个章节）\n" if total_units > len(by_unit) else ""
+    unit_summary = unit_note
     for u in by_unit:
         rate = (u.get("correct", 0) * 100 // u.get("total", 1)) if u.get("total", 0) > 0 else 0
         unit_summary += f"  - {u.get('unit','?')}：{u.get('correct',0)}/{u.get('total',0)} 题正确（正确率 {rate}%）\n"

@@ -44,6 +44,7 @@ const S = {
   examStart: null,
   examLimit: 90 * 60,
   examSubmitted: false,
+  examReviewMode: false,  // 全部答完后进入"回看"模式：自由导航但不可修改
   timerInterval: null,
   bankInfo: null,
   results: null,
@@ -930,6 +931,11 @@ function showScreen(id, dir = 'forward') {
   if (id === 's-home') {
     renderHistorySection();   // 本地数据，无网络延迟
     refreshHomeData();        // 异步拉服务端记录、刷新徽章
+  }
+  // 离开做题页时隐藏回看提示条
+  if (id !== 's-quiz') {
+    const bar = document.getElementById('exam-review-bar');
+    if (bar) bar.style.display = 'none';
   }
 
   // 新屏：先标记为 sliding（visibility:visible），再移除偏移类，最后 active
@@ -1891,6 +1897,7 @@ async function startSession() {
   S.revealed = new Set();
   S.examStart = Date.now();
   S.examSubmitted = false;
+  S.examReviewMode = false;
   S.streak = 0;
   S.questionTimes = {};
   S._qStartTime   = Date.now();
@@ -2227,6 +2234,8 @@ function selectOpt(letter, btn) {
     S.ans[S.cur] = letter;
 
     if (isExam) {
+      // 回看模式：不允许修改答案
+      if (S.examReviewMode) { toast('回看模式，答案不可修改'); return; }
       // 考试：标记已选
       document.querySelectorAll('.opt').forEach(b => b.classList.remove('selected'));
       btn.classList.add('selected');
@@ -2301,6 +2310,7 @@ function submitMulti() {
   const isPractice = S.mode === 'practice';
   const sel      = S.ans[S.cur]; // Set<string>
   if (!sel || sel.size === 0) return;
+  if (isExam && S.examReviewMode) { toast('回看模式，答案不可修改'); return; }
 
   if (isExam) {
     // 考试模式：标记已答，更新小地图，直接跳下一题
@@ -2427,13 +2437,38 @@ function buildExplain(q, selected) {
 
 function nextOrSubmit() {
   const total = S.questions.length;
-  if (S.mode === 'exam' && S.cur === total - 1) { submitExam(); return; }
+  if (S.mode === 'exam' && S.cur === total - 1) {
+    // 检查是否全部作答
+    const unanswered = S.questions.filter((_, i) => {
+      const sel = S.ans[i];
+      return !sel || (sel instanceof Set && sel.size === 0);
+    }).length;
+    if (unanswered > 0) {
+      // 还有未答题目，显示确认弹窗
+      showExamSubmitConfirm(unanswered, total);
+    } else {
+      // 全部答完：进入回看模式（可自由浏览但不可修改）
+      _enterExamReview();
+    }
+    return;
+  }
   if (S.mode === 'practice' && S.cur === total - 1) { finishPractice(); return; }
 
   if (S.mode === 'exam') {
     const nextIdx  = S.cur + 1;
     const curGIdx  = getGroupIdxForQ(S.cur);
     const nextGIdx = getGroupIdxForQ(nextIdx);
+    const curGroup = S.modeGroups[curGIdx];
+
+    // A3/A4/案例分析组：当前题未作答不允许前进
+    if (curGroup && !curGroup.allowBack) {
+      const sel = S.ans[S.cur];
+      const answered = sel instanceof Set ? sel.size > 0 : (sel !== undefined && sel !== null && sel !== '');
+      if (!answered) {
+        toast('请先回答本题再前进');
+        return;
+      }
+    }
 
     if (nextGIdx !== curGIdx) {
       // 跨题型组——弹窗提示
@@ -2452,8 +2487,7 @@ function nextOrSubmit() {
     }
 
     // 同组内：若为案例分析，更新最远到达位置
-    const curGroup = S.modeGroups[curGIdx];
-    if (!curGroup.allowBack) {
+    if (curGroup && !curGroup.allowBack) {
       S.caseMaxReached[curGIdx] = Math.max(S.caseMaxReached[curGIdx] ?? nextIdx, nextIdx);
     }
   }
@@ -2561,8 +2595,8 @@ function buildGrid() {
     dot.textContent = i + 1;
 
     dot.onclick = () => {
-      if (!isPractice) {
-        // 考试模式：保留原有限制
+      if (!isPractice && !S.examReviewMode) {
+        // 考试模式（非回看）：保留原有限制
         const curGIdx    = getGroupIdxForQ(S.cur);
         const targetGIdx = getGroupIdxForQ(i);
         const targetG    = S.modeGroups[targetGIdx];
@@ -2579,7 +2613,7 @@ function buildGrid() {
           return;
         }
       }
-      // 练习模式：自由跳转
+      // 回看模式或练习模式：自由跳转
       const dir = i > S.cur ? 'forward' : i < S.cur ? 'back' : 'none';
       S.cur = i;
       renderQ(dir);
@@ -3443,6 +3477,13 @@ async function showAIReport() {
     }
   });
 
+  // 大题量优化：byUnit 只传正确率最低的 15 个章节（避免 prompt 过长）
+  const byUnitSorted = [...byUnit].sort((a, b) => {
+    const ra = a.total > 0 ? a.correct / a.total : 1;
+    const rb = b.total > 0 ? b.correct / b.total : 1;
+    return ra - rb; // 正确率低的排前面
+  }).slice(0, 15);
+
   const payload = {
     total:    R.total,
     correct:  R.correct,
@@ -3451,8 +3492,9 @@ async function showAIReport() {
     time_sec: R.timeSec || 0,
     score:    R.totalEarned || 0,
     max_score: R.totalScore || 0,
-    by_unit:  byUnit,
-    wrong_items: wrongItems,
+    by_unit:  byUnitSorted,         // 最多 15 个章节
+    wrong_items: wrongItems,         // 已限 30 条
+    total_units: byUnit.length,      // 告知后端实际章节总数
   };
 
   // 显示容器，loading 状态
@@ -3501,8 +3543,10 @@ async function showAIReport() {
           if (obj.error) throw new Error(obj.error);
           if (obj.content) {
             fullText += obj.content;
-            // 流式渲染 markdown
-            if (typeof marked !== 'undefined' && marked.parse) {
+            // 复用 quiz_ai.js 的 markedRender（已懒加载 marked + 数学公式扩展）
+            if (typeof markedRender === 'function') {
+              reportEl.innerHTML = markedRender(fullText);
+            } else if (typeof marked !== 'undefined' && marked.parse) {
               reportEl.innerHTML = marked.parse(fullText, { async: false });
             } else {
               reportEl.textContent = fullText;
@@ -3518,7 +3562,9 @@ async function showAIReport() {
       }
     }
     // 最终渲染一次确保完整
-    if (typeof marked !== 'undefined' && marked.parse) {
+    if (typeof markedRender === 'function') {
+      reportEl.innerHTML = markedRender(fullText);
+    } else if (typeof marked !== 'undefined' && marked.parse) {
       reportEl.innerHTML = marked.parse(fullText, { async: false });
     }
     // 渲染 mermaid 流程图（如报告中含有）
@@ -3576,6 +3622,47 @@ function highlightInductiveWords(html) {
   });
 }
 
+
+/** 全部答完后进入回看模式（可自由导航，但不可修改答案） */
+function _enterExamReview() {
+  S.examReviewMode = true;
+  // 解除组限制，允许自由导航
+  S.currentGroupIdx = 0;
+  // 更新 btn-next 为"交卷"
+  const btn = document.getElementById('btn-next');
+  if (btn) { btn.textContent = '交卷 ✓'; btn.disabled = false; }
+  // 顶部提示
+  toast('✅ 全部题目已作答，可自由回看，满意后点「交卷」', false, 4000);
+  // 在 topbar 区域显示回看提示条
+  let bar = document.getElementById('exam-review-bar');
+  if (!bar) {
+    bar = document.createElement('div');
+    bar.id = 'exam-review-bar';
+    bar.className = 'exam-review-bar';
+    bar.innerHTML = '🔍 回看模式——可自由翻页，答案不可修改 &nbsp;<button onclick="submitExam()" style="background:#4f46e5;color:#fff;border:none;border-radius:6px;padding:3px 12px;cursor:pointer;font-size:12px;font-weight:700">交卷 ✓</button>';
+    const quizScreen = document.getElementById('s-quiz');
+    if (quizScreen) quizScreen.prepend(bar);
+  }
+  bar.style.display = '';
+  // 小地图允许任意跳转：重绘小地图（导航限制在 dot.onclick 判断 examReviewMode）
+  updateGridDot();
+}
+
+/** 显示交卷确认弹窗（有未答题目时） */
+function showExamSubmitConfirm(unanswered, total) {
+  const answered = total - unanswered;
+  // 复用现有的 group-transition-modal 样式或用 confirm
+  const ok = confirm(
+    `还有 ${unanswered} 道题目未作答（共 ${total} 题，已答 ${answered} 题）。
+
+` +
+    `确定现在交卷吗？未答题目将记为空白。
+
+` +
+    `点「取消」继续作答，点「确定」立即交卷。`
+  );
+  if (ok) submitExam();
+}
 function showReview() {
   showScreen('s-review');
   // 更新标签页数量角标

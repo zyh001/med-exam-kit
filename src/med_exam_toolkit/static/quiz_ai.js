@@ -730,6 +730,7 @@ function sendAIMessage(key) {
   let hasReasoning = false;
   let thinkingCollapsed = false;
   let aborted = false;
+  let truncated = false; // true when server signals finish_reason=length
   let contentRenderer = null; // streaming renderer for content
   let reasoningRenderer = null; // streaming renderer for thinking
   let fullRawText = ''; // raw text for history saving
@@ -765,6 +766,7 @@ function sendAIMessage(key) {
               if (data === '[DONE]') break;
               try {
                 const obj = JSON.parse(data);
+                if (obj.truncated) truncated = true;
                 if (obj.content) { if (!contentRenderer) contentRenderer = makeStreamingRenderer(contentWrap, null, messages); contentRenderer.push(obj.content); fullRawText += obj.content; }
                 if (obj.reasoning) { if (!reasoningRenderer) reasoningRenderer = makeStreamingRenderer(thinkingBody, null, messages); reasoningRenderer.push(obj.reasoning); fullReasoning += obj.reasoning; }
               } catch(e) {}
@@ -807,6 +809,9 @@ function sendAIMessage(key) {
               fullReasoning += obj.reasoning;
               scrollMessages(messages);
             }
+
+            // truncated 标志：服务端在 [DONE] 前发送 {"truncated":true}
+            if (obj.truncated) truncated = true;
 
             // Handle main content — stream it paragraph by paragraph
             if (obj.content) {
@@ -878,6 +883,22 @@ function sendAIMessage(key) {
       sendBtn.classList.remove('ai-sending');
       sendBtn.innerHTML = sendBtn.dataset.origHTML || _AI_SEND_ICON;
       // 不自动 focus，避免移动端弹出输入法
+
+      // 输出被截断：在消息末尾插入提示 + 「继续输出」按钮
+      if (truncated) {
+        const contWrap = document.createElement('div');
+        contWrap.className = 'ai-truncated-notice';
+        contWrap.innerHTML =
+          '<span class="ai-truncated-label">⚠ 已达输出长度限制</span>' +
+          '<button class="ai-continue-btn">继续输出 →</button>';
+        contWrap.querySelector('.ai-continue-btn').addEventListener('click', () => {
+          contWrap.remove();            // 移除提示条
+          // 将「继续」填入输入框并发送，消耗一次对话次数
+          input.value = '请继续上面未完成的输出，从断点处接续，不要重复已有内容';
+          sendAIMessage(key);
+        });
+        msgEl.appendChild(contWrap);
+      }
     }
     scrollMessages(messages);
   }
