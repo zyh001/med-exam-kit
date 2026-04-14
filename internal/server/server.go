@@ -351,9 +351,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	// /api/debug 只需访问码，无需 Session Token（调试用，不含敏感操作）
 	// /api/img/proxy 由 <img> 标签直接请求，无法携带自定义 Header，豁免 Token 校验
+	// /api/img/local/ 同理：编辑器/做题页面用 <img> 加载私有 S3 图片，无法携带 Header；
+	//   安全保障来自第一层 Cookie 访问码验证 + UUID 随机文件名（不可猜测）
 	if strings.HasPrefix(r.URL.Path, "/api/") &&
 		r.URL.Path != "/api/debug" &&
-		r.URL.Path != "/api/img/proxy" {
+		r.URL.Path != "/api/img/proxy" &&
+		!strings.HasPrefix(r.URL.Path, "/api/img/local/") {
 		tok := r.Header.Get("X-Session-Token")
 		// WebSocket 无法设置自定义 Header，从 query param 获取 token
 		if tok == "" {
