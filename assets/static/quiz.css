@@ -2545,3 +2545,15 @@ button,a,[role=button],label{touch-action:manipulation}
   0%,100%{transform:translateY(0)}
   50%{transform:translateY(5px)}
 }
+
+/* ── 考试回看模式提示条 ──────────────────────────────────────────── */
+.exam-review-bar{
+  position:sticky;top:0;z-index:500;
+  background:linear-gradient(90deg,#4f46e5,#7c3aed);
+  color:#fff;font-size:13px;font-weight:500;
+  padding:8px 16px;
+  display:flex;align-items:center;justify-content:center;gap:10px;
+  box-shadow:0 2px 8px rgba(79,70,229,.35);
+  animation:slideDown .2s ease;
+}
+@keyframes slideDown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
