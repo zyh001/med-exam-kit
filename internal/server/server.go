@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -1861,14 +1862,15 @@ func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Total    int     `json:"total"`
-		Correct  int     `json:"correct"`
-		Wrong    int     `json:"wrong"`
-		Skip     int     `json:"skip"`
-		TimeSec  int     `json:"time_sec"`
-		Score    float64 `json:"score"`
-		MaxScore float64 `json:"max_score"`
-		ByUnit   []struct {
+		Total      int     `json:"total"`
+		Correct    int     `json:"correct"`
+		Wrong      int     `json:"wrong"`
+		Skip       int     `json:"skip"`
+		TimeSec    int     `json:"time_sec"`
+		Score      float64 `json:"score"`
+		MaxScore   float64 `json:"max_score"`
+		TotalUnits int     `json:"total_units"` // 实际章节总数（前端可能只传最差15个）
+		ByUnit     []struct {
 			Unit    string `json:"unit"`
 			Correct int    `json:"correct"`
 			Total   int    `json:"total"`
@@ -1891,8 +1893,12 @@ func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
 		pct = body.Correct * 100 / body.Total
 	}
 
-	// 构造章节分析摘要
-	unitSummary := ""
+	// 构造章节分析摘要（前端已按正确率升序排列，只传最差 15 个）
+	unitNote := ""
+	if body.TotalUnits > len(body.ByUnit) {
+		unitNote = fmt.Sprintf("（仅显示正确率最低的 %d 个章节，共 %d 个章节）", len(body.ByUnit), body.TotalUnits)
+	}
+	unitSummary := unitNote + "\n"
 	for _, u := range body.ByUnit {
 		rate := 0
 		if u.Total > 0 {
@@ -2026,6 +2032,30 @@ func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+}
+
+// sortModeOrder 按医学考试标准题型顺序对 modeOrder 原地排序：
+// A1 → A2 → A3/A4 → B → 案例分析 → 其他
+func sortModeOrder(modes []string) {
+	rank := func(m string) int {
+		mu := strings.ToUpper(m)
+		switch {
+		case strings.HasPrefix(mu, "A1"):  return 1
+		case strings.HasPrefix(mu, "A2"):  return 2
+		case strings.HasPrefix(mu, "A3"):  return 3
+		case strings.HasPrefix(mu, "A4"):  return 3
+		case strings.HasPrefix(mu, "B"):   return 4
+		case strings.Contains(mu, "案例"): return 5
+		case strings.Contains(mu, "X型"):  return 6
+		case strings.Contains(mu, "不定项"): return 6
+		default:                           return 7
+		}
+	}
+	sort.SliceStable(modes, func(i, j int) bool {
+		ri, rj := rank(modes[i]), rank(modes[j])
+		if ri != rj { return ri < rj }
+		return modes[i] < modes[j]
+	})
 }
 
 // truncateStr 截断字符串到指定字符数
@@ -2256,6 +2286,9 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 		}
 		modeMap[mk] = append(modeMap[mk], grp)
 	}
+
+	// 按医学考试标准题型顺序排列：A1 → A2 → A3/A4 → B → 案例分析 → 其他
+	sortModeOrder(modeOrder)
 
 	var resultGroups []group
 	switch {
