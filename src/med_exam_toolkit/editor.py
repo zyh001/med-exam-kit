@@ -30,6 +30,12 @@ _access_code:   str         = ""
 _cookie_secret: str         = ""
 _pin_enabled:   bool        = True   # False 时跳过验证（--no-pin）
 
+# ── S3 图片存储（可选）──
+_s3_endpoint:   str = ""
+_s3_bucket:     str = ""
+_s3_access_key: str = ""
+_s3_secret_key: str = ""
+
 # ── 写操作锁：多线程并发时保护 _questions 的结构完整性 ──
 # 使用 RLock（可重入锁），允许同一线程在持有锁时再次加锁（防死锁）。
 # 所有会修改 _questions 的 endpoint 都必须持有此锁。
@@ -128,7 +134,9 @@ def _guard():
         return jsonify({"error": "Unauthorized", "auth": False}), 401
 
     # ── 3. API 路由：校验 Session Token ───────────────────────────
-    if request.path.startswith("/api/"):
+    # /api/img/local/ 由 <img> 标签直接请求，无法携带自定义 Header，豁免 Token 校验
+    # 安全保障来自第 2 步的 Cookie 访问码验证 + UUID 随机文件名
+    if request.path.startswith("/api/") and not request.path.startswith("/api/img/local/"):
         token = request.headers.get("X-Session-Token", "")
         if not secrets.compare_digest(token, _session_token):
             return jsonify({"error": "Unauthorized"}), 401
@@ -206,6 +214,7 @@ def api_info():
         "units":     sorted(unit_cnt.keys()),
         "mode_counts":  dict(mode_cnt),
         "unit_counts":  dict(unit_cnt),
+        "s3_enabled": bool(_s3_endpoint and _s3_bucket and _s3_access_key),
     })
 
 
@@ -501,6 +510,123 @@ def api_save():
             return jsonify({"error": str(e)}), 500
 
 
+# ── S3 图片上传（仅编辑器使用）──────────────────────────────────────
+
+@app.post("/api/img/upload")
+def api_img_upload():
+    """接收图片，上传到私有 S3，返回本站访问 URL。"""
+    if not (_s3_endpoint and _s3_bucket and _s3_access_key):
+        return jsonify({"error": "S3 未配置"}), 503
+
+    if "file" not in request.files:
+        return jsonify({"error": "缺少 file 字段"}), 400
+
+    f = request.files["file"]
+    ct = f.content_type or "image/jpeg"
+    if not ct.startswith("image/"):
+        return jsonify({"error": "只允许上传图片文件"}), 400
+
+    data = f.read(10 * 1024 * 1024 + 1)
+    if len(data) > 10 * 1024 * 1024:
+        return jsonify({"error": "文件不能超过 10 MB"}), 400
+
+    import uuid as _uuid
+    ext_map = {"image/png": ".png", "image/gif": ".gif",
+               "image/webp": ".webp", "image/svg+xml": ".svg"}
+    ext = ext_map.get(ct, ".jpg")
+    orig_ext = Path(f.filename).suffix.lower() if f.filename else ""
+    if orig_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"):
+        ext = orig_ext
+
+    filename = str(_uuid.uuid4()) + ext
+    key = "images/uploads/" + filename
+
+    try:
+        _editor_s3_put(_s3_endpoint, _s3_bucket, key, _s3_access_key, _s3_secret_key, ct, data)
+    except Exception as e:
+        return jsonify({"error": f"上传 S3 失败：{e}"}), 502
+
+    return jsonify({"url": f"/api/img/local/{filename}", "filename": filename, "size": len(data)})
+
+
+@app.get("/api/img/local/<filename>")
+def api_img_local(filename: str):
+    """从私有 S3 取图并回传（受 Cookie 访问码保护 + UUID 文件名不可猜测）。"""
+    if not (_s3_endpoint and _s3_bucket and _s3_access_key):
+        return "S3 未配置", 503
+
+    import re, urllib.error
+    if not re.match(r'^[a-zA-Z0-9\-_.]{10,100}$', filename):
+        return "invalid filename", 400
+    ext = Path(filename).suffix.lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"):
+        return "invalid file type", 400
+
+    key = "images/uploads/" + filename
+    try:
+        body, ct = _editor_s3_get(_s3_endpoint, _s3_bucket, key, _s3_access_key, _s3_secret_key)
+    except urllib.error.HTTPError as e:
+        return ("图片不存在", 404) if e.code == 404 else (f"获取图片失败：{e}", 502)
+    except Exception as e:
+        return f"获取图片失败：{e}", 502
+
+    from flask import Response
+    resp = Response(body, content_type=ct)
+    resp.headers["Cache-Control"] = "private, max-age=3600"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
+
+
+def _editor_s3_put(endpoint, bucket, key, ak, sk, content_type, data):
+    """AWS Signature V4 PUT，兼容 MinIO / RustFS。"""
+    import hashlib, hmac as _hmac, datetime as _dt, urllib.request
+    from urllib.parse import urlparse
+    now  = _dt.datetime.utcnow()
+    date = now.strftime("%Y%m%d")
+    ts   = now.strftime("%Y%m%dT%H%M%SZ")
+    host = urlparse(endpoint).netloc
+    ph   = hashlib.sha256(data).hexdigest()
+    url  = endpoint.rstrip("/") + f"/{bucket}/{key}"
+    sh   = "content-type;host;x-amz-content-sha256;x-amz-date"
+    ch   = f"content-type:{content_type}\nhost:{host}\nx-amz-content-sha256:{ph}\nx-amz-date:{ts}\n"
+    cr   = "\n".join(["PUT", f"/{bucket}/{key}", "", ch, sh, ph])
+    scope = f"{date}/us-east-1/s3/aws4_request"
+    sts  = "AWS4-HMAC-SHA256\n" + ts + "\n" + scope + "\n" + hashlib.sha256(cr.encode()).hexdigest()
+    def h256(k, d): return _hmac.new(k if isinstance(k, bytes) else k.encode(), d.encode(), hashlib.sha256).digest()
+    sig  = _hmac.new(h256(h256(h256(h256(f"AWS4{sk}", date), "us-east-1"), "s3"), "aws4_request"), sts.encode(), hashlib.sha256).hexdigest()
+    auth = f"AWS4-HMAC-SHA256 Credential={ak}/{scope},SignedHeaders={sh},Signature={sig}"
+    req  = urllib.request.Request(url, data=data, method="PUT",
+           headers={"Content-Type": content_type, "x-amz-date": ts,
+                    "x-amz-content-sha256": ph, "Authorization": auth})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status >= 300:
+            raise RuntimeError(f"S3 PUT {resp.status}")
+
+
+def _editor_s3_get(endpoint, bucket, key, ak, sk):
+    """AWS Signature V4 GET，返回 (bytes, content_type)。"""
+    import hashlib, hmac as _hmac, datetime as _dt, urllib.request
+    from urllib.parse import urlparse
+    now  = _dt.datetime.utcnow()
+    date = now.strftime("%Y%m%d")
+    ts   = now.strftime("%Y%m%dT%H%M%SZ")
+    host = urlparse(endpoint).netloc
+    ph   = hashlib.sha256(b"").hexdigest()
+    url  = endpoint.rstrip("/") + f"/{bucket}/{key}"
+    sh   = "host;x-amz-content-sha256;x-amz-date"
+    ch   = f"host:{host}\nx-amz-content-sha256:{ph}\nx-amz-date:{ts}\n"
+    cr   = "\n".join(["GET", f"/{bucket}/{key}", "", ch, sh, ph])
+    scope = f"{date}/us-east-1/s3/aws4_request"
+    sts  = "AWS4-HMAC-SHA256\n" + ts + "\n" + scope + "\n" + hashlib.sha256(cr.encode()).hexdigest()
+    def h256(k, d): return _hmac.new(k if isinstance(k, bytes) else k.encode(), d.encode(), hashlib.sha256).digest()
+    sig  = _hmac.new(h256(h256(h256(h256(f"AWS4{sk}", date), "us-east-1"), "s3"), "aws4_request"), sts.encode(), hashlib.sha256).hexdigest()
+    auth = f"AWS4-HMAC-SHA256 Credential={ak}/{scope},SignedHeaders={sh},Signature={sig}"
+    req  = urllib.request.Request(url, method="GET",
+           headers={"x-amz-date": ts, "x-amz-content-sha256": ph, "Authorization": auth})
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        return resp.read(), resp.headers.get("Content-Type", "image/jpeg")
+
+
 @app.post("/api/shutdown")
 def api_shutdown():
     import os, signal
@@ -548,18 +674,25 @@ def auth():
 
 def start_editor(bank_path: str, port: int = 5173, host: str = "127.0.0.1",
                  no_browser: bool = False, password: str | None = None,
-                 no_pin: bool = False) -> None:
+                 no_pin: bool = False,
+                 s3_endpoint: str = "", s3_bucket: str = "",
+                 s3_access_key: str = "", s3_secret_key: str = "") -> None:
     from med_exam_toolkit.bank import load_bank
     from med_exam_toolkit.auth import generate_access_code
 
     global _questions, _bank_path, _password, _session_token, _asset_ver, \
-           _server_port, _server_host, _access_code, _cookie_secret, _pin_enabled
+           _server_port, _server_host, _access_code, _cookie_secret, _pin_enabled, \
+           _s3_endpoint, _s3_bucket, _s3_access_key, _s3_secret_key
     _bank_path     = Path(bank_path).resolve()
     _password      = password
     _server_port   = port
     _server_host   = host
     _session_token = secrets.token_hex(32)
     _asset_ver     = secrets.token_hex(8)
+    _s3_endpoint   = s3_endpoint
+    _s3_bucket     = s3_bucket
+    _s3_access_key = s3_access_key
+    _s3_secret_key = s3_secret_key
 
     _pin_enabled = not no_pin
 

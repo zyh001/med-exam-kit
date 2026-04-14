@@ -620,16 +620,26 @@ def inspect(bank, password, filter_modes, filter_units, keyword,
 @click.option("--host", default="127.0.0.1", help="监听地址（默认 127.0.0.1）")
 @click.option("--no-browser", is_flag=True, default=False, help="不自动打开浏览器")
 @click.option("--no-pin", is_flag=True, default=False, help="禁用访问码验证（仅限受信任的本地网络）")
-def edit(bank, password, port, host, no_browser, no_pin):
+@click.pass_context
+def edit(ctx, bank, password, port, host, no_browser, no_pin):
     """在浏览器中编辑题库（本地 Web 编辑器）
 
     \b
     启动后在浏览器访问 http://127.0.0.1:5173
-    支持：修改答案/解析、批量替换文本、删除题目
+    支持：修改答案/解析、批量替换文本、删除题目、上传图片（需配置 S3）
     按 Ctrl+C 退出，Ctrl+S 快速保存
     """
+    # 从 config.yaml 读取 S3 配置
+    cfg = (ctx.obj or {}).get("config", {})
+    s3_endpoint   = cfg.get("s3_endpoint",   "") or ""
+    s3_bucket     = cfg.get("s3_bucket",     "") or ""
+    s3_access_key = cfg.get("s3_access_key", "") or ""
+    s3_secret_key = cfg.get("s3_secret_key", "") or ""
+
     from med_exam_toolkit.editor import start_editor
-    start_editor(bank, port=port, host=host, no_browser=no_browser, password=password, no_pin=no_pin)
+    start_editor(bank, port=port, host=host, no_browser=no_browser, password=password,
+                 no_pin=no_pin, s3_endpoint=s3_endpoint, s3_bucket=s3_bucket,
+                 s3_access_key=s3_access_key, s3_secret_key=s3_secret_key)
 
 @cli.command()
 @click.option("--bank", "-b", "banks", multiple=True, type=click.Path(exists=True),
