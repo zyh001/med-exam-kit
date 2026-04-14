@@ -278,7 +278,8 @@ func (s *Server) Close() {
 	}
 }
 
-// runUserCleanup removes stale user data (>7 days inactive) from all SQLite banks.
+// runUserCleanup removes stale user data (>7 days inactive) from all SQLite banks,
+// and purges idle IP entries from the rate-limit map.
 func (s *Server) runUserCleanup() {
 	for i, b := range s.cfg.Banks {
 		if b.DB == nil {
@@ -289,6 +290,22 @@ func (s *Server) runUserCleanup() {
 			log.Printf("[cleanup] bank=%d: removed %d stale users (%d rows)", i, users, rows)
 		}
 	}
+	// 清理 rateBuckets：删除窗口期内无任何请求的 IP 条目，防止长期运行内存无限增长
+	s.rateMu.Lock()
+	cutoff := time.Now().Add(-rateWindow)
+	for ip, bucket := range s.rateBuckets {
+		hasRecent := false
+		for _, t := range bucket {
+			if t.After(cutoff) {
+				hasRecent = true
+				break
+			}
+		}
+		if !hasRecent {
+			delete(s.rateBuckets, ip)
+		}
+	}
+	s.rateMu.Unlock()
 }
 
 func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -2860,7 +2877,8 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", cl)
 	}
 
-	if _, err := io.Copy(w, resp.Body); err != nil {
+	// 限制代理响应体 20 MB，防止恶意上游打满内存/带宽
+	if _, err := io.Copy(w, io.LimitReader(resp.Body, 20<<20)); err != nil {
 		log.Printf("[img-proxy] copy error for %s: %v", rawURL, err)
 	}
 }
