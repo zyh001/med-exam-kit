@@ -109,6 +109,25 @@
       });
     };
 
+    // iOS Safari 不支持 beforeinstallprompt，需要手动引导
+    (function() {
+      var isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+      var isSafari = /safari/i.test(navigator.userAgent) && !/chrome|crios|fxios|opios/i.test(navigator.userAgent);
+      var isStandalone = navigator.standalone === true ||
+                         window.matchMedia('(display-mode: standalone)').matches;
+      if (!isIOS || !isSafari || isStandalone) return;
+      // 每次会话只提示一次（用 sessionStorage 避免每次刷新都弹）
+      if (sessionStorage.getItem('ios-pwa-shown')) return;
+      // 延迟 3 秒再弹，避免页面刚加载就干扰用户
+      setTimeout(function() {
+        var guide = document.getElementById('ios-pwa-guide');
+        if (guide) {
+          guide.style.display = 'flex';
+          sessionStorage.setItem('ios-pwa-shown', '1');
+        }
+      }, 3000);
+    })();
+
     // ── Web Push 每日复习提醒 ──────────────────────────────────────────
     (function() {
       if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
@@ -194,9 +213,12 @@
 <body>
 <!-- SW 更新横幅：新版本就绪时显示，用户点击才切换，避免新旧文件混用 -->
 <div id="sw-update-bar" style="display:none;position:fixed;top:0;left:0;right:0;
-  background:#4f46e5;color:#fff;padding:10px 16px;z-index:99999;
+  background:#4f46e5;color:#fff;
+  padding-top:max(10px, env(safe-area-inset-top));
+  padding-bottom:10px;padding-left:16px;padding-right:16px;
+  z-index:99999;
   font-size:14px;align-items:center;justify-content:center;gap:10px;
-  box-shadow:0 2px 8px rgba(0,0,0,.25)">
+  box-shadow:0 2px 8px rgba(0,0,0,.25)">&zwnj;
   📦 新版本已就绪
   <button onclick="_swActivateUpdate()" style="background:#fff;color:#4f46e5;
     border:none;border-radius:6px;padding:4px 14px;cursor:pointer;
@@ -879,6 +901,22 @@
   </div>
 
   <div id="toast"></div>
+
+  <!-- iOS Safari PWA 安装引导（底部弹层） -->
+  <div id="ios-pwa-guide" style="display:none">
+    <div id="ios-pwa-guide-box">
+      <button id="ios-pwa-close" onclick="document.getElementById('ios-pwa-guide').style.display='none'" aria-label="关闭">✕</button>
+      <div id="ios-pwa-title">📲 添加到主屏幕</div>
+      <div id="ios-pwa-desc">
+        点击底部工具栏的
+        <span id="ios-pwa-share-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/></svg>
+        </span>
+        <strong>分享</strong>按钮，然后选择<strong>「添加到主屏幕」</strong>，即可像 App 一样使用。
+      </div>
+      <div id="ios-pwa-arrow">▼</div>
+    </div>
+  </div>
 
   <script src="/static/quiz_sync.js"></script>
   <script src="/static/quiz.js"></script>
