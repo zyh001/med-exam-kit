@@ -1268,7 +1268,7 @@ def _s3_get(endpoint: str, bucket: str, key: str,
     req  = urllib.request.Request(url, headers=hdrs, method="GET")
     with urllib.request.urlopen(req, timeout=20) as resp:
         ct   = resp.headers.get("Content-Type", "image/jpeg")
-        body = resp.read()
+        body = resp.read(20 * 1024 * 1024)  # 限制 20 MB
     return body, ct
 
 

@@ -625,6 +625,10 @@ function restoreMessages(key) {
 }
 
 function clearAICache() {
+  // 切题时 abort 所有正在进行的 AI 请求
+  for (const state of aiPanels.values()) {
+    if (state.abortController) { state.abortController.abort(); state.abortController = null; }
+  }
   aiPanels.clear();
 }
 
@@ -635,6 +639,8 @@ function toggleAIPanel(key) {
   const isOpen = panel.style.display !== 'none';
   if (isOpen) {
     panel.style.display = 'none';
+    // 关闭面板时取消正在进行的 SSE 请求，避免后台继续消耗连接
+    if (state.abortController) { state.abortController.abort(); state.abortController = null; }
     return;
   }
   loadAIAssets().then(() => {
@@ -823,6 +829,8 @@ function sendAIMessage(key) {
     }
     return read();
   }).catch(err => {
+    // AbortError 是用户主动取消（关闭面板），不算错误
+    if (err && err.name === 'AbortError') { aborted = true; return; }
     if (!aborted) {
       if (!fullRawText && !fullReasoning) {
         contentWrap.textContent = '[请求失败] ' + (err.message || '网络错误');
