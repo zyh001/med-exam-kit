@@ -1651,72 +1651,91 @@ def api_ai_report():
     time_sec = int(data.get("time_sec", 0))
     score    = float(data.get("score", 0))
     max_score = float(data.get("max_score", 0))
-    by_unit     = data.get("by_unit", [])
-    wrong_items = data.get("wrong_items", [])
-    total_units = int(data.get("total_units", len(by_unit)))
+    by_unit     = data.get("by_unit", [])      # 全部章节，按正确率升序
+    by_mode     = data.get("by_mode", [])      # 全部题型统计
+    wrong_stat  = data.get("wrong_stat", [])   # 全部错题（无题干）
+    wrong_sample = data.get("wrong_sample", []) # 前20条带题干
 
     pct = (correct * 100 // total) if total > 0 else 0
 
-    # 章节分析摘要（前端只传最差15个）
-    unit_note = f"（仅显示正确率最低的 {len(by_unit)} 个章节，共 {total_units} 个章节）\n" if total_units > len(by_unit) else ""
-    unit_summary = unit_note
+    # 章节统计（全量）
+    unit_summary = f"共 {len(by_unit)} 个章节，按正确率由低到高：\n"
     for u in by_unit:
         rate = (u.get("correct", 0) * 100 // u.get("total", 1)) if u.get("total", 0) > 0 else 0
-        unit_summary += f"  - {u.get('unit','?')}：{u.get('correct',0)}/{u.get('total',0)} 题正确（正确率 {rate}%）\n"
+        unit_summary += f"  - {u.get('unit','?')}：{u.get('correct',0)}/{u.get('total',0)} 正确（{rate}%）\n"
     if not unit_summary:
         unit_summary = "  （无章节数据）\n"
 
-    # 错题明细
-    wrong_summary = ""
-    for i, w in enumerate(wrong_items[:30]):
-        wrong_summary += (
+    # 题型统计（全量）
+    mode_summary = ""
+    for m in by_mode:
+        rate = (m.get("correct", 0) * 100 // m.get("total", 1)) if m.get("total", 0) > 0 else 0
+        mode_summary += f"  - {m.get('mode','?')}：{m.get('correct',0)}/{m.get('total',0)} 正确（{rate}%）\n"
+    if not mode_summary:
+        mode_summary = "  （无题型数据）\n"
+
+    # 错误规律：统计高频错误模式
+    from collections import Counter
+    freq = Counter(
+        (w.get("unit",""), w.get("mode",""), w.get("answer",""), w.get("user_ans",""))
+        for w in wrong_stat
+    )
+    error_pattern = f"共 {len(wrong_stat)} 道错题，高频错误：\n"
+    for (unit, mode, ans, user_ans), cnt in freq.most_common(20):
+        freq_str = f"×{cnt}" if cnt > 1 else ""
+        error_pattern += f"  - [{unit}/{mode}] 正确:{ans} 选了:{user_ans} {freq_str}\n"
+
+    # 带题干的样本（前20条）
+    wrong_sample_str = ""
+    for i, w in enumerate(wrong_sample[:20]):
+        wrong_sample_str += (
             f"  {i+1}. [{w.get('unit','?')}/{w.get('mode','?')}] "
-            f"{w.get('text','')[:60]}（正确答案：{w.get('answer','?')}，"
-            f"你的答案：{w.get('user_ans','?')}）\n"
+            f"{w.get('text','')[:50]} → 正确:{w.get('answer','?')} 选了:{w.get('user_ans','?')}\n"
         )
-    if len(wrong_items) > 30:
-        wrong_summary += f"  ...（另有 {len(wrong_items)-30} 道错题未列出）\n"
-    if not wrong_summary:
-        wrong_summary = "  （全部答对！）\n"
+    if not wrong_sample_str:
+        wrong_sample_str = "  （全部答对！）\n"
 
     mins, secs = divmod(time_sec, 60)
     hours, mins = divmod(mins, 60)
     time_str = f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins}:{secs:02d}"
     score_str = f"得分：{score:.1f} / {max_score:.1f} 分\n" if max_score > 0 else ""
 
-    prompt = f"""你是一位经验丰富的医学考试辅导老师。学生刚完成了一次模拟考试，请根据以下成绩数据，为他生成一份详细的考试分析报告。
+    prompt = f"""你是一位经验丰富的医学考试辅导老师。以下是学生一次模拟考试的完整数据，请据此生成详细的考试分析报告。
 
 ## 考试概况
-总题数：{total} 题
-答对：{correct} 题（正确率 {pct}%）
-答错：{wrong} 题
-未答：{skip} 题
-用时：{time_str}
+总题数：{total} 题 | 答对：{correct} 题（正确率 {pct}%）| 答错：{wrong} 题 | 未答：{skip} 题 | 用时：{time_str}
 {score_str}
-## 章节正确率分布
+## 各章节正确率（全量，按正确率由低到高）
 {unit_summary}
-## 答错题目明细
-{wrong_summary}
-## 请完成以下分析报告
+## 各题型正确率
+{mode_summary}
+## 错误规律分析数据
+{error_pattern}
+## 代表性错题样本（前 {len(wrong_sample)} 条，含题干）
+{wrong_sample_str}
+## 分析报告要求
 
-请按以下结构输出（使用 Markdown 格式）：
+请用 Markdown 格式输出，结构如下：
 
 ### 📊 总体评价
-[对整体表现做简短评价，指出优势和不足]
+对整体表现做简明评价，结合正确率和用时给出定性判断。
 
 ### 🔍 薄弱章节分析
-[列出正确率低于 60% 的章节，分析可能的知识薄弱点]
+针对正确率低于 60% 的章节，逐章分析可能的知识薄弱点，结合错题规律数据指出是概念性错误还是临床应用不熟。
 
-### ❌ 错题规律分析
-[归纳答错题目的规律：是概念混淆、题型不熟、还是某类知识点集中薄弱]
+### 🔄 题型表现分析
+分析各题型的正确率差异，若某题型明显偏低，分析原因。
+
+### ❌ 高频错误模式
+基于错误规律数据，归纳重复出现的「错误替换模式」，推断可能的知识混淆点。
 
 ### 📚 针对性复习建议
-[给出 3-5 条具体的复习建议，按优先级排列]
+按优先级给出 3-5 条可执行的复习建议，每条要具体到章节或知识点。
 
 ### 💪 下一步学习计划
-[建议接下来 1-2 周的具体学习安排]
+建议接下来 1-2 周的具体学习安排。
 
-请用鼓励且专业的语气，分析要具体，避免泛泛而谈。"""
+请用鼓励且专业的语气，分析必须结合以上具体数据，不要泛泛而谈。"""
 
     from med_exam_toolkit.ai.client import chat_completion_stream
     messages = [{"role": "user", "content": prompt}]
