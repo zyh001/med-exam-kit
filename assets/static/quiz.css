@@ -2324,6 +2324,22 @@ button,a,[role=button],label{touch-action:manipulation}
   text-align:center;font-size:12px;color:var(--muted);
   padding:6px 0;margin-top:4px;
 }
+/* 输出长度限制提示条 */
+.ai-truncated-notice{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+  margin:10px 0 4px;padding:8px 12px;
+  background:rgba(245,158,11,.1);border:1px solid rgba(245,158,11,.3);
+  border-radius:8px;font-size:12px;
+}
+.ai-truncated-label{color:#d97706;flex:1;min-width:0}
+.ai-continue-btn{
+  flex-shrink:0;
+  background:var(--accent);color:#fff;border:none;
+  border-radius:6px;padding:4px 12px;font-size:12px;
+  cursor:pointer;font-weight:600;transition:filter .15s;
+  white-space:nowrap;
+}
+.ai-continue-btn:hover{filter:brightness(1.12)}
 
 /* ── Mermaid 流程图 ── */
 .ai-mermaid-wrap {

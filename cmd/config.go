@@ -37,6 +37,10 @@ type AppConfig struct {
 	S3AccessKey  string `yaml:"s3_access_key"`
 	S3SecretKey  string `yaml:"s3_secret_key"`
 	S3PublicBase string `yaml:"s3_public_base"`
+	// 数据保留
+	CleanupDays int `yaml:"cleanup_days"` // 不活跃用户数据保留天数，0=使用默认值7
+	// AI 输出控制
+	AIMaxTokens int `yaml:"ai_max_tokens"` // AI 单次回复最大 token 数，0=使用默认值2048
 }
 
 // defaultConfig returns a zero-value config with sensible defaults.
@@ -155,6 +159,14 @@ func loadConfig(path string) (AppConfig, error) {
 			cfg.S3SecretKey = val
 		case "s3_public_base":
 			cfg.S3PublicBase = val
+		case "cleanup_days":
+			if v, err := strconv.Atoi(val); err == nil && v > 0 {
+				cfg.CleanupDays = v
+			}
+		case "ai_max_tokens":
+			if v, err := strconv.Atoi(val); err == nil && v > 0 {
+				cfg.AIMaxTokens = v
+			}
 		case "banks":
 			// inline single value: banks: exam.mqb
 			bankList = append(bankList, val)

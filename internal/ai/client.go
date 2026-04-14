@@ -291,6 +291,7 @@ type StreamChunk struct {
 	Content          string
 	ReasoningContent string
 	Done             bool
+	Truncated        bool  // true when finish_reason=length (output cut off by max_tokens)
 	Err              error
 }
 
@@ -405,6 +406,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []ChatMessag
 						Content          string `json:"content"`
 						ReasoningContent string `json:"reasoning_content"`
 					} `json:"delta"`
+					FinishReason string `json:"finish_reason"`
 				} `json:"choices"`
 			}
 			if err := json.Unmarshal([]byte(data), &sse); err != nil {
@@ -419,6 +421,11 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []ChatMessag
 						ch <- StreamChunk{Done: true}
 						return
 					}
+				}
+				// finish_reason=length 说明被 max_tokens 截断
+				if sse.Choices[0].FinishReason == "length" {
+					ch <- StreamChunk{Done: true, Truncated: true}
+					return
 				}
 			}
 		}

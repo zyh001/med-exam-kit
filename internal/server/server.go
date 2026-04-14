@@ -95,6 +95,7 @@ type Config struct {
 	AIAPIKey        string
 	AIBaseURL       string
 	AIEnableThinking *bool
+	AIMaxTokens     int    // 0 = 使用默认值 2048
 
 	// ASR (语音识别)
 	ASRAPIKey  string
@@ -107,6 +108,9 @@ type Config struct {
 	S3AccessKey  string
 	S3SecretKey  string
 	S3PublicBase string
+
+	// 数据保留策略
+	CleanupDays int // 不活跃用户数据保留天数，0 = 使用默认值 7
 
 	// Legacy single-bank fields kept for editor command compatibility.
 	// When Banks is set, these are ignored.
@@ -278,16 +282,20 @@ func (s *Server) Close() {
 	}
 }
 
-// runUserCleanup removes stale user data (>7 days inactive) from all SQLite banks,
+// runUserCleanup removes stale user data from all SQLite banks,
 // and purges idle IP entries from the rate-limit map.
 func (s *Server) runUserCleanup() {
+	days := s.cfg.CleanupDays
+	if days <= 0 {
+		days = 7
+	}
 	for i, b := range s.cfg.Banks {
 		if b.DB == nil {
 			continue
 		}
-		users, rows := progress.CleanupStaleUsers(b.DB, 7)
+		users, rows := progress.CleanupStaleUsers(b.DB, days)
 		if users > 0 {
-			log.Printf("[cleanup] bank=%d: removed %d stale users (%d rows)", i, users, rows)
+			log.Printf("[cleanup] bank=%d: removed %d stale users (%d rows) [threshold=%dd]", i, users, rows, days)
 		}
 	}
 	// 清理 rateBuckets：删除窗口期内无任何请求的 IP 条目，防止长期运行内存无限增长
@@ -1781,7 +1789,11 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Start streaming
-	ch, err := s.aiClient.ChatCompletionStream(r.Context(), messages, 0.7, 2048)
+	maxTokens := s.cfg.AIMaxTokens
+	if maxTokens <= 0 {
+		maxTokens = 2048
+	}
+	ch, err := s.aiClient.ChatCompletionStream(r.Context(), messages, 0.7, maxTokens)
 	if err != nil {
 		jsonError(w, fmt.Sprintf("AI 请求失败: %v", err), http.StatusInternalServerError)
 		return
@@ -1821,6 +1833,12 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 			if chunk.Done {
+				if chunk.Truncated {
+					// 通知前端：输出被 max_tokens 截断，可让用户点击"继续"
+					td, _ := json.Marshal(map[string]any{"truncated": true})
+					fmt.Fprintf(w, "data: %s\n\n", td)
+					flusher.Flush()
+				}
 				fmt.Fprintf(w, "data: [DONE]\n\n")
 				flusher.Flush()
 				return
