@@ -1948,11 +1948,27 @@ button,a,[role=button],label{touch-action:manipulation}
   font-size:13px;color:var(--muted);min-height:18px;
   overflow-x:auto;white-space:nowrap;
 }
-.calc-result{
+/* 普通/科学计算器表达式输入框：真实光标，支持键盘输入和点击定位 */
+.calc-result-input{
+  width:100%;box-sizing:border-box;
   font-size:36px;font-weight:700;color:var(--text);
-  line-height:1.2;overflow-x:auto;white-space:nowrap;
-  border-right:2px solid var(--accent);padding-right:2px;
-  animation:calcBlink 1s step-end infinite;
+  line-height:1.2;
+  background:transparent;border:none;outline:none;
+  text-align:right;
+  caret-color:var(--accent);
+  /* 自定义光标宽度 */
+  caret-shape:block;
+  white-space:nowrap;overflow-x:auto;
+  padding:0;margin:0;
+  font-family:inherit;
+}
+.calc-result-input::selection{
+  background:rgba(var(--accent-rgb,99,102,241),.25);
+}
+/* 聚焦时底部细线提示可输入 */
+.calc-result-input:focus{
+  border-bottom:2px solid var(--accent);
+  padding-bottom:0;
 }
 @keyframes calcBlink{0%,100%{border-color:var(--accent)}50%{border-color:transparent}}
 
