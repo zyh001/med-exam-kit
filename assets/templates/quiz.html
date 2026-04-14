@@ -732,7 +732,11 @@
         <div class="calc-history" id="calc-history"></div>
         <div class="calc-current">
           <div class="calc-expr" id="calc-expr"></div>
-          <div class="calc-result" id="calc-result">0</div>
+          <input type="text" id="calc-result" class="calc-result-input"
+            value="0" autocomplete="off" autocorrect="off"
+            autocapitalize="off" spellcheck="false"
+            oninput="_calcSyncFromInput()"
+            onkeydown="_calcInputKeydown(event)">
         </div>
       </div>
       <!-- 简易模式 -->
