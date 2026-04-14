@@ -64,62 +64,324 @@ const S = {
 // 返回当前题库的 query string 参数 (bank=N)
 function bankQS() { return 'bank=' + S.bankID; }
 
-// ── 图片灯箱 ──────────────────────────────────────────────────────
+// ── 图片灯箱（支持滚轮/捏合缩放 · 拖拽平移 · 双击还原）────────────
 (function() {
-  // 插入灯箱 DOM（懒创建，只执行一次）
-  var _lb = null, _lbImg = null;
-  function _initLightbox() {
+  var _lb = null, _lbWrap = null, _lbImg = null;
+
+  // 变换状态
+  var _scale = 1, _minScale = 1, _maxScale = 12;
+  var _panX = 0, _panY = 0;
+
+  // 拖拽状态
+  var _dragging = false, _didMove = false;
+  var _dragX0 = 0, _dragY0 = 0, _panX0 = 0, _panY0 = 0;
+
+  // 双击 / 双指点击状态
+  var _lastTap = 0;
+
+  // 捏合状态
+  var _pinchDist0 = 0, _pinchMidX = 0, _pinchMidY = 0, _pinchPanX0 = 0, _pinchPanY0 = 0, _pinchScale0 = 1;
+  // 单指平移状态
+  var _touchPanX0 = 0, _touchPanY0 = 0, _touchPanPX0 = 0, _touchPanPY0 = 0;
+
+  var _zoomTimer = null;
+
+  // ── 初始化 DOM ────────────────────────────────────────────────────
+  function _init() {
     if (_lb) return;
+
     _lb = document.createElement('div');
     _lb.id = 'img-lightbox';
     _lb.setAttribute('role', 'dialog');
     _lb.setAttribute('aria-modal', 'true');
 
+    // 关闭按钮
     var closeBtn = document.createElement('button');
     closeBtn.id = 'img-lightbox-close';
     closeBtn.setAttribute('aria-label', '关闭');
     closeBtn.innerHTML = '&#x2715;';
-    closeBtn.onclick = function(e) { e.stopPropagation(); _closeLightbox(); };
+    closeBtn.addEventListener('click', function(e) { e.stopPropagation(); _close(); });
+
+    // 缩放工具栏
+    var toolbar = document.createElement('div');
+    toolbar.id = 'lb-toolbar';
+    toolbar.innerHTML =
+      '<button class="lb-tbtn" id="lb-zout" title="缩小 (-)">&#x2212;</button>' +
+      '<span id="lb-zpct">100%</span>' +
+      '<button class="lb-tbtn" id="lb-zin"  title="放大 (+)">&#x2b;</button>' +
+      '<button class="lb-tbtn" id="lb-zrst" title="重置 (0)">⊙</button>';
+    toolbar.addEventListener('click', function(e) { e.stopPropagation(); });
+
+    // 缩放百分比浮动提示
+    var zInd = document.createElement('div');
+    zInd.id = 'lb-zoom-ind';
+
+    // 图片容器（承载 transform）
+    _lbWrap = document.createElement('div');
+    _lbWrap.id = 'lb-wrap';
 
     _lbImg = document.createElement('img');
     _lbImg.alt = '图片预览';
-    _lbImg.onclick = function(e) { e.stopPropagation(); }; // 点图片本身不关闭
+    _lbImg.draggable = false;
+    _lbImg.addEventListener('dragstart', function(e) { e.preventDefault(); });
 
+    _lbWrap.appendChild(_lbImg);
     _lb.appendChild(closeBtn);
-    _lb.appendChild(_lbImg);
-    // 点击背景关闭
-    _lb.onclick = function() { _closeLightbox(); };
+    _lb.appendChild(toolbar);
+    _lb.appendChild(_lbWrap);
+    _lb.appendChild(zInd);
     document.body.appendChild(_lb);
 
-    // ESC 关闭
+    // 工具栏按钮
+    document.getElementById('lb-zin').addEventListener('click',  function() { _zoomStep(1.3); });
+    document.getElementById('lb-zout').addEventListener('click', function() { _zoomStep(1/1.3); });
+    document.getElementById('lb-zrst').addEventListener('click', function() { _resetAnim(); });
+
+    // 鼠标事件
+    _lb.addEventListener('mousedown', _mdDown);
+    window.addEventListener('mousemove', _mdMove);
+    window.addEventListener('mouseup',   _mdUp);
+
+    // 滚轮缩放
+    _lb.addEventListener('wheel', _onWheel, { passive: false });
+
+    // 双击缩放
+    _lb.addEventListener('dblclick', _onDblClick);
+
+    // 触摸事件
+    _lb.addEventListener('touchstart',  _onTouchStart,  { passive: false });
+    _lb.addEventListener('touchmove',   _onTouchMove,   { passive: false });
+    _lb.addEventListener('touchend',    _onTouchEnd);
+    _lb.addEventListener('touchcancel', _onTouchEnd);
+
+    // 键盘
     document.addEventListener('keydown', function(e) {
-      if (e.key === 'Escape' && _lb.classList.contains('open')) _closeLightbox();
+      if (!_lb.classList.contains('open')) return;
+      if (e.key === 'Escape')             { _close(); }
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); _zoomStep(1.3); }
+      if (e.key === '-')                  { e.preventDefault(); _zoomStep(1/1.3); }
+      if (e.key === '0')                  { e.preventDefault(); _resetAnim(); }
+      if (e.key === 'ArrowLeft')  { e.preventDefault(); _movePan( 60,  0); }
+      if (e.key === 'ArrowRight') { e.preventDefault(); _movePan(-60,  0); }
+      if (e.key === 'ArrowUp')    { e.preventDefault(); _movePan(  0, 60); }
+      if (e.key === 'ArrowDown')  { e.preventDefault(); _movePan(  0,-60); }
     });
   }
 
-  function _openLightbox(src) {
-    _initLightbox();
+  // ── 变换应用 ─────────────────────────────────────────────────────
+  function _applyTransform() {
+    _lbWrap.style.transform = 'translate3d(' + _panX + 'px,' + _panY + 'px,0) scale(' + _scale + ')';
+    _lb.style.cursor = _scale > 1.01 ? (_dragging ? 'grabbing' : 'grab') : 'zoom-out';
+    var pct = document.getElementById('lb-zpct');
+    if (pct) pct.textContent = Math.round(_scale * 100) + '%';
+  }
+
+  function _showZoomInd() {
+    var el = document.getElementById('lb-zoom-ind');
+    if (!el) return;
+    el.textContent = Math.round(_scale * 100) + '%';
+    el.classList.add('visible');
+    clearTimeout(_zoomTimer);
+    _zoomTimer = setTimeout(function() { el.classList.remove('visible'); }, 1000);
+  }
+
+  // 限制平移范围（允许图片边缘最多超出 80px）
+  function _clampPan() {
+    if (!_lbImg || !_lb) return;
+    var lw = _lb.clientWidth, lh = _lb.clientHeight;
+    // 图片在 scale=1 时的显示尺寸
+    var iw = _lbImg.naturalWidth  || _lbImg.clientWidth;
+    var ih = _lbImg.naturalHeight || _lbImg.clientHeight;
+    var dw = Math.min(iw, lw * 0.92) * _scale;
+    var dh = Math.min(ih, lh * 0.88) * _scale;
+    var mx = Math.max(0, (dw - lw) / 2 + 80);
+    var my = Math.max(0, (dh - lh) / 2 + 80);
+    _panX = Math.max(-mx, Math.min(mx, _panX));
+    _panY = Math.max(-my, Math.min(my, _panY));
+  }
+
+  // 以视口坐标 (cx,cy) 为中心，缩放 ratio 倍
+  function _zoomAt(cx, cy, ratio) {
+    var rect = _lbWrap.getBoundingClientRect();
+    var wcx = rect.left + rect.width  / 2;
+    var wcy = rect.top  + rect.height / 2;
+    var dx = cx - wcx, dy = cy - wcy;
+    var newScale = Math.max(_minScale * 0.95, Math.min(_maxScale, _scale * ratio));
+    var r = newScale / _scale;
+    _scale = newScale;
+    _panX = _panX * r + dx * (1 - r);
+    _panY = _panY * r + dy * (1 - r);
+    _clampPan();
+    _applyTransform();
+    _showZoomInd();
+  }
+
+  function _zoomStep(ratio) {
+    var lw = _lb ? _lb.clientWidth  : window.innerWidth;
+    var lh = _lb ? _lb.clientHeight : window.innerHeight;
+    _zoomAt(lw / 2, lh / 2, ratio);
+  }
+
+  function _movePan(dx, dy) {
+    _panX += dx; _panY += dy;
+    _clampPan();
+    _applyTransform();
+  }
+
+  function _resetAnim() {
+    _lbWrap.style.transition = 'transform .22s cubic-bezier(.4,0,.2,1)';
+    _scale = 1; _panX = 0; _panY = 0;
+    _applyTransform();
+    _showZoomInd();
+    setTimeout(function() { if (_lbWrap) _lbWrap.style.transition = ''; }, 240);
+  }
+
+  // ── 鼠标事件 ─────────────────────────────────────────────────────
+  function _mdDown(e) {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    _dragging = true; _didMove = false;
+    _dragX0 = e.clientX; _dragY0 = e.clientY;
+    _panX0 = _panX; _panY0 = _panY;
+    _applyTransform();
+  }
+  function _mdMove(e) {
+    if (!_dragging) return;
+    var dx = e.clientX - _dragX0, dy = e.clientY - _dragY0;
+    if (Math.abs(dx) > 3 || Math.abs(dy) > 3) _didMove = true;
+    _panX = _panX0 + dx; _panY = _panY0 + dy;
+    _clampPan();
+    _applyTransform();
+  }
+  function _mdUp(e) {
+    if (!_dragging) return;
+    _dragging = false;
+    _applyTransform();
+    // 没拖动 + 在背景上 + 未放大 → 关闭
+    if (!_didMove && e.target === _lb && _scale <= 1.01) _close();
+    _didMove = false;
+  }
+
+  // ── 滚轮 ─────────────────────────────────────────────────────────
+  function _onWheel(e) {
+    e.preventDefault();
+    // ctrlKey = 触控板捏合（已经是 pinch delta），普通滚轮取 deltaY
+    var factor = e.ctrlKey ? Math.exp(-e.deltaY / 100) : (e.deltaY > 0 ? 0.85 : 1.18);
+    _zoomAt(e.clientX, e.clientY, factor);
+  }
+
+  // ── 双击 ─────────────────────────────────────────────────────────
+  function _onDblClick(e) {
+    e.preventDefault();
+    if (_scale > 1.1) { _resetAnim(); }
+    else { _zoomAt(e.clientX, e.clientY, 2.5); }
+  }
+
+  // ── 触摸（捏合 + 单指平移 + 双击）──────────────────────────────────
+  function _dist(a, b) {
+    var dx = a.clientX - b.clientX, dy = a.clientY - b.clientY;
+    return Math.sqrt(dx*dx + dy*dy);
+  }
+
+  function _onTouchStart(e) {
+    e.preventDefault();
+    var ts = e.touches;
+    if (ts.length === 2) {
+      // 捏合开始
+      _pinchDist0   = _dist(ts[0], ts[1]);
+      _pinchMidX    = (ts[0].clientX + ts[1].clientX) / 2;
+      _pinchMidY    = (ts[0].clientY + ts[1].clientY) / 2;
+      _pinchScale0  = _scale;
+      _pinchPanX0   = _panX;
+      _pinchPanY0   = _panY;
+    } else if (ts.length === 1) {
+      // 单指：记录起点
+      _touchPanX0  = ts[0].clientX;
+      _touchPanY0  = ts[0].clientY;
+      _touchPanPX0 = _panX;
+      _touchPanPY0 = _panY;
+      // 双击检测
+      var now = Date.now();
+      if (now - _lastTap < 300) {
+        _onDblClick({ preventDefault: function(){}, clientX: ts[0].clientX, clientY: ts[0].clientY });
+      }
+      _lastTap = now;
+    }
+  }
+
+  function _onTouchMove(e) {
+    e.preventDefault();
+    var ts = e.touches;
+    if (ts.length === 2) {
+      // 捏合缩放：同时支持平移（两指中心移动）
+      var curDist = _dist(ts[0], ts[1]);
+      var curMidX = (ts[0].clientX + ts[1].clientX) / 2;
+      var curMidY = (ts[0].clientY + ts[1].clientY) / 2;
+      if (_pinchDist0 > 0) {
+        var ratio = curDist / _pinchDist0;
+        var newScale = Math.max(_minScale * 0.95, Math.min(_maxScale, _pinchScale0 * ratio));
+        // 两指中心移动产生的平移量
+        var midDX = curMidX - _pinchMidX;
+        var midDY = curMidY - _pinchMidY;
+        // 缩放中心修正
+        var rect = _lbWrap.getBoundingClientRect();
+        var wcx = rect.left + rect.width / 2, wcy = rect.top + rect.height / 2;
+        var dx = _pinchMidX - wcx, dy = _pinchMidY - wcy;
+        var r = newScale / _pinchScale0;
+        _scale = newScale;
+        _panX = _pinchPanX0 * r + dx * (1 - r) + midDX;
+        _panY = _pinchPanY0 * r + dy * (1 - r) + midDY;
+        _clampPan();
+        _applyTransform();
+        _showZoomInd();
+      }
+    } else if (ts.length === 1) {
+      // 单指平移（缩放时才允许，否则让页面正常滚动）
+      if (_scale > 1.01) {
+        var dx = ts[0].clientX - _touchPanX0;
+        var dy = ts[0].clientY - _touchPanY0;
+        _panX = _touchPanPX0 + dx;
+        _panY = _touchPanPY0 + dy;
+        _clampPan();
+        _applyTransform();
+      }
+    }
+  }
+
+  function _onTouchEnd(e) {
+    // 捏合结束后重置参考距离
+    if (e.touches.length < 2) _pinchDist0 = 0;
+    if (e.touches.length === 0) {
+      // 没有放大时单次点击背景关闭（touchend 在目标上）
+      // 双击已在 touchstart 处理，这里只处理单击
+    }
+  }
+
+  // ── 开 / 关 ──────────────────────────────────────────────────────
+  function _open(src) {
+    _init();
+    _scale = 1; _panX = 0; _panY = 0;
+    _lbWrap.style.transition = '';
     _lbImg.src = src;
+    _applyTransform();
     _lb.classList.add('open');
     document.body.style.overflow = 'hidden';
   }
 
-  function _closeLightbox() {
+  function _close() {
     if (!_lb) return;
     _lb.classList.remove('open');
     document.body.style.overflow = '';
-    setTimeout(function() { if (!_lb.classList.contains('open')) _lbImg.src = ''; }, 200);
+    clearTimeout(_zoomTimer);
+    setTimeout(function() { if (_lb && !_lb.classList.contains('open')) _lbImg.src = ''; }, 200);
   }
 
-  window._openLightbox = _openLightbox;
+  window._openLightbox = _open;
 
-  // 事件委托：捕获所有带 data-lb 标记的图片点击
-  // renderHTML 用 data-lb 标记图片（直接 setAttribute onclick 会被 on* sanitizer 清除）
+  // 事件委托：data-lb 图片点击打开
   document.addEventListener('click', function(e) {
     var t = e.target;
-    if (t && t.tagName === 'IMG' && t.dataset && t.dataset.lb) {
-      _openLightbox(t.src);
-    }
+    if (t && t.tagName === 'IMG' && t.dataset && t.dataset.lb) _open(t.src);
   }, true);
 })();
 
