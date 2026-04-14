@@ -71,8 +71,16 @@ func TestSM2_FirstCorrect_DueToday(t *testing.T) {
 			found = true
 		}
 	}
-	if !found {
-		t.Fatal("fp-sm2 should be due today after first correct answer (interval=0 → due today)")
+	// 修复后：第一次答对 interval=1（明天复习），今天不应出现在待复习列表
+	if found {
+		t.Fatal("fp-sm2 should NOT be due today after first correct answer (interval=1 → due tomorrow)")
+	}
+	// 验证 SM2 记录确实写入且 interval=1
+	var interval, reps int
+	db.QueryRow("SELECT interval, reps FROM sm2 WHERE user_id='u1' AND fingerprint='fp-sm2'").
+		Scan(&interval, &reps)
+	if interval != 1 || reps != 1 {
+		t.Fatalf("first correct: want interval=1 reps=1, got interval=%d reps=%d", interval, reps)
 	}
 }
 
@@ -90,8 +98,9 @@ func TestSM2_WrongAnswerResets(t *testing.T) {
 	var interval, reps int
 	db.QueryRow("SELECT interval, reps FROM sm2 WHERE user_id='u1' AND fingerprint='fp1'").
 		Scan(&interval, &reps)
-	if reps != 0 || interval != 0 {
-		t.Fatalf("wrong answer should reset: interval=%d reps=%d (want interval=0 reps=0)", interval, reps)
+	// 修复后：答错 reps=0 且 interval=1（明天再复习，不再是当天重复）
+	if reps != 0 || interval != 1 {
+		t.Fatalf("wrong answer should reset: interval=%d reps=%d (want interval=1 reps=0)", interval, reps)
 	}
 }
 
