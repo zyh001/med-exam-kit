@@ -1664,37 +1664,73 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .wb-unit-picker-box{
   width:100%;max-width:480px;background:var(--surface);
-  border-radius:18px 18px 0 0;padding:20px 16px 32px;
-  max-height:70vh;display:flex;flex-direction:column;gap:12px;
+  border-radius:18px 18px 0 0;
+  padding:20px 16px 0;
+  /* 限制最大高度，避免章节过多时撑满屏幕 */
+  max-height:75vh;
+  display:flex;flex-direction:column;gap:10px;
+  padding-bottom:max(16px, env(safe-area-inset-bottom));
 }
 .wb-unit-picker-title{
   font-size:16px;font-weight:700;text-align:center;color:var(--text);
+  flex-shrink:0;
+}
+.wb-unit-picker-hint{
+  font-size:12px;text-align:center;color:var(--muted);
+  margin-top:-4px;flex-shrink:0;
 }
 .wb-unit-picker-list{
-  display:flex;flex-wrap:wrap;gap:8px;overflow-y:auto;
-  padding:4px 0;
+  display:flex;flex-wrap:wrap;gap:8px;
+  /* 关键：可滚动，不撑满 */
+  overflow-y:auto;
+  flex:1;
+  min-height:0;     /* flex 子项 overflow 必须 */
+  padding:4px 2px 8px;
+  /* 顶部内阴影提示可滚动 */
+  -webkit-mask-image:linear-gradient(to bottom, transparent 0, black 8px, black calc(100% - 12px), transparent 100%);
+  mask-image:linear-gradient(to bottom, transparent 0, black 8px, black calc(100% - 12px), transparent 100%);
 }
 .wb-unit-chip{
-  background:var(--bg);border:1px solid var(--border);
+  background:var(--bg);border:1.5px solid var(--border);
   border-radius:20px;padding:7px 14px;font-size:13px;
   cursor:pointer;transition:all .15s;color:var(--text);
   display:flex;align-items:center;gap:6px;
+  user-select:none;-webkit-tap-highlight-color:transparent;
 }
 .wb-unit-chip:hover{background:var(--accent);color:#fff;border-color:var(--accent)}
+/* 多选选中状态 */
+.wb-unit-chip.selected{
+  background:var(--accent);color:#fff;border-color:var(--accent);
+}
+.wb-unit-chip.selected .wb-unit-chip-cnt{background:rgba(255,255,255,.3)}
 .wb-unit-chip-all{
   width:100%;justify-content:center;font-weight:600;
   background:var(--accent);color:#fff;border-color:var(--accent);
+  flex-shrink:0;
 }
 .wb-unit-chip-cnt{
-  background:rgba(255,255,255,.25);border-radius:10px;
+  background:rgba(128,128,128,.15);border-radius:10px;
   padding:1px 7px;font-size:11px;font-weight:700;
+  transition:background .15s;
+}
+/* 底部操作栏 */
+.wb-unit-picker-footer{
+  display:flex;gap:8px;padding:12px 0;
+  flex-shrink:0;border-top:1px solid var(--border);
 }
 .wb-unit-picker-cancel{
+  flex:0 0 auto;
   border:none;background:var(--bg);color:var(--muted);
-  border-radius:10px;padding:10px;font-size:14px;cursor:pointer;
-  width:100%;
+  border-radius:10px;padding:10px 16px;font-size:14px;cursor:pointer;
 }
 .wb-unit-picker-cancel:hover{color:var(--text)}
+.wb-unit-picker-confirm{
+  flex:1;
+  border:none;background:var(--accent);color:#fff;
+  border-radius:10px;padding:10px 16px;font-size:14px;
+  font-weight:600;cursor:pointer;transition:filter .15s;
+}
+.wb-unit-picker-confirm:hover{filter:brightness(1.1)}
 /* ── 题目图片 ──────────────────────────────────────────────────── */
 .q-text img,.q-stem-content img,.memo-explain-text img,
 .review-discuss img,.result-discuss img,.q-discuss img {
