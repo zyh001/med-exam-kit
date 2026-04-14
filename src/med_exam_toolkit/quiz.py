@@ -227,7 +227,9 @@ def _create_app():
             return jsonify({"error": "Unauthorized", "auth": False}), 401
 
         # /api/img/proxy 由 <img> 标签直接请求，无法携带自定义 Header，豁免 Token 校验
-        if request.path.startswith("/api/") and request.path != "/api/img/proxy":
+        # /api/img/local/ 同理：编辑器/做题页 <img> 加载私有 S3 图片，安全靠 Cookie + UUID
+        if request.path.startswith("/api/") and request.path != "/api/img/proxy" \
+                and not request.path.startswith("/api/img/local/"):
             token = request.headers.get("X-Session-Token", "") or request.args.get("token", "")
             if not secrets.compare_digest(token, _session_token):
                 return jsonify({"error": "Unauthorized"}), 401
@@ -784,6 +786,7 @@ def api_info():
         "unit_mode_sq":   unit_mode_sq,
         "ai_enabled":     _ai_client is not None,
         "asr_enabled":    bool(_asr_api_key),
+        "s3_enabled":     bool(app.config.get("S3_ENDPOINT") and app.config.get("S3_BUCKET") and app.config.get("S3_ACCESS_KEY")),
     })
 
 
@@ -1202,6 +1205,149 @@ def _img_ext_from_url(url: str) -> str:
         if not after or after[0] in ("?", "#"):
             return ext
     return ".jpg"
+
+
+# ── S3 私有上传 / 下载（AWS Signature V4，兼容 MinIO / RustFS）──────
+
+import hashlib, hmac as _hmac, datetime as _datetime, io as _io, uuid as _uuid
+
+_S3_UPLOAD_PREFIX = "images/uploads/"
+_S3_REGION        = "us-east-1"
+
+def _s3_sign(method: str, endpoint: str, bucket: str, key: str,
+             ak: str, sk: str, content_type: str = "", payload: bytes = b"") -> dict:
+    """返回 AWS V4 签名所需的 headers 字典。"""
+    from urllib.parse import urlparse
+    now   = _datetime.datetime.utcnow()
+    date  = now.strftime("%Y%m%d")
+    ts    = now.strftime("%Y%m%dT%H%M%SZ")
+    host  = urlparse(endpoint).netloc
+    ph    = hashlib.sha256(payload).hexdigest()
+
+    if method == "PUT":
+        signed_hdrs  = "content-type;host;x-amz-content-sha256;x-amz-date"
+        canon_hdrs   = f"content-type:{content_type}\nhost:{host}\nx-amz-content-sha256:{ph}\nx-amz-date:{ts}\n"
+    else:
+        signed_hdrs  = "host;x-amz-content-sha256;x-amz-date"
+        canon_hdrs   = f"host:{host}\nx-amz-content-sha256:{ph}\nx-amz-date:{ts}\n"
+
+    canon_req = "\n".join([method, f"/{bucket}/{key}", "", canon_hdrs, signed_hdrs, ph])
+    scope     = f"{date}/{_S3_REGION}/s3/aws4_request"
+    sts       = "AWS4-HMAC-SHA256\n" + ts + "\n" + scope + "\n" + hashlib.sha256(canon_req.encode()).hexdigest()
+
+    def hmac_sha256(k, d):
+        return _hmac.new(k if isinstance(k, bytes) else k.encode(), d.encode(), hashlib.sha256).digest()
+
+    sig_key   = hmac_sha256(hmac_sha256(hmac_sha256(hmac_sha256(f"AWS4{sk}", date), _S3_REGION), "s3"), "aws4_request")
+    signature = _hmac.new(sig_key, sts.encode(), hashlib.sha256).hexdigest()
+    auth      = f"AWS4-HMAC-SHA256 Credential={ak}/{scope},SignedHeaders={signed_hdrs},Signature={signature}"
+
+    hdrs = {"x-amz-date": ts, "x-amz-content-sha256": ph, "Authorization": auth}
+    if content_type:
+        hdrs["Content-Type"] = content_type
+    return hdrs
+
+
+def _s3_put(endpoint: str, bucket: str, key: str,
+            ak: str, sk: str, content_type: str, data: bytes) -> None:
+    import urllib.request
+    url     = endpoint.rstrip("/") + f"/{bucket}/{key}"
+    hdrs    = _s3_sign("PUT", endpoint, bucket, key, ak, sk, content_type, data)
+    req     = urllib.request.Request(url, data=data, headers=hdrs, method="PUT")
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        if resp.status >= 300:
+            raise RuntimeError(f"S3 PUT {resp.status}")
+
+
+def _s3_get(endpoint: str, bucket: str, key: str,
+            ak: str, sk: str):
+    """返回 (body_bytes, content_type)。"""
+    import urllib.request
+    url  = endpoint.rstrip("/") + f"/{bucket}/{key}"
+    hdrs = _s3_sign("GET", endpoint, bucket, key, ak, sk)
+    req  = urllib.request.Request(url, headers=hdrs, method="GET")
+    with urllib.request.urlopen(req, timeout=20) as resp:
+        ct   = resp.headers.get("Content-Type", "image/jpeg")
+        body = resp.read()
+    return body, ct
+
+
+def _s3_cfg():
+    """返回 (endpoint, bucket, ak, sk) 或 None。"""
+    ep = app.config.get("S3_ENDPOINT", "") or ""
+    bk = app.config.get("S3_BUCKET",   "") or ""
+    ak = app.config.get("S3_ACCESS_KEY","") or ""
+    sk = app.config.get("S3_SECRET_KEY","") or ""
+    return (ep, bk, ak, sk) if (ep and bk and ak) else None
+
+
+@app.post("/api/img/upload")
+def api_img_upload():
+    """接收图片，上传到私有 S3，返回本站访问 URL。"""
+    cfg = _s3_cfg()
+    if not cfg:
+        return jsonify({"error": "S3 未配置"}), 503
+
+    if "file" not in request.files:
+        return jsonify({"error": "缺少 file 字段"}), 400
+
+    f = request.files["file"]
+    ct = f.content_type or "image/jpeg"
+    if not ct.startswith("image/"):
+        return jsonify({"error": "只允许上传图片文件"}), 400
+
+    data = f.read(10 * 1024 * 1024 + 1)
+    if len(data) > 10 * 1024 * 1024:
+        return jsonify({"error": "文件不能超过 10 MB"}), 400
+
+    # 推断扩展名
+    ext_map = {"image/png": ".png", "image/gif": ".gif",
+               "image/webp": ".webp", "image/svg+xml": ".svg"}
+    ext = ext_map.get(ct, ".jpg")
+    orig_ext = Path(f.filename).suffix.lower() if f.filename else ""
+    if orig_ext in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"):
+        ext = orig_ext
+
+    filename = str(_uuid.uuid4()) + ext
+    key      = _S3_UPLOAD_PREFIX + filename
+    ep, bk, ak, sk = cfg
+
+    try:
+        _s3_put(ep, bk, key, ak, sk, ct, data)
+    except Exception as e:
+        return jsonify({"error": f"上传 S3 失败：{e}"}), 502
+
+    return jsonify({"url": f"/api/img/local/{filename}", "filename": filename, "size": len(data)})
+
+
+@app.get("/api/img/local/<filename>")
+def api_img_local(filename: str):
+    """从私有 S3 取图并回传（受 Cookie 访问码保护 + UUID 文件名不可猜测）。"""
+    cfg = _s3_cfg()
+    if not cfg:
+        return "S3 未配置", 503
+
+    import re, urllib.error
+    if not re.match(r'^[a-zA-Z0-9\-_.]{10,100}$', filename):
+        return "invalid filename", 400
+    ext = Path(filename).suffix.lower()
+    if ext not in (".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg"):
+        return "invalid file type", 400
+
+    key = _S3_UPLOAD_PREFIX + filename
+    ep, bk, ak, sk = cfg
+    try:
+        body, ct = _s3_get(ep, bk, key, ak, sk)
+    except urllib.error.HTTPError as e:
+        return ("图片不存在", 404) if e.code == 404 else (f"获取图片失败：{e}", 502)
+    except Exception as e:
+        return f"获取图片失败：{e}", 502
+
+    from flask import Response
+    resp = Response(body, content_type=ct)
+    resp.headers["Cache-Control"] = "private, max-age=3600"
+    resp.headers["X-Content-Type-Options"] = "nosniff"
+    return resp
 
 @app.post("/api/calculate")
 def api_calculate():
