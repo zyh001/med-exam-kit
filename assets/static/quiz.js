@@ -1755,8 +1755,13 @@ function buildModeGroups(questions) {
   questions.forEach((q, i) => {
     const mode = q.mode || '';
     if (groups.length === 0 || groups[groups.length - 1].mode !== mode) {
-      // A3/A4型题和案例分析均不允许回退
-      const allowBack = !mode.includes('案例') && !mode.includes('A3') && !mode.includes('A4');
+      // 不允许回退的题型：A3/A4型、案例分析
+      // A1/A2型 是合并题型，允许回退（视同 A1/A2 的混合）
+      const mu = mode.toUpperCase();
+      const isNoBack = (mu.includes('案例') ||
+        (mu.includes('A3') && !mu.includes('A1') && !mu.includes('A2')) ||
+        (mu.includes('A4') && !mu.includes('A1') && !mu.includes('A2')));
+      const allowBack = !isNoBack;
       groups.push({ mode, startIdx: i, endIdx: i, allowBack });
     } else {
       groups[groups.length - 1].endIdx = i;
