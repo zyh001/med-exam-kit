@@ -3451,55 +3451,85 @@ async function showAIReport() {
   }
 
   // 构建传给后端的数据
+  // ── 收集考试数据（全量，不截断）─────────────────────────────────
+  // 策略：
+  //   by_unit    → 全部章节完整统计（按正确率升序），数据紧凑，不截断
+  //   by_mode    → 全部题型统计，反映题型层面弱点
+  //   wrong_stat → 全部错题的「章节+题型+正确答案+用户答案」（无题干），全量
+  //   wrong_sample → 仅前 20 条带题干（供 AI 识别错误规律用）
+  //   题干本身冗余且占 token，大题量时去掉题干能覆盖全部错题
+
+  // 1. 章节统计（全量，按正确率升序）
   const byUnit = Object.entries(R.byUnit || {}).map(([unit, v]) => ({
     unit, correct: v.correct, total: v.total,
-  }));
+  })).sort((a, b) => {
+    const ra = a.total > 0 ? a.correct / a.total : 1;
+    const rb = b.total > 0 ? b.correct / b.total : 1;
+    return ra - rb;
+  });
 
-  // 收集错题明细（最多 30 条）
-  const wrongItems = [];
+  // 2. 题型统计（全量）
+  const byModeMap = {};
   (R.qs || []).forEach((q, i) => {
-    if (wrongItems.length >= 30) return;
+    const mode = q.mode || '未知';
+    if (!byModeMap[mode]) byModeMap[mode] = { correct: 0, total: 0 };
+    byModeMap[mode].total++;
+    const sel = R.ans[i];
+    const empty = !sel || (sel instanceof Set && sel.size === 0);
+    if (!empty) {
+      const isMulti = typeof isMultiQ === 'function' ? isMultiQ(q) : false;
+      let isCorrect = isMulti
+        ? (() => { const cs = new Set(q.answer.split('')); const ss = sel instanceof Set ? sel : new Set([sel]); return ss.size === cs.size && [...cs].every(l => ss.has(l)); })()
+        : sel === q.answer;
+      if (isCorrect) byModeMap[mode].correct++;
+    }
+  });
+  const byMode = Object.entries(byModeMap).map(([mode, v]) => ({
+    mode, correct: v.correct, total: v.total,
+  })).sort((a, b) => {
+    const ra = a.total > 0 ? a.correct / a.total : 1;
+    const rb = b.total > 0 ? b.correct / b.total : 1;
+    return ra - rb;
+  });
+
+  // 3. 错题统计：全量（仅 unit+mode+answer+user_ans，无题干）
+  const wrongStat = [];
+  // 4. 错题样本：前 20 条带题干（AI 识别错误规律用）
+  const wrongSample = [];
+
+  (R.qs || []).forEach((q, i) => {
     const sel = R.ans[i];
     const empty = !sel || (sel instanceof Set && sel.size === 0);
     if (empty) return;
     const isMulti = typeof isMultiQ === 'function' ? isMultiQ(q) : false;
-    let isCorrect = false;
-    if (isMulti) {
-      const cs = new Set(q.answer.split(''));
-      const ss = sel instanceof Set ? sel : new Set([sel]);
-      isCorrect = ss.size === cs.size && [...cs].every(l => ss.has(l));
-    } else {
-      isCorrect = sel === q.answer;
-    }
+    let isCorrect = isMulti
+      ? (() => { const cs = new Set(q.answer.split('')); const ss = sel instanceof Set ? sel : new Set([sel]); return ss.size === cs.size && [...cs].every(l => ss.has(l)); })()
+      : sel === q.answer;
     if (!isCorrect) {
-      wrongItems.push({
-        unit:     q.unit || '',
-        mode:     q.mode || '',
-        text:     (q.text || q.stem || '').slice(0, 80),
-        answer:   q.answer || '',
-        user_ans: sel instanceof Set ? [...sel].join('') : (sel || ''),
-      });
+      const userAns = sel instanceof Set ? [...sel].join('') : (sel || '');
+      wrongStat.push({ unit: q.unit || '', mode: q.mode || '', answer: q.answer || '', user_ans: userAns });
+      if (wrongSample.length < 20) {
+        wrongSample.push({
+          unit: q.unit || '', mode: q.mode || '',
+          text: (q.text || q.stem || '').slice(0, 60),
+          answer: q.answer || '', user_ans: userAns,
+        });
+      }
     }
   });
 
-  // 大题量优化：byUnit 只传正确率最低的 15 个章节（避免 prompt 过长）
-  const byUnitSorted = [...byUnit].sort((a, b) => {
-    const ra = a.total > 0 ? a.correct / a.total : 1;
-    const rb = b.total > 0 ? b.correct / b.total : 1;
-    return ra - rb; // 正确率低的排前面
-  }).slice(0, 15);
-
   const payload = {
-    total:    R.total,
-    correct:  R.correct,
-    wrong:    R.wrong,
-    skip:     R.skip,
-    time_sec: R.timeSec || 0,
-    score:    R.totalEarned || 0,
+    total:     R.total,
+    correct:   R.correct,
+    wrong:     R.wrong,
+    skip:      R.skip,
+    time_sec:  R.timeSec || 0,
+    score:     R.totalEarned || 0,
     max_score: R.totalScore || 0,
-    by_unit:  byUnitSorted,         // 最多 15 个章节
-    wrong_items: wrongItems,         // 已限 30 条
-    total_units: byUnit.length,      // 告知后端实际章节总数
+    by_unit:   byUnit,       // 全部章节，按正确率升序
+    by_mode:   byMode,       // 全部题型统计
+    wrong_stat: wrongStat,   // 全部错题（无题干）
+    wrong_sample: wrongSample, // 前20条带题干
   };
 
   // 显示容器，loading 状态
