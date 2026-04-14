@@ -1862,26 +1862,36 @@ func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var body struct {
-		Total      int     `json:"total"`
-		Correct    int     `json:"correct"`
-		Wrong      int     `json:"wrong"`
-		Skip       int     `json:"skip"`
-		TimeSec    int     `json:"time_sec"`
-		Score      float64 `json:"score"`
-		MaxScore   float64 `json:"max_score"`
-		TotalUnits int     `json:"total_units"` // 实际章节总数（前端可能只传最差15个）
-		ByUnit     []struct {
+		Total    int     `json:"total"`
+		Correct  int     `json:"correct"`
+		Wrong    int     `json:"wrong"`
+		Skip     int     `json:"skip"`
+		TimeSec  int     `json:"time_sec"`
+		Score    float64 `json:"score"`
+		MaxScore float64 `json:"max_score"`
+		ByUnit   []struct {
 			Unit    string `json:"unit"`
 			Correct int    `json:"correct"`
 			Total   int    `json:"total"`
-		} `json:"by_unit"`
-		WrongItems []struct {
+		} `json:"by_unit"` // 全部章节，按正确率升序
+		ByMode []struct {
+			Mode    string `json:"mode"`
+			Correct int    `json:"correct"`
+			Total   int    `json:"total"`
+		} `json:"by_mode"` // 全部题型统计
+		WrongStat []struct {
+			Unit    string `json:"unit"`
+			Mode    string `json:"mode"`
+			Answer  string `json:"answer"`
+			UserAns string `json:"user_ans"`
+		} `json:"wrong_stat"` // 全部错题（无题干），用于统计分析
+		WrongSample []struct {
 			Unit    string `json:"unit"`
 			Mode    string `json:"mode"`
 			Text    string `json:"text"`
 			Answer  string `json:"answer"`
 			UserAns string `json:"user_ans"`
-		} `json:"wrong_items"`
+		} `json:"wrong_sample"` // 前20条带题干，供AI识别错误规律
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
@@ -1893,41 +1903,70 @@ func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
 		pct = body.Correct * 100 / body.Total
 	}
 
-	// 构造章节分析摘要（前端已按正确率升序排列，只传最差 15 个）
-	unitNote := ""
-	if body.TotalUnits > len(body.ByUnit) {
-		unitNote = fmt.Sprintf("（仅显示正确率最低的 %d 个章节，共 %d 个章节）", len(body.ByUnit), body.TotalUnits)
-	}
-	unitSummary := unitNote + "\n"
+	// ── 章节统计（全量，按正确率升序）──
+	unitSummary := fmt.Sprintf("共 %d 个章节，按正确率由低到高：\n", len(body.ByUnit))
 	for _, u := range body.ByUnit {
 		rate := 0
 		if u.Total > 0 {
 			rate = u.Correct * 100 / u.Total
 		}
-		unitSummary += fmt.Sprintf("  - %s：%d/%d 题正确（正确率 %d%%）\n", u.Unit, u.Correct, u.Total, rate)
+		unitSummary += fmt.Sprintf("  - %s：%d/%d 正确（%d%%）\n", u.Unit, u.Correct, u.Total, rate)
 	}
-	if unitSummary == "" {
+	if len(body.ByUnit) == 0 {
 		unitSummary = "  （无章节数据）\n"
 	}
 
-	// 列出答错的题目（最多 30 题，超过截断）
-	wrongSummary := ""
-	limit := 30
-	if len(body.WrongItems) < limit {
-		limit = len(body.WrongItems)
+	// ── 题型统计（全量）──
+	modeSummary := ""
+	for _, m := range body.ByMode {
+		rate := 0
+		if m.Total > 0 {
+			rate = m.Correct * 100 / m.Total
+		}
+		modeSummary += fmt.Sprintf("  - %s：%d/%d 正确（%d%%）\n", m.Mode, m.Correct, m.Total, rate)
 	}
-	for i, w := range body.WrongItems[:limit] {
-		wrongSummary += fmt.Sprintf(
-			"  %d. [%s/%s] %s（正确答案：%s，你的答案：%s）\n",
-			i+1, w.Unit, w.Mode,
-			truncateStr(w.Text, 60), w.Answer, w.UserAns,
-		)
+	if modeSummary == "" {
+		modeSummary = "  （无题型数据）\n"
 	}
-	if len(body.WrongItems) > 30 {
-		wrongSummary += fmt.Sprintf("  ...（另有 %d 道错题未列出）\n", len(body.WrongItems)-30)
+
+	// ── 错误模式分析（全量错题，无题干）──
+	// 统计「错成哪个答案」的频率，帮助 AI 识别规律性混淆
+	type wrongKey struct{ Unit, Mode, Answer, UserAns string }
+	wrongFreq := map[wrongKey]int{}
+	for _, w := range body.WrongStat {
+		wrongFreq[wrongKey{w.Unit, w.Mode, w.Answer, w.UserAns}]++
 	}
-	if wrongSummary == "" {
-		wrongSummary = "  （全部答对！）\n"
+	// 按频率降序，取前 20 个高频错误
+	type wf struct {
+		wrongKey
+		Cnt int
+	}
+	wfList := make([]wf, 0, len(wrongFreq))
+	for k, v := range wrongFreq {
+		wfList = append(wfList, wf{k, v})
+	}
+	sort.Slice(wfList, func(i, j int) bool { return wfList[i].Cnt > wfList[j].Cnt })
+	if len(wfList) > 20 {
+		wfList = wfList[:20]
+	}
+	errorPattern := fmt.Sprintf("共 %d 道错题，高频错误（相同题型/章节/答案组合）：\n", len(body.WrongStat))
+	for _, w := range wfList {
+		freqStr := ""
+		if w.Cnt > 1 {
+			freqStr = fmt.Sprintf("×%d", w.Cnt)
+		}
+		errorPattern += fmt.Sprintf("  - [%s/%s] 正确:%s 选了:%s %s\n",
+			w.Unit, w.Mode, w.Answer, w.UserAns, freqStr)
+	}
+
+	// ── 带题干的错题样本（前 20 条，供 AI 理解题目特征）──
+	wrongSample := ""
+	for i, w := range body.WrongSample {
+		wrongSample += fmt.Sprintf("  %d. [%s/%s] %s → 正确:%s 选了:%s\n",
+			i+1, w.Unit, w.Mode, truncateStr(w.Text, 50), w.Answer, w.UserAns)
+	}
+	if wrongSample == "" {
+		wrongSample = "  （全部答对！）\n"
 	}
 
 	scoreStr := ""
@@ -1935,42 +1974,47 @@ func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
 		scoreStr = fmt.Sprintf("得分：%.1f / %.1f 分\n", body.Score, body.MaxScore)
 	}
 
-	prompt := fmt.Sprintf(`你是一位经验丰富的医学考试辅导老师。学生刚完成了一次模拟考试，请根据以下成绩数据，为他生成一份详细的考试分析报告。
+	prompt := fmt.Sprintf(`你是一位经验丰富的医学考试辅导老师。以下是学生一次模拟考试的完整数据，请据此生成详细的考试分析报告。
 
 ## 考试概况
-总题数：%d 题
-答对：%d 题（正确率 %d%%）
-答错：%d 题
-未答：%d 题
-用时：%s
+总题数：%d 题 | 答对：%d 题（正确率 %d%%）| 答错：%d 题 | 未答：%d 题 | 用时：%s
 %s
-## 章节正确率分布
+## 各章节正确率（全量，按正确率由低到高）
 %s
-## 答错题目明细
+## 各题型正确率
 %s
-## 请完成以下分析报告
+## 错误规律分析数据
+%s
+## 代表性错题样本（前 %d 条，含题干）
+%s
+## 分析报告要求
 
-请按以下结构输出（使用 Markdown 格式）：
+请用 Markdown 格式输出，结构如下：
 
 ### 📊 总体评价
-[对整体表现做简短评价，指出优势和不足]
+对整体表现做简明评价，结合正确率和用时给出定性判断。
 
 ### 🔍 薄弱章节分析
-[列出正确率低于 60%% 的章节，分析可能的知识薄弱点]
+针对正确率低于 60%% 的章节，逐章分析可能的知识薄弱点，结合错题规律数据指出是概念性错误还是临床应用不熟。
 
-### ❌ 错题规律分析
-[归纳答错题目的规律：是概念混淆、题型不熟、还是某类知识点集中薄弱]
+### 🔄 题型表现分析
+分析各题型的正确率差异，若某题型明显偏低，分析原因（如 A3/A4 序贯题逻辑推理、案例分析综合判断等）。
+
+### ❌ 高频错误模式
+基于错误规律数据，归纳重复出现的「错误替换模式」（如总把答案 A 错选为 B），推断可能的知识混淆点。
 
 ### 📚 针对性复习建议
-[给出 3-5 条具体的复习建议，按优先级排列]
+按优先级给出 3-5 条可执行的复习建议，每条要具体到章节或知识点。
 
 ### 💪 下一步学习计划
-[建议接下来 1-2 周的具体学习安排]
+建议接下来 1-2 周的具体学习安排，包括每天大概用多少时间、复习顺序。
 
-请用鼓励且专业的语气，分析要具体，避免泛泛而谈。`,
+请用鼓励且专业的语气，分析必须结合以上具体数据，不要泛泛而谈。`,
 		body.Total, body.Correct, pct, body.Wrong, body.Skip,
 		fmtDuration(body.TimeSec), scoreStr,
-		unitSummary, wrongSummary,
+		unitSummary, modeSummary,
+		errorPattern,
+		len(body.WrongSample), wrongSample,
 	)
 
 	messages := []ai.ChatMessage{
