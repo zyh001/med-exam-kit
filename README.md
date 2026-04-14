@@ -297,10 +297,141 @@ med-exam quiz --bank <题库路径> [选项]
 
 | 按键 | 功能 |
 |------|------|
-| 1-5 | 选择对应选项 |
-| ← / → | 上一题 / 下一题 |
-| Enter | 提交答案 / 下一题 |
-| Escape | 返回首页 |
+| `1`–`5` / `A`–`E` | 选择对应选项 |
+| `←` / `→` | 上一题 / 下一题 |
+| `M` / `Space` | 标记/取消标记当前题目 |
+| `E` | 展开/定位到解析区 |
+| `Enter` | 下一题 |
+| `Esc` | 关闭弹窗 |
+
+## 下载预编译版本（无需 Python 环境）
+
+从 [GitHub Releases](https://github.com/zyh001/med-exam-kit/releases) 下载最新版，双击即用：
+
+| 平台 | 文件名 |
+|------|--------|
+| Windows | `med-exam-kit-vX.X.X-py-windows.exe` |
+| macOS | `med-exam-kit-vX.X.X-py-macos` |
+| Linux | `med-exam-kit-vX.X.X-py-linux` |
+
+```bash
+# macOS / Linux 首次使用：授予执行权限
+chmod +x med-exam-kit-*-macos
+
+# macOS 还需解除 Gatekeeper：系统设置 → 隐私与安全 → 「仍要打开」
+
+# 用法与 pip 安装版完全相同，将 med-exam 替换为下载的文件名
+./med-exam-kit-v1.6.1-py-linux quiz -b 内科学.mqb
+```
+
+---
+
+## 配置文件
+
+在工作目录创建 `config.yaml`，以后只需 `med-exam quiz -b xxx.mqb`，无需每次输入参数：
+
+```yaml
+# config.yaml
+
+ai:
+  provider:  deepseek       # openai / deepseek / qwen / kimi / ollama
+  model:     ""             # 留空使用 provider 默认模型
+  api_key:   "sk-xxx"       # API 密钥
+  base_url:  ""             # 自定义接口地址（留空使用官方）
+
+asr:
+  api_key:   "sk-xxx"       # 阿里云 DashScope，用于 AI 答疑语音输入
+  model:     ""             # 留空使用 qwen3-asr-flash
+
+# S3 图片存储（可选，兼容 MinIO / RustFS）
+# 题库编辑器中上传图片到题干/解析需要此配置
+s3_endpoint:   "http://localhost:9000"
+s3_bucket:     "med-images"
+s3_access_key: "minioadmin"
+s3_secret_key: "minioadmin"
+```
+
+---
+
+## 刷题应用详细说明
+
+### 启动方式
+
+```bash
+# 单题库
+med-exam quiz -b 内科学.mqb
+
+# 多题库同时加载
+med-exam quiz -b 内科.mqb -b 外科.mqb
+
+# 开放局域网（手机也能访问）
+med-exam quiz -b 内科.mqb --host 0.0.0.0
+
+# 服务器部署（不自动开浏览器）
+med-exam quiz -b 内科.mqb --host 0.0.0.0 --port 8080 --no-browser
+
+# 带 AI 答疑
+med-exam quiz -b 内科.mqb --ai-provider deepseek --ai-key sk-xxx
+
+# 带语音输入（阿里云 DashScope）
+med-exam quiz -b 内科.mqb --asr-key sk-xxx
+
+# 自定义访问码
+med-exam quiz -b 内科.mqb --pin 12345678
+```
+
+### 键盘快捷键
+
+| 按键 | 功能 |
+|------|------|
+| `1`–`5` / `A`–`E` | 选择对应选项 |
+| `←` / `→` | 上一题 / 下一题 |
+| `M` / `Space` | 标记/取消标记当前题目 |
+| `E` | 展开/定位到解析区 |
+| `Enter` | 下一题 |
+| `Esc` | 关闭弹窗 |
+
+### AI 答疑
+
+配置 `ai.api_key` 后，每道题右下角出现「AI 帮你解析」按钮，支持多轮追问，AI 回复中的流程图自动渲染。
+
+### 语音输入
+
+配置 `asr.api_key` 后，AI 答疑输入框**长按发送按钮**触发语音识别，实时转写到输入框。
+
+### 题库编辑器
+
+```bash
+med-exam edit --bank 内科.mqb
+```
+
+在浏览器中直接编辑题目、解析、答案，支持批量替换文本、AI 补全、上传图片到 S3（配置后启用）。
+
+### PWA 安装
+
+- **Android / Chrome**：地址栏右侧「安装到主屏幕」
+- **iPhone / Safari**：底部「分享」→「添加到主屏幕」
+
+---
+
+## 全部命令速查
+
+```bash
+med-exam quiz      -b FILE [...]   # 刷题 Web 应用
+med-exam edit      --bank FILE     # 题库编辑器
+med-exam build     -i DIR -o PATH  # 从 JSON 构建 .mqb 题库
+med-exam export    -b FILE -f FMT  # 导出 xlsx/docx/pdf/csv/json/db
+med-exam enrich    -b FILE         # AI 批量补全缺失答案/解析
+med-exam generate  ...             # 随机组卷导出 Word 试卷
+med-exam info      -b FILE         # 查看题库统计
+med-exam inspect   -b FILE         # 逐题浏览题库内容
+med-exam migrate   --bank FILE     # 旧版 MQB1 格式迁移为 MQB2
+
+# 任意命令加 --help 查看详细参数
+med-exam quiz --help
+```
+
+---
 
 ## 给没有编程经验用户的详细操作指南
 
@@ -385,140 +516,3 @@ med-exam quiz --bank <题库路径> [选项]
 ### 致谢
 
  * 本脚本灵感来自 [https://github.com/wjixiang/ykb_copyer](https://github.com/wjixiang/ykb_copyer)
----
-
-## 下载预编译版本（无需 Python 环境）
-
-从 [GitHub Releases](https://github.com/zyh001/med-exam-kit/releases) 下载最新版：
-
-| 平台 | 文件名 |
-|------|--------|
-| Windows | `med-exam-kit-vX.X.X-py-windows.exe` |
-| macOS | `med-exam-kit-vX.X.X-py-macos` |
-| Linux | `med-exam-kit-vX.X.X-py-linux` |
-
-### 首次运行
-
-```bash
-# macOS / Linux：先授予执行权限
-chmod +x med-exam-kit-*-macos
-
-# macOS 还需解除 Gatekeeper：系统设置 → 隐私与安全 → 「仍要打开」
-
-# 运行（与安装版命令相同，将 med-exam 替换为下载的文件名）
-./med-exam-kit-v1.6.1-py-linux quiz -b 内科学.mqb
-```
-
----
-
-## 刷题应用快速启动
-
-```bash
-# 单题库
-med-exam quiz -b 内科学.mqb
-
-# 多题库
-med-exam quiz -b 内科.mqb -b 外科.mqb
-
-# 开放局域网访问（手机也能用）
-med-exam quiz -b 内科.mqb --host 0.0.0.0
-
-# 服务器部署（不自动开浏览器）
-med-exam quiz -b 内科.mqb --host 0.0.0.0 --port 8080 --no-browser
-
-# 带 AI 答疑
-med-exam quiz -b 内科.mqb --ai-provider deepseek --ai-key sk-xxx
-
-# 带语音输入（阿里云 DashScope）
-med-exam quiz -b 内科.mqb --asr-key sk-xxx
-```
-
-启动后浏览器访问 `http://127.0.0.1:5174`
-
----
-
-## 配置文件
-
-在工作目录创建 `config.yaml`，以后只需 `med-exam quiz -b xxx.mqb`：
-
-```yaml
-# config.yaml
-
-ai:
-  provider:  deepseek       # openai / deepseek / qwen / kimi / ollama
-  model:     ""             # 留空使用 provider 默认模型
-  api_key:   "sk-xxx"
-  base_url:  ""             # 自定义接口地址（留空使用官方）
-
-asr:
-  api_key:   "sk-xxx"       # 阿里云 DashScope，用于语音输入
-  model:     ""             # 留空使用 qwen3-asr-flash
-
-# S3 图片存储（可选，兼容 MinIO / RustFS）
-# 在编辑器中上传图片到题干/解析需要此配置
-s3_endpoint:   "http://localhost:9000"
-s3_bucket:     "med-images"
-s3_access_key: "minioadmin"
-s3_secret_key: "minioadmin"
-```
-
----
-
-## Web 应用功能说明
-
-### 三种学习模式
-
-| 模式 | 特点 |
-|------|------|
-| **练习模式** | 答题后即时显示对错和解析，适合日常学习 |
-| **考试模式** | 计时限时，交卷后统一评分，模拟正式考试 |
-| **背题模式** | 卡片翻转，自评掌握程度，SM-2 智能复习 |
-
-### 键盘快捷键（练习/考试模式）
-
-| 按键 | 功能 |
-|------|------|
-| `1`–`5` / `A`–`E` | 选择对应选项 |
-| `←` / `→` | 上一题 / 下一题 |
-| `M` / `Space` | 标记/取消标记当前题目 |
-| `E` | 展开/定位到解析区 |
-| `Enter` | 下一题 |
-
-### AI 答疑
-
-配置 `ai.api_key` 后，每道题显示「AI 帮你解析」按钮，支持多轮追问。
-
-### 语音输入
-
-配置 `asr.api_key` 后，AI 答疑输入框**长按发送按钮**触发语音识别，实时转写。
-
-### 题库编辑器
-
-```bash
-med-exam edit --bank 内科.mqb
-```
-
-支持：修改题干/答案/解析、批量替换文本、AI 补全、上传图片到 S3（需配置）。
-
-### PWA 安装
-
-- **Android / Chrome**：地址栏右侧「安装到主屏幕」
-- **iPhone / Safari**：底部「分享」→「添加到主屏幕」
-
----
-
-## 全部命令速查
-
-```bash
-med-exam quiz      -b FILE [...]   # 刷题 Web 应用
-med-exam edit      --bank FILE     # 题库编辑器
-med-exam build     -i DIR -o PATH  # 从 JSON 构建 .mqb 题库
-med-exam export    -b FILE -f FMT  # 导出 xlsx/docx/pdf/csv/json/db
-med-exam enrich    -b FILE         # AI 补全缺失答案/解析
-med-exam generate  ...             # 随机组卷导出 Word
-med-exam info      -b FILE         # 查看题库统计
-med-exam inspect   -b FILE         # 逐题浏览内容
-
-# 任意命令加 --help 查看详细参数
-med-exam quiz --help
-```
