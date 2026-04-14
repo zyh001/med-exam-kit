@@ -2646,6 +2646,8 @@ async function submitExam() {
   S.examSubmitted = true; // 防止任何路径重新保存
   const origMode = S.mode; // 保存原始模式用于 calculateResults
   S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
+  // 在 await reveal 之前记录交卷时间，防止 reveal 异步耗时导致 timeSec 偏大
+  const submitAt = Date.now();
 
   // sealed 模式：从服务端获取答案后再评分
   if (S.examId) {
@@ -2691,7 +2693,7 @@ async function submitExam() {
 
   // 再次确保清除（防止 await 期间被重新保存）
   clearExamSession();
-  calculateResults(origMode);
+  calculateResults(origMode, submitAt);
   showScreen('s-results');
 }
 function retryQuiz() {
@@ -3086,7 +3088,7 @@ async function _recordMemoSession() {
 // ════════════════════════════════════════════
 // Results
 // ════════════════════════════════════════════
-function calculateResults(origMode) {
+function calculateResults(origMode, submitAt) {
   // origMode: 传入原始模式（submitExam 中 S.mode 已被改为 'exam_done'）
   const effectiveMode = origMode || S.mode;
   // 深拷贝题目数据，防止后续修改影响结果页面
@@ -3141,7 +3143,7 @@ function calculateResults(origMode) {
   S.results = {
     mode: effectiveMode,
     total: qs.length, correct, wrong, skip,
-    timeSec: Math.floor((Date.now() - S.examStart) / 1000),
+    timeSec: Math.floor(((submitAt || Date.now()) - S.examStart) / 1000),
     timeLimit: S.examLimit || 0,
     byUnit,
     qs, ans,
@@ -3759,14 +3761,20 @@ async function startReview() {
   } catch(e) { toast('加载复习题目失败'); }
 }
 
-/** 开始错题练习（练习模式，仅加载答错过的题目） */
-async function startWrongBookReview(filterUnit) {
+/** 开始错题练习（练习模式）。
+ *  filterUnit: undefined=自动弹章节选择 | '__all__'=全部 | 字符串=单章节 | 数组=多章节
+ *  cachedItems: 已从 /api/wrongbook 取回的 items，有则直接用（避免重复请求）
+ */
+async function startWrongBookReview(filterUnit, cachedItems) {
   try {
-    const res = await apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json());
-    const allItems = res.items || [];
+    let allItems = cachedItems;
+    if (!allItems) {
+      const res = await apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json());
+      allItems = res.items || [];
+    }
     if (!allItems.length) { toast('暂时没有错题记录 👍'); return; }
 
-    // 如果没有指定 unit，且错题跨多个章节，弹出选择面板
+    // 如果没有指定 unit，且错题跨多个章节，弹出选择面板（把 allItems 缓存传入）
     if (filterUnit === undefined) {
       const units = [...new Set(allItems.map(it => it.unit).filter(Boolean))];
       if (units.length > 1) {
@@ -3775,13 +3783,21 @@ async function startWrongBookReview(filterUnit) {
       }
     }
 
-    // 按 unit 过滤（filterUnit='__all__' 或未指定单章节时全选）
-    const items = (filterUnit && filterUnit !== '__all__')
-      ? allItems.filter(it => it.unit === filterUnit)
-      : allItems;
+    // 按 unit 过滤
+    let items;
+    if (Array.isArray(filterUnit)) {
+      // 多章节数组
+      const unitSet = new Set(filterUnit);
+      items = allItems.filter(it => unitSet.has(it.unit));
+    } else if (filterUnit && filterUnit !== '__all__') {
+      // 单章节字符串
+      items = allItems.filter(it => it.unit === filterUnit);
+    } else {
+      items = allItems;
+    }
 
     const fps = items.map(it => it.fingerprint).slice(0, 100);
-    if (!fps.length) { toast('该章节暂无错题'); return; }
+    if (!fps.length) { toast('所选章节暂无错题'); return; }
 
     const data = await apiFetch(
         '/api/questions?shuffle=1&fingerprints=' + fps.join(',') + '&' + bankQS()
@@ -3795,7 +3811,9 @@ async function startWrongBookReview(filterUnit) {
     S.currentGroupIdx = 0; S.caseMaxReached = {};
     S.practiceSessionId = String(Date.now());
     S.streak = 0;
-    const label = (filterUnit && filterUnit !== '__all__') ? `【${filterUnit}】` : '';
+    let label = '';
+    if (Array.isArray(filterUnit))                        label = `【${filterUnit.length}章】`;
+    else if (filterUnit && filterUnit !== '__all__')       label = `【${filterUnit}】`;
     toast(`📕 错题模式${label}：共 ${data.items.length} 题`);
     startQuiz();
   } catch(e) { toast('加载错题失败'); }
@@ -3835,9 +3853,8 @@ function _showWbUnitPicker(units, allItems) {
   allBtn.className = 'wb-unit-chip wb-unit-chip-all';
   allBtn.innerHTML = `全部章节 <span class="wb-unit-chip-cnt">${allItems.length}</span>`;
   allBtn.addEventListener('click', () => {
-    // 点全部：清空其他选择，直接开始
     panel.remove();
-    startWrongBookReview('__all__');
+    startWrongBookReview('__all__', allItems); // 传缓存，不重新请求
   });
   list.appendChild(allBtn);
 
@@ -3878,11 +3895,11 @@ function _showWbUnitPicker(units, allItems) {
   confirmBtn.addEventListener('click', () => {
     panel.remove();
     if (selected.size === 0) {
-      startWrongBookReview('__all__');
+      startWrongBookReview('__all__', allItems);        // 全部，传缓存
     } else if (selected.size === 1) {
-      startWrongBookReview([...selected][0]);
+      startWrongBookReview([...selected][0], allItems); // 单章节，传缓存
     } else {
-      startWrongBookReviewMulti([...selected]);
+      startWrongBookReview([...selected], allItems);    // 多章节数组，传缓存
     }
   });
 
@@ -3899,31 +3916,6 @@ function _showWbUnitPicker(units, allItems) {
   document.body.appendChild(panel);
 }
 
-/** 多章节同时重做错题 */
-async function startWrongBookReviewMulti(unitList) {
-  try {
-    const res = await apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json());
-    const allItems = res.items || [];
-    const unitSet = new Set(unitList);
-    const items = allItems.filter(it => unitSet.has(it.unit));
-    const fps = items.map(it => it.fingerprint).slice(0, 100);
-    if (!fps.length) { toast('所选章节暂无错题'); return; }
-    const data = await apiFetch(
-        '/api/questions?shuffle=1&fingerprints=' + fps.join(',') + '&' + bankQS()
-    ).then(r => r.json());
-    if (!data.items || !data.items.length) { toast('找不到对应题目'); return; }
-    S.mode = 'practice';
-    S.questions = data.items;
-    S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
-    S.examStart = Date.now();
-    S.modeGroups = buildModeGroups(data.items);
-    S.currentGroupIdx = 0; S.caseMaxReached = {};
-    S.practiceSessionId = String(Date.now());
-    S.streak = 0;
-    toast(`📕 错题模式【${unitList.length}章】：共 ${data.items.length} 题`);
-    startQuiz();
-  } catch(e) { toast('加载错题失败'); }
-}
 
 /** 只练习本次答错的题目 */
 function practiceSessionWrong() {
