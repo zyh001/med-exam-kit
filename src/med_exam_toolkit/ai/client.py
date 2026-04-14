@@ -171,6 +171,13 @@ def chat_completion_stream(
             if content or reasoning:
                 yield {"content": content, "reasoning": reasoning}
 
+            # finish_reason=length 说明被 max_tokens 截断
+            finish_reason = getattr(chunk.choices[0], "finish_reason", None)
+            if finish_reason == "length":
+                yield {"truncated": True}
+                yield {"done": True}
+                return
+
         yield {"done": True}
     except Exception as e:
         yield {"error": str(e)}

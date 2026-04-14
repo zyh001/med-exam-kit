@@ -656,13 +656,15 @@ def edit(ctx, bank, password, port, host, no_browser, no_pin):
 @click.option("--ai-key", default="", help="AI API Key")
 @click.option("--ai-base-url", default="", help="AI API Base URL（自定义端点）")
 @click.option("--ai-thinking/--ai-no-thinking", default=None, help="混合思考模型的思考开关")
+@click.option("--ai-max-tokens", default=0, type=int, help="AI 单次最大输出 token 数（0=默认 2048）")
 @click.option("--asr-key", default="", help="ASR API Key（DashScope）")
 @click.option("--asr-model", default="", help="ASR 模型名（默认 qwen3-asr-flash）")
 @click.option("--asr-base-url", default="", help="ASR WebSocket URL")
+@click.option("--cleanup-days", default=0, type=int, help="不活跃用户数据保留天数（0=默认 7 天）")
 @click.pass_context
 def quiz(ctx, banks, password, port, host, no_browser, no_record, no_pin, pin,
-         ai_provider, ai_model, ai_key, ai_base_url, ai_thinking,
-         asr_key, asr_model, asr_base_url):
+         ai_provider, ai_model, ai_key, ai_base_url, ai_thinking, ai_max_tokens,
+         asr_key, asr_model, asr_base_url, cleanup_days):
     """启动医考练习 Web 应用（练习/考试/背题模式，支持多题库）
 
     \b
@@ -693,8 +695,9 @@ def quiz(ctx, banks, password, port, host, no_browser, no_record, no_pin, pin,
                password=password, no_record=no_record, no_pin=no_pin, pin=pin,
                ai_provider=ai_provider, ai_model=ai_model,
                ai_api_key=ai_key, ai_base_url=ai_base_url,
-               ai_thinking=ai_thinking,
-               asr_api_key=asr_key, asr_model=asr_model, asr_base_url=asr_base_url)
+               ai_thinking=ai_thinking, ai_max_tokens=ai_max_tokens,
+               asr_api_key=asr_key, asr_model=asr_model, asr_base_url=asr_base_url,
+               cleanup_days=cleanup_days)
 
 
 def main():

@@ -55,10 +55,14 @@ _ai_model:    str  = ""
 _ai_provider: str  = ""
 _ai_enable_thinking: "bool | None" = None
 
+_ai_max_tokens: int = 2048  # AI 单次最大输出 token 数
+
 # ── ASR 语音识别 ──
 _asr_api_key:  str = ""
 _asr_model:    str = ""
 _asr_base_url: str = ""
+
+_cleanup_days: int = 7  # 不活跃用户数据保留天数
 
 # ── 速率限制 ──
 _RATE_LIMIT  = 120
@@ -1611,10 +1615,14 @@ def api_ai_chat():
             model=_ai_model,
             messages=messages,
             temperature=0.7,
-            max_tokens=2048,
+            max_tokens=_ai_max_tokens,
             enable_thinking=_ai_enable_thinking,
             provider=_ai_provider,
         ):
+            if chunk.get("truncated"):
+                # 输出被 max_tokens 截断，通知前端显示「继续」按钮
+                yield f"data: {_json.dumps({'truncated': True})}\n\n"
+                continue
             if chunk.get("done"):
                 yield "data: [DONE]\n\n"
                 return
@@ -1622,6 +1630,118 @@ def api_ai_chat():
                 yield f"data: {_json.dumps({'error': chunk['error']})}\n\n"
                 return
             yield f"data: {_json.dumps({'content': chunk.get('content', ''), 'reasoning': chunk.get('reasoning', '')})}\n\n"
+
+    from flask import Response
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+
+@app.post("/api/ai/report")
+def api_ai_report():
+    """流式生成 AI 考试分析报告。"""
+    if _ai_client is None:
+        return jsonify({"error": "AI 功能未配置"}), 503
+
+    data = request.get_json(silent=True) or {}
+    total    = int(data.get("total", 0))
+    correct  = int(data.get("correct", 0))
+    wrong    = int(data.get("wrong", 0))
+    skip     = int(data.get("skip", 0))
+    time_sec = int(data.get("time_sec", 0))
+    score    = float(data.get("score", 0))
+    max_score = float(data.get("max_score", 0))
+    by_unit  = data.get("by_unit", [])
+    wrong_items = data.get("wrong_items", [])
+
+    pct = (correct * 100 // total) if total > 0 else 0
+
+    # 章节分析摘要
+    unit_summary = ""
+    for u in by_unit:
+        rate = (u.get("correct", 0) * 100 // u.get("total", 1)) if u.get("total", 0) > 0 else 0
+        unit_summary += f"  - {u.get('unit','?')}：{u.get('correct',0)}/{u.get('total',0)} 题正确（正确率 {rate}%）\n"
+    if not unit_summary:
+        unit_summary = "  （无章节数据）\n"
+
+    # 错题明细
+    wrong_summary = ""
+    for i, w in enumerate(wrong_items[:30]):
+        wrong_summary += (
+            f"  {i+1}. [{w.get('unit','?')}/{w.get('mode','?')}] "
+            f"{w.get('text','')[:60]}（正确答案：{w.get('answer','?')}，"
+            f"你的答案：{w.get('user_ans','?')}）\n"
+        )
+    if len(wrong_items) > 30:
+        wrong_summary += f"  ...（另有 {len(wrong_items)-30} 道错题未列出）\n"
+    if not wrong_summary:
+        wrong_summary = "  （全部答对！）\n"
+
+    mins, secs = divmod(time_sec, 60)
+    hours, mins = divmod(mins, 60)
+    time_str = f"{hours}:{mins:02d}:{secs:02d}" if hours else f"{mins}:{secs:02d}"
+    score_str = f"得分：{score:.1f} / {max_score:.1f} 分\n" if max_score > 0 else ""
+
+    prompt = f"""你是一位经验丰富的医学考试辅导老师。学生刚完成了一次模拟考试，请根据以下成绩数据，为他生成一份详细的考试分析报告。
+
+## 考试概况
+总题数：{total} 题
+答对：{correct} 题（正确率 {pct}%）
+答错：{wrong} 题
+未答：{skip} 题
+用时：{time_str}
+{score_str}
+## 章节正确率分布
+{unit_summary}
+## 答错题目明细
+{wrong_summary}
+## 请完成以下分析报告
+
+请按以下结构输出（使用 Markdown 格式）：
+
+### 📊 总体评价
+[对整体表现做简短评价，指出优势和不足]
+
+### 🔍 薄弱章节分析
+[列出正确率低于 60% 的章节，分析可能的知识薄弱点]
+
+### ❌ 错题规律分析
+[归纳答错题目的规律：是概念混淆、题型不熟、还是某类知识点集中薄弱]
+
+### 📚 针对性复习建议
+[给出 3-5 条具体的复习建议，按优先级排列]
+
+### 💪 下一步学习计划
+[建议接下来 1-2 周的具体学习安排]
+
+请用鼓励且专业的语气，分析要具体，避免泛泛而谈。"""
+
+    from med_exam_toolkit.ai.client import chat_completion_stream
+    messages = [{"role": "user", "content": prompt}]
+
+    # 报告需要更多 token，默认 4096
+    report_max_tokens = _ai_max_tokens if _ai_max_tokens > 2048 else 4096
+
+    def generate():
+        for chunk in chat_completion_stream(
+            client=_ai_client,
+            model=_ai_model,
+            messages=messages,
+            temperature=0.7,
+            max_tokens=report_max_tokens,
+            enable_thinking=_ai_enable_thinking,
+            provider=_ai_provider,
+        ):
+            if chunk.get("truncated"):
+                yield f"data: {_json.dumps({'truncated': True})}\n\n"
+                continue
+            if chunk.get("done"):
+                yield "data: [DONE]\n\n"
+                return
+            if chunk.get("error"):
+                yield f"data: {_json.dumps({'error': chunk['error']})}\n\n"
+                return
+            yield f"data: {_json.dumps({'content': chunk.get('content', '')})}\n\n"
 
     from flask import Response
     return Response(generate(), mimetype="text/event-stream",
@@ -1807,6 +1927,8 @@ def start_quiz(
     _ai_model  = ""
     _ai_provider = ""
     _ai_enable_thinking = ai_thinking
+    _ai_max_tokens      = ai_max_tokens if ai_max_tokens > 0 else 2048
+    _cleanup_days       = cleanup_days  if cleanup_days  > 0 else 7
     if ai_provider and ai_api_key:
         try:
             from med_exam_toolkit.ai.client import make_client, default_model
@@ -1921,9 +2043,9 @@ def start_quiz(
             for b in _banks:
                 if b.get("db_path"):
                     try:
-                        users, rows = progress.cleanup_stale_users(Path(b["db_path"]))
+                        users, rows = progress.cleanup_stale_users(Path(b["db_path"]), _cleanup_days)
                         if users > 0:
-                            print(f"[cleanup] {b.get('name','?')}: removed {users} stale users ({rows} rows)")
+                            print(f"[cleanup] {b.get('name','?')}: removed {users} stale users ({rows} rows) [threshold={_cleanup_days}d]")
                     except Exception:
                         pass
             _t.sleep(86400)  # 每 24 小时
