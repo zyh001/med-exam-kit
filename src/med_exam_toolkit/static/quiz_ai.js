@@ -77,6 +77,52 @@ function loadMermaid() {
  * 本函数找到这些节点，用 mermaid.render() 替换为 SVG。
  * @param {HTMLElement} container
  */
+/**
+ * 清理 AI 生成的 mermaid 定义里混入的 HTML 污染。
+ *
+ * 常见污染来源：
+ *  1. marked 对 <> 做了 HTML 实体转义 → &lt; &gt; &amp; 等
+ *  2. AI 在节点文本里内嵌了 <br>、<b>、<i>、<span> 等真实 HTML 标签
+ *  3. AI 加了 HTML 注释 <!-- ... -->
+ *  4. AI 在代码块外层包了 <p>...</p> 等块级标签
+ *  5. 中文引号被 marked 转成 &ldquo; &rdquo;
+ */
+function cleanMermaidDef(raw) {
+  let s = raw;
+
+  // ① 去掉外层 HTML 块标签（marked 有时会把代码块包在 <p> 里）
+  s = s.replace(/^<(?:p|div|section|article)[^>]*>([\s\S]*?)<\/(?:p|div|section|article)>\s*$/i, '$1');
+
+  // ② 还原 HTML 实体 → 原始字符（marked 渲染时已对特殊符号做了转义）
+  s = s
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&amp;/g, '&')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&ldquo;/g, '\u201c')
+    .replace(/&rdquo;/g, '\u201d')
+    .replace(/&laquo;/g, '\u00ab')
+    .replace(/&raquo;/g, '\u00bb')
+    .replace(/&nbsp;/g, ' ');
+
+  // ③ 删除 HTML 注释
+  s = s.replace(/<!--[\s\S]*?-->/g, '');
+
+  // ④ 把节点文本里的内联 HTML 标签替换为文本等价物
+  //    <br> → 换行（mermaid 节点标签支持 \n）
+  s = s.replace(/<br\s*\/?>/gi, '\n');
+  //    格式标签（<b>/<strong>/<i>/<em>...）→ 只保留内部文本
+  s = s.replace(/<\/?(b|strong|i|em|u|s|del|ins|mark|span|small|sup|sub|code|font)[^>]*>/gi, '');
+  //    其余残留 HTML 标签一律删掉，避免 mermaid parser 报错
+  s = s.replace(/<[a-zA-Z][^>]*\/?>/g, '').replace(/<\/[a-zA-Z]+>/g, '');
+
+  // ⑤ 清理连续空行
+  s = s.replace(/\n{3,}/g, '\n\n');
+
+  return s.trim();
+}
+
 async function renderMermaidBlocks(container) {
   // 检测 language-mermaid 或 lang-mermaid class
   const codeEls = container.querySelectorAll('code.language-mermaid, code.lang-mermaid');
@@ -85,7 +131,6 @@ async function renderMermaidBlocks(container) {
   try {
     await loadMermaid();
   } catch(e) {
-    // 网络不可达时降级：显示原始代码 + 提示
     codeEls.forEach(code => {
       const pre = code.closest('pre') || code;
       const warn = document.createElement('p');
@@ -98,7 +143,8 @@ async function renderMermaidBlocks(container) {
 
   for (const code of codeEls) {
     const pre = code.closest('pre') || code;
-    const graphDef = code.textContent.trim();
+    // textContent 含 marked 转义，cleanMermaidDef 负责还原并去除 HTML 污染
+    const graphDef = cleanMermaidDef(code.textContent.trim());
     if (!graphDef) continue;
 
     const id = 'mermaid-' + (++_mermaidCounter);
@@ -107,19 +153,25 @@ async function renderMermaidBlocks(container) {
       const wrapper = document.createElement('div');
       wrapper.className = 'ai-mermaid-wrap';
       wrapper.innerHTML = svg;
-      // 让 SVG 宽度自适应容器
       const svgEl = wrapper.querySelector('svg');
-      if (svgEl) {
-        svgEl.style.maxWidth = '100%';
-        svgEl.style.height = 'auto';
-      }
+      if (svgEl) { svgEl.style.maxWidth = '100%'; svgEl.style.height = 'auto'; }
       pre.replaceWith(wrapper);
     } catch(e) {
-      // 语法错误时保留原始代码块，添加错误提示
-      const errMsg = document.createElement('p');
-      errMsg.className = 'ai-mermaid-err';
-      errMsg.textContent = '⚠ 流程图语法错误：' + (e.message || String(e)).slice(0, 120);
-      pre.parentNode.insertBefore(errMsg, pre.nextSibling);
+      // 语法错误：显示可折叠的错误详情 + 清理后的原始定义（方便复制调试）
+      const errDetails = document.createElement('details');
+      errDetails.className = 'ai-mermaid-err';
+      const summary = document.createElement('summary');
+      summary.textContent = '⚠ 流程图语法错误，点击查看详情';
+      const errText = document.createElement('p');
+      errText.style.cssText = 'margin:6px 0 4px;font-size:12px;opacity:.8';
+      errText.textContent = (e.message || String(e)).slice(0, 200);
+      const rawPre = document.createElement('pre');
+      rawPre.style.cssText = 'font-size:11px;opacity:.6;margin-top:6px;white-space:pre-wrap;word-break:break-all;max-height:160px;overflow-y:auto';
+      rawPre.textContent = graphDef;
+      errDetails.appendChild(summary);
+      errDetails.appendChild(errText);
+      errDetails.appendChild(rawPre);
+      pre.parentNode.insertBefore(errDetails, pre.nextSibling);
     }
   }
 }
