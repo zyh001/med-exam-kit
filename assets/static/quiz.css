@@ -2314,45 +2314,91 @@ button,a,[role=button],label{touch-action:manipulation}
   position: fixed;
   inset: 0;
   z-index: 9999;
-  background: rgba(0,0,0,.85);
+  background: rgba(0,0,0,.88);
   align-items: center;
   justify-content: center;
-  cursor: zoom-out;
+  overflow: hidden;
+  touch-action: none;
   animation: lbFadeIn .18s ease;
 }
 #img-lightbox.open { display: flex; }
-@keyframes lbFadeIn {
-  from { opacity: 0; }
-  to   { opacity: 1; }
+@keyframes lbFadeIn { from { opacity:0 } to { opacity:1 } }
+
+/* 图片变换容器 */
+#lb-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transform-origin: center center;
+  will-change: transform;
+  user-select: none;
+  -webkit-user-select: none;
 }
-#img-lightbox img {
+#lb-wrap img {
   max-width: 92vw;
   max-height: 88vh;
   border-radius: 8px;
   box-shadow: 0 8px 48px rgba(0,0,0,.7);
-  cursor: default;
+  display: block;
+  pointer-events: none;   /* 让鼠标事件穿透到 _lb */
   animation: lbZoomIn .18s ease;
-  user-select: none;
 }
-@keyframes lbZoomIn {
-  from { transform: scale(.88); opacity: 0; }
-  to   { transform: scale(1);   opacity: 1; }
-}
+@keyframes lbZoomIn { from { transform:scale(.88); opacity:0 } to { transform:scale(1); opacity:1 } }
+
+/* 关闭按钮 */
 #img-lightbox-close {
   position: fixed;
-  top: 16px;
-  right: 20px;
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  border: none;
+  top: 14px; right: 18px;
+  width: 36px; height: 36px;
+  border-radius: 50%; border: none;
   background: rgba(255,255,255,.15);
-  color: #fff;
-  font-size: 20px;
-  line-height: 36px;
-  text-align: center;
-  cursor: pointer;
+  color: #fff; font-size: 20px;
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer; z-index: 10001;
   transition: background .15s;
-  z-index: 10000;
 }
 #img-lightbox-close:hover { background: rgba(255,255,255,.3); }
+
+/* 工具栏（左下角） */
+#lb-toolbar {
+  position: fixed;
+  bottom: 20px; left: 50%;
+  transform: translateX(-50%);
+  display: flex; align-items: center; gap: 6px;
+  background: rgba(0,0,0,.55);
+  backdrop-filter: blur(8px);
+  border-radius: 24px;
+  padding: 6px 12px;
+  z-index: 10001;
+  user-select: none;
+}
+#lb-zpct {
+  color: rgba(255,255,255,.9);
+  font-size: 13px; font-weight: 600;
+  min-width: 46px; text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.lb-tbtn {
+  width: 32px; height: 32px;
+  background: rgba(255,255,255,.15);
+  border: none; border-radius: 50%;
+  color: #fff; font-size: 18px;
+  cursor: pointer; display: flex;
+  align-items: center; justify-content: center;
+  transition: background .15s; line-height: 1;
+}
+.lb-tbtn:hover { background: rgba(255,255,255,.3); }
+
+/* 居中浮现的百分比提示 */
+#lb-zoom-ind {
+  position: fixed;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(0,0,0,.6);
+  color: #fff; font-size: 22px; font-weight: 700;
+  padding: 10px 20px; border-radius: 12px;
+  pointer-events: none;
+  opacity: 0; transition: opacity .2s;
+  z-index: 10002;
+}
+#lb-zoom-ind.visible { opacity: 1; }
