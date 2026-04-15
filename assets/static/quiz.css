@@ -431,7 +431,29 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
   position:relative;
 }
-.quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;-webkit-tap-highlight-color:transparent}
+
+/* ── 极简刷题模式 ────────────────────────────────────────────── */
+.s-quiz-zen #quiz-back-btn,
+.s-quiz-zen #calc-toggle-btn,
+.s-quiz-zen #share-quiz-btn,
+.s-quiz-zen #flag-btn,
+.s-quiz-zen #quiz-timer,
+.s-quiz-zen #quiz-footer,
+.s-quiz-zen .q-grid-panel{display:none !important}
+.s-quiz-zen .quiz-header{border-bottom-color:transparent;background:transparent}
+.s-quiz-zen .quiz-progress-cur{font-size:16px;font-weight:800;color:var(--accent)}
+@keyframes flash-correct{0%,100%{background:transparent}35%{background:rgba(40,190,80,.18)}}
+@keyframes flash-wrong  {0%,100%{background:transparent}35%{background:rgba(220,50,50,.14)}}
+.s-quiz-zen .question-wrap.flash-correct{animation:flash-correct .45s ease}
+.s-quiz-zen .question-wrap.flash-wrong  {animation:flash-wrong   .5s ease}
+.zen-mode-hint{
+  position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
+  background:rgba(0,0,0,.72);color:#fff;padding:10px 22px;
+  border-radius:24px;font-size:14px;font-weight:600;letter-spacing:.3px;
+  pointer-events:none;opacity:0;transition:opacity .25s;z-index:9999;white-space:nowrap;
+}
+.zen-mode-hint.show{opacity:1}
 .quiz-progress-text{display:flex;justify-content:space-between;align-items:baseline;gap:4px}
 .quiz-progress-cur{font-size:15px;font-weight:700;flex-shrink:0;white-space:nowrap}
 .quiz-progress-total{
