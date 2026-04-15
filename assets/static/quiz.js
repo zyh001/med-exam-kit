@@ -3764,20 +3764,19 @@ async function showAIReport() {
 
   // ── 发起流式请求，用 makeStreamingRenderer 渲染 ─────────────
   try {
-    const headers = {
-      'Content-Type': 'application/json',
-      'X-Session-Token': window.SESSION_TOKEN || '',
-    };
-    const uid = typeof _getUIDCookie === 'function' ? _getUIDCookie() : '';
-    if (uid) headers['X-User-ID'] = uid;
-
-    const res = await fetch('/api/ai/report?' + bankQS(), {
-      method: 'POST', headers, body: JSON.stringify(payload),
+    // 使用 apiFetch 确保携带正确的 session token 和 user-id
+    const res = await apiFetch('/api/ai/report?' + bankQS(), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
+    if (!res.ok) {
+      const errText = await res.text().catch(() => '');
+      throw new Error('HTTP ' + res.status + (errText ? ': ' + errText.slice(0,100) : ''));
+    }
 
     // 清除 loading，创建内容容器
-    loadingEl.remove();
+    if (loadingEl.parentNode) loadingEl.remove();
     const contentEl = document.createElement('div');
     contentEl.className = 'ai-report-msg';
     messagesEl.appendChild(contentEl);
@@ -3809,23 +3808,22 @@ async function showAIReport() {
             if (renderer) {
               renderer.push(obj.content);
             } else {
-              // fallback：纯文字追加
               contentEl.textContent += obj.content;
             }
-            // 自动滚动到底部
             messagesEl.scrollTop = messagesEl.scrollHeight;
           }
-        } catch(e) { /* ignore parse errors */ }
+        } catch(parseErr) { /* ignore parse errors */ }
       }
     }
     if (renderer) renderer.end();
 
   } catch(e) {
-    loadingEl.remove();
+    if (loadingEl.parentNode) loadingEl.remove();
     const errEl = document.createElement('p');
     errEl.style.cssText = 'color:var(--danger);padding:16px;font-size:13px';
     errEl.textContent = '⚠ 报告生成失败：' + (e.message || '网络错误');
     messagesEl.appendChild(errEl);
+    console.error('[AI Report]', e);
   }
 }
 
@@ -4639,6 +4637,66 @@ function refreshFavBadge() {
 }
 
 /** 打开收藏页 */
+/** 打开错题练习独立页面 */
+async function openWrongBook() {
+  showScreen('s-wrongbook');
+  await _renderWrongBookScreen();
+}
+
+async function _renderWrongBookScreen() {
+  const bankNameEl = document.getElementById('wb-bank-name');
+  if (bankNameEl) bankNameEl.textContent = (S.bankInfo && S.bankInfo.name) || '';
+
+  const listEl  = document.getElementById('wb-unit-list');
+  const emptyEl = document.getElementById('wb-empty');
+  const cntAll  = document.getElementById('wb-cnt-all');
+
+  if (listEl) listEl.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:13px">加载中…</div>';
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  try {
+    const res = await apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json());
+    const allItems = res.items || [];
+
+    if (!allItems.length) {
+      if (listEl) listEl.innerHTML = '';
+      if (emptyEl) emptyEl.style.display = '';
+      if (cntAll)  cntAll.textContent = '0';
+      return;
+    }
+
+    if (cntAll) cntAll.textContent = allItems.length;
+
+    // 按 unit 分组
+    const unitMap = {};
+    allItems.forEach(it => {
+      const unit = it.unit || '未分类';
+      if (!unitMap[unit]) unitMap[unit] = 0;
+      unitMap[unit]++;
+    });
+
+    if (listEl) {
+      listEl.innerHTML = Object.entries(unitMap).map(([unit, cnt]) =>
+        `<div class="fav-unit-row" data-unit="${esc(unit)}">
+          <div class="fav-unit-left">
+            <div class="fav-unit-name">${esc(unit)}</div>
+            <div class="fav-unit-count">${cnt} 题</div>
+          </div>
+          <span class="fav-unit-chevron">›</span>
+        </div>`
+      ).join('');
+
+      listEl.onclick = function(e) {
+        const row = e.target.closest('.fav-unit-row');
+        if (!row || !row.dataset.unit) return;
+        startWrongBookReview(row.dataset.unit, allItems);
+      };
+    }
+  } catch(e) {
+    if (listEl) listEl.innerHTML = '<div style="padding:16px;color:var(--danger);font-size:13px">⚠ 加载失败</div>';
+  }
+}
+
 function openFavorites() {
   showScreen('s-favorites');
   _renderFavoritesScreen();
