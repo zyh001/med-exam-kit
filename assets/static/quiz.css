@@ -434,19 +434,67 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;-webkit-tap-highlight-color:transparent}
 
 /* ── 极简刷题模式 ────────────────────────────────────────────── */
+/* 隐藏非必要控件 */
 .s-quiz-zen #quiz-back-btn,
 .s-quiz-zen #calc-toggle-btn,
 .s-quiz-zen #share-quiz-btn,
 .s-quiz-zen #flag-btn,
 .s-quiz-zen #quiz-timer,
 .s-quiz-zen #quiz-footer,
-.s-quiz-zen .q-grid-panel{display:none !important}
+.s-quiz-zen .q-grid-panel,
+.s-quiz-zen .explain-panel,
+.s-quiz-zen .q-tag-row,
+.s-quiz-zen .q-type-tag{display:none !important}
+
+/* header：透明无边 */
 .s-quiz-zen .quiz-header{border-bottom-color:transparent;background:transparent}
 .s-quiz-zen .quiz-progress-cur{font-size:16px;font-weight:800;color:var(--accent)}
-@keyframes flash-correct{0%,100%{background:transparent}35%{background:rgba(40,190,80,.18)}}
-@keyframes flash-wrong  {0%,100%{background:transparent}35%{background:rgba(220,50,50,.14)}}
-.s-quiz-zen .question-wrap.flash-correct{animation:flash-correct .45s ease}
-.s-quiz-zen .question-wrap.flash-wrong  {animation:flash-wrong   .5s ease}
+
+/* 选项：去掉卡片感，纯行列表 */
+.s-quiz-zen .opt{
+  background:transparent;border:none;border-radius:0;
+  padding:11px 0;border-bottom:1px solid var(--border);
+  transition:opacity .15s;
+}
+.s-quiz-zen .opt:last-child{border-bottom:none}
+.s-quiz-zen .opt:hover:not(:disabled){background:transparent;border-color:transparent;border-bottom:1px solid var(--border)}
+.s-quiz-zen .opt:active:not(:disabled){transform:none}
+/* 选中状态：仅字母圈变色，行无背景 */
+.s-quiz-zen .opt.selected{background:transparent;border-bottom:1px solid var(--border)}
+.s-quiz-zen .opt.selected .opt-label{background:var(--accent);color:#fff;box-shadow:0 2px 6px rgba(var(--accent-rgb),.35)}
+/* 答对：字母圈绿，文字正常 */
+.s-quiz-zen .opt.correct{background:transparent;border-bottom:1px solid var(--border);animation:none}
+.s-quiz-zen .opt.correct .opt-label{background:var(--success);color:#fff;box-shadow:0 2px 6px rgba(40,190,80,.35)}
+/* 答错：字母圈红，文字正常 */
+.s-quiz-zen .opt.wrong{background:transparent;border-bottom:1px solid var(--border);animation:none}
+.s-quiz-zen .opt.wrong .opt-label{background:var(--danger);color:#fff;box-shadow:0 2px 6px rgba(220,50,50,.3)}
+/* 多选选中 */
+.s-quiz-zen .opt.multi-selected{background:transparent;border-bottom:1px solid var(--border)}
+.s-quiz-zen .opt.multi-selected .opt-label{background:var(--accent);color:#fff}
+/* dim 题目轻化 */
+.s-quiz-zen .opt.dim{opacity:.35}
+
+/* 共用题干框：去掉边框和背景，纯内容 */
+.s-quiz-zen .q-stem{
+  background:transparent;border:none;border-radius:0;
+  border-bottom:1px solid var(--border);
+  padding-left:0;padding-right:0;margin-bottom:12px;
+}
+.s-quiz-zen .q-stem-label{color:var(--muted);opacity:.7}
+
+/* 共用选项块：去掉边框和背景 */
+.s-quiz-zen .q-shared-opts{
+  background:transparent;border:none;border-left:none;
+  border-bottom:1px solid var(--border);
+  padding-left:0;padding-right:0;margin-bottom:12px;
+}
+.s-quiz-zen .q-shared-opts-label{color:var(--muted);opacity:.7}
+.s-quiz-zen .q-shared-opts-label::after{background:var(--muted)}
+
+/* 选项列表容器去掉额外间距 */
+.s-quiz-zen .opts-list{gap:0}
+
+/* 答对/答错无背景闪动，已删除 flash 动画类 */
 .zen-mode-hint{
   position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
   background:rgba(0,0,0,.72);color:#fff;padding:10px 22px;
@@ -454,6 +502,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   pointer-events:none;opacity:0;transition:opacity .25s;z-index:9999;white-space:nowrap;
 }
 .zen-mode-hint.show{opacity:1}
+
 .quiz-progress-text{display:flex;justify-content:space-between;align-items:baseline;gap:4px}
 .quiz-progress-cur{font-size:15px;font-weight:700;flex-shrink:0;white-space:nowrap}
 .quiz-progress-total{

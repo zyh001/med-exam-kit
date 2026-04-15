@@ -2312,20 +2312,19 @@ function selectOpt(letter, btn) {
       savePracticeSession();
       const answeredIdx = S.cur;
       if (_zenMode) {
-        // 极简模式：闪动 + 快速处理
-        _zenFlash(isCorrectAns);
+        // 极简模式：直接渲染结果，无闪动
         setTimeout(() => {
           if (S.cur !== answeredIdx) return;
-          renderQ('none');  // 更新选项颜色高亮
+          renderQ('none');  // 更新选项颜色（字母圈绿/红）
           if (isCorrectAns) {
-            // 答对：400ms 后自动下一题，不展开解析
+            // 答对：500ms 后自动切下一题
             _autoAdvanceTimer = setTimeout(() => {
               _autoAdvanceTimer = null;
               if (S.cur !== answeredIdx) return;
               const total = S.questions.length;
               if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
               else finishPractice();
-            }, 400);
+            }, 500);
           }
           // 答错：停留，用户自行左右滑动切题
         }, 130);
@@ -2625,15 +2624,7 @@ function exitZenMode() {
   });
 })();
 
-function _zenFlash(correct) {
-  var wrap = document.getElementById('question-wrap');
-  if (!wrap) return;
-  var cls = correct ? 'flash-correct' : 'flash-wrong';
-  wrap.classList.remove('flash-correct', 'flash-wrong');
-  void wrap.offsetWidth;
-  wrap.classList.add(cls);
-  wrap.addEventListener('animationend', function() { wrap.classList.remove(cls); }, { once: true });
-}
+// _zenFlash 已废弃：极简模式不再使用背景闪动效果
 
 // ── 收藏系统 ────────────────────────────────────────────────────
 const FAV_KEY      = 'med_exam_favorites';
