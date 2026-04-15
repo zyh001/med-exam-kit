@@ -715,8 +715,6 @@
             <button class="res-btn ai-report" onclick="showAIReport()" id="res-ai-report-btn" style="display:none">🤖 AI 分析报告</button>
             <button class="res-btn ghost"     onclick="showScreen('s-home')">🏠 回到主页</button>
           </div>
-          <!-- AI 分析报告容器（点击按钮后展开） -->
-          <div id="ai-report-container" style="display:none"></div>
         </div>
       </div>
     </div>
@@ -1196,6 +1194,18 @@
         <div class="cadv-help-row"><span class="cadv-help-fn">sign(-7)  sign(3)</span><span class="cadv-help-desc">符号函数 → -1 / 1</span></div>
         <div class="cadv-help-row"><span class="cadv-help-fn">lgamma(10)</span><span class="cadv-help-desc">ln(Γ(10)) ≈ 12.8</span></div>
       </div>
+    </div>
+  </div>
+
+  <!-- AI 考试分析报告底部弹层（复用 AI 答疑面板样式，独立于结果页） -->
+  <div id="ai-report-modal" style="display:none" onclick="if(event.target===this)closeAIReport()" class="ai-report-backdrop">
+    <div class="ai-report-sheet">
+      <div class="ai-report-sheet-hd">
+        <span class="ai-report-sheet-title">🤖 AI 考试分析报告</span>
+        <button class="ai-report-close" onclick="closeAIReport()">✕</button>
+      </div>
+      <!-- 消息列表区域，复用 .ai-messages 样式 -->
+      <div class="ai-messages" id="ai-report-messages"></div>
     </div>
   </div>
 

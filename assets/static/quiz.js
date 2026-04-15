@@ -3671,64 +3671,59 @@ function renderResults() {
     aiReportBtn.style.display = (isExamDone && aiOk) ? '' : 'none';
   }
   // 重置报告容器（重做后隐藏旧报告）
-  const rptBox = document.getElementById('ai-report-container');
-  if (rptBox) { rptBox.style.display = 'none'; rptBox.innerHTML = ''; }
+  // 重置 AI 报告弹层（重做后清空旧报告）
+  const aiModal = document.getElementById('ai-report-modal');
+  if (aiModal) aiModal.style.display = 'none';
+  const aiMsgs = document.getElementById('ai-report-messages');
+  if (aiMsgs) aiMsgs.innerHTML = '';
 }
 
 /** 生成并流式显示 AI 考试分析报告 */
+function closeAIReport() {
+  const modal = document.getElementById('ai-report-modal');
+  if (modal) modal.style.display = 'none';
+}
+
 async function showAIReport() {
   const R = S.results;
   if (!R) return;
 
-  const btn = document.getElementById('res-ai-report-btn');
-  const container = document.getElementById('ai-report-container');
-  if (!container) return;
+  // 先预加载 quiz_ai.js（含 makeStreamingRenderer / markedRender）
+  try { await _loadQuizAI(); } catch(e) {}
 
-  // 如果已生成过，切换显示/隐藏
-  if (container.dataset.done === '1') {
-    container.style.display = container.style.display === 'none' ? '' : 'none';
-    btn && (btn.textContent = container.style.display === 'none' ? '🤖 AI 分析报告' : '🤖 收起报告');
-    return;
-  }
+  // 打开底部弹层
+  const modal = document.getElementById('ai-report-modal');
+  const messagesEl = document.getElementById('ai-report-messages');
+  if (!modal || !messagesEl) return;
+  modal.style.display = 'flex';
+  messagesEl.innerHTML = '';
 
-  // 预加载 quiz_ai.js（含 markedRender / marked），确保 Markdown 可渲染
-  try { await _loadQuizAI(); } catch(e) { /* 静默，降级为纯文本 */ }
+  // Loading 占位
+  const loadingEl = document.createElement('div');
+  loadingEl.className = 'ai-report-loading';
+  loadingEl.innerHTML = '<span class="ai-spinner"></span> AI 正在分析考试报告，请稍候…';
+  messagesEl.appendChild(loadingEl);
 
-  // ── 辅助：反序列化 R.ans 中经 _serializeAns 序列化的 Set ──────────
+  // 辅助：反序列化 R.ans 中经 _serializeAns 序列化的 Set
   function _deser(v) {
     if (v && typeof v === 'object' && v.__set) return new Set(v.v || []);
     return v;
   }
 
-  // 构建传给后端的数据
-  // ── 收集考试数据（全量，不截断）─────────────────────────────────
-  // 策略：
-  //   by_unit    → 全部章节完整统计（按正确率升序），数据紧凑，不截断
-  //   by_mode    → 全部题型统计，反映题型层面弱点
-  //   wrong_stat → 全部错题的「章节+题型+正确答案+用户答案」（无题干），全量
-  //   wrong_sample → 仅前 20 条带题干（供 AI 识别错误规律用）
-  //   题干本身冗余且占 token，大题量时去掉题干能覆盖全部错题
-
-  // 1. 章节统计（全量，按正确率升序）
+  // ── 构建 payload（与原逻辑相同）────────────────────────────
   const byUnit = Object.entries(R.byUnit || {}).map(([unit, v]) => ({
     unit, correct: v.correct, total: v.total,
-  })).sort((a, b) => {
-    const ra = a.total > 0 ? a.correct / a.total : 1;
-    const rb = b.total > 0 ? b.correct / b.total : 1;
-    return ra - rb;
-  });
+  })).sort((a, b) => (a.total > 0 ? a.correct/a.total : 1) - (b.total > 0 ? b.correct/b.total : 1));
 
-  // 2. 题型统计（全量）
   const byModeMap = {};
   (R.qs || []).forEach((q, i) => {
     const mode = q.mode || '未知';
     if (!byModeMap[mode]) byModeMap[mode] = { correct: 0, total: 0 };
     byModeMap[mode].total++;
     let sel = _deser(R.ans[i]);
-    const empty = !sel || (sel instanceof Set && sel.size === 0);
-    if (!empty) {
+    if (sel && !(sel instanceof Set && sel.size === 0)) {
       const isMulti = typeof isMultiQ === 'function' ? isMultiQ(q) : false;
-      let isCorrect = isMulti
+      const isCorrect = isMulti
         ? (() => { const cs = new Set(q.answer.split('')); const ss = sel instanceof Set ? sel : new Set([sel]); return ss.size === cs.size && [...cs].every(l => ss.has(l)); })()
         : sel === q.answer;
       if (isCorrect) byModeMap[mode].correct++;
@@ -3736,82 +3731,59 @@ async function showAIReport() {
   });
   const byMode = Object.entries(byModeMap).map(([mode, v]) => ({
     mode, correct: v.correct, total: v.total,
-  })).sort((a, b) => {
-    const ra = a.total > 0 ? a.correct / a.total : 1;
-    const rb = b.total > 0 ? b.correct / b.total : 1;
-    return ra - rb;
-  });
+  })).sort((a, b) => (a.total > 0 ? a.correct/a.total : 1) - (b.total > 0 ? b.correct/b.total : 1));
 
-  // 3. 错题统计：全量（仅 unit+mode+answer+user_ans，无题干）
-  const wrongStat = [];
-  // 4. 错题样本：前 20 条带题干（AI 识别错误规律用）
-  const wrongSample = [];
-
+  const wrongStat = [], wrongSample = [];
   (R.qs || []).forEach((q, i) => {
     let sel = _deser(R.ans[i]);
-    const empty = !sel || (sel instanceof Set && sel.size === 0);
-    if (empty) return;
+    if (!sel || (sel instanceof Set && sel.size === 0)) return;
     const isMulti = typeof isMultiQ === 'function' ? isMultiQ(q) : false;
-    let isCorrect = isMulti
+    const isCorrect = isMulti
       ? (() => { const cs = new Set(q.answer.split('')); const ss = sel instanceof Set ? sel : new Set([sel]); return ss.size === cs.size && [...cs].every(l => ss.has(l)); })()
       : sel === q.answer;
     if (!isCorrect) {
       const userAns = sel instanceof Set ? [...sel].join('') : (sel || '');
-      wrongStat.push({ unit: q.unit || '', mode: q.mode || '', answer: q.answer || '', user_ans: userAns });
-      if (wrongSample.length < 20) {
-        wrongSample.push({
-          unit: q.unit || '', mode: q.mode || '',
-          text: (q.text || q.stem || '').slice(0, 60),
-          answer: q.answer || '', user_ans: userAns,
-        });
-      }
+      wrongStat.push({ unit: q.unit||'', mode: q.mode||'', answer: q.answer||'', user_ans: userAns });
+      if (wrongSample.length < 20)
+        wrongSample.push({ unit: q.unit||'', mode: q.mode||'', text: (q.text||q.stem||'').slice(0,60), answer: q.answer||'', user_ans: userAns });
     }
   });
 
   const payload = {
-    total:     R.total,
-    correct:   R.correct,
-    wrong:     R.wrong,
-    skip:      R.skip,
-    time_sec:  R.timeSec || 0,
-    score:     R.totalEarned || 0,
-    max_score: R.totalScore || 0,
-    by_unit:   byUnit,       // 全部章节，按正确率升序
-    by_mode:   byMode,       // 全部题型统计
-    wrong_stat: wrongStat,   // 全部错题（无题干）
-    wrong_sample: wrongSample, // 前20条带题干
+    total: R.total, correct: R.correct, wrong: R.wrong, skip: R.skip,
+    time_sec: R.timeSec || 0, score: R.totalEarned || 0, max_score: R.totalScore || 0,
+    by_unit: byUnit, by_mode: byMode, wrong_stat: wrongStat, wrong_sample: wrongSample,
   };
 
-  // 显示容器，loading 状态
-  container.style.display = '';
-  container.innerHTML = '<div class="ai-report-loading"><span class="ai-spinner"></span> AI 正在分析考试报告，请稍候…</div>';
-  if (btn) { btn.textContent = '🤖 收起报告'; btn.disabled = true; }
-
-  const controller = new AbortController();
-
+  // ── 发起流式请求，用 makeStreamingRenderer 渲染 ─────────────
   try {
-    const uid = typeof _getUIDCookie === 'function' ? _getUIDCookie() : '';
     const headers = {
       'Content-Type': 'application/json',
       'X-Session-Token': window.SESSION_TOKEN || '',
     };
+    const uid = typeof _getUIDCookie === 'function' ? _getUIDCookie() : '';
     if (uid) headers['X-User-ID'] = uid;
 
     const res = await fetch('/api/ai/report?' + bankQS(), {
-      method: 'POST', headers,
-      body: JSON.stringify(payload),
-      signal: controller.signal,
+      method: 'POST', headers, body: JSON.stringify(payload),
     });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
 
-    container.innerHTML = '';
-    const reportEl = document.createElement('div');
-    reportEl.className = 'ai-report-content';
-    container.appendChild(reportEl);
+    // 清除 loading，创建内容容器
+    loadingEl.remove();
+    const contentEl = document.createElement('div');
+    contentEl.className = 'ai-report-msg';
+    messagesEl.appendChild(contentEl);
+
+    // 使用 makeStreamingRenderer（quiz_ai.js 提供，已预加载）
+    let renderer = null;
+    if (typeof makeStreamingRenderer === 'function') {
+      renderer = makeStreamingRenderer(contentEl, null, messagesEl);
+    }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
-    let buf = '', fullText = '';
+    let buf = '';
 
     while (true) {
       const { done, value } = await reader.read();
@@ -3822,49 +3794,34 @@ async function showAIReport() {
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6);
-        if (data === '[DONE]') break;
+        if (data === '[DONE]') { if (renderer) renderer.end(); break; }
         try {
           const obj = JSON.parse(data);
           if (obj.error) throw new Error(obj.error);
           if (obj.content) {
-            fullText += obj.content;
-            // 复用 quiz_ai.js 的 markedRender（已懒加载 marked + 数学公式扩展）
-            if (typeof markedRender === 'function') {
-              reportEl.innerHTML = markedRender(fullText);
-            } else if (typeof marked !== 'undefined' && marked.parse) {
-              reportEl.innerHTML = marked.parse(fullText, { async: false });
+            if (renderer) {
+              renderer.push(obj.content);
             } else {
-              reportEl.textContent = fullText;
+              // fallback：纯文字追加
+              contentEl.textContent += obj.content;
             }
+            // 自动滚动到底部
+            messagesEl.scrollTop = messagesEl.scrollHeight;
           }
-          if (obj.truncated) {
-            const notice = document.createElement('p');
-            notice.className = 'ai-report-truncated';
-            notice.textContent = '⚠ 报告已达输出上限，可通过 --ai-max-tokens 参数增大限制后重新生成。';
-            container.appendChild(notice);
-          }
-        } catch (e) { /* ignore */ }
+        } catch(e) { /* ignore parse errors */ }
       }
     }
-    // 最终渲染一次确保完整
-    if (typeof markedRender === 'function') {
-      reportEl.innerHTML = markedRender(fullText);
-    } else if (typeof marked !== 'undefined' && marked.parse) {
-      reportEl.innerHTML = marked.parse(fullText, { async: false });
-    }
-    // 渲染 mermaid 流程图（如报告中含有）
-    if (typeof renderMermaidBlocks === 'function') {
-      renderMermaidBlocks(container).catch(() => {});
-    }
-    container.dataset.done = '1';
-  } catch (e) {
-    if (e.name !== 'AbortError') {
-      container.innerHTML = '<p class="ai-report-error">⚠ 报告生成失败：' + (e.message || '网络错误') + '</p>';
-    }
-  } finally {
-    if (btn) btn.disabled = false;
+    if (renderer) renderer.end();
+
+  } catch(e) {
+    loadingEl.remove();
+    const errEl = document.createElement('p');
+    errEl.style.cssText = 'color:var(--danger);padding:16px;font-size:13px';
+    errEl.textContent = '⚠ 报告生成失败：' + (e.message || '网络错误');
+    messagesEl.appendChild(errEl);
   }
 }
+
 
 // ════════════════════════════════════════════
 // Utils
@@ -4725,15 +4682,13 @@ function _renderFavoritesScreen() {
 
   listEl.innerHTML = Object.entries(unitMap).map(([unit, fps]) => {
     const disabled = fps.length === 0;
-    return `<div class="fav-unit-row">
+    const clickAttr = disabled ? '' : `onclick="startFavoritesQuiz('unit', ${JSON.stringify(unit)})"`;
+    return `<div class="fav-unit-row${disabled ? ' fav-unit-row-disabled' : ''}" ${clickAttr}>
       <div class="fav-unit-left">
         <div class="fav-unit-name">${esc(unit)}</div>
-        <div class="fav-unit-count">${fps.length} 题</div>
+        <div class="fav-unit-count">${fps.length} 题${disabled ? '　需重新收藏' : ''}</div>
       </div>
-      ${disabled
-        ? `<span class="fav-unit-action fav-unit-disabled" style="opacity:.4;cursor:default">重新收藏</span>`
-        : `<button class="fav-unit-action" onclick="startFavoritesQuiz('unit', ${JSON.stringify(unit)})">继续做题 ›</button>`
-      }
+      ${disabled ? '' : '<span class="fav-unit-chevron">›</span>'}
     </div>`;
   }).join('');
 }
