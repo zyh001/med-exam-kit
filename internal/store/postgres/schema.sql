@@ -153,3 +153,29 @@ CREATE TABLE IF NOT EXISTS share_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_share_expires ON share_tokens(expires_at);
 
+-- ── Migration: 修复 sm2 主键（幂等）────────────────────────────────
+-- 旧版本创建 sm2 时主键为 (user_id, fingerprint)，后续通过 ALTER TABLE ADD COLUMN
+-- 追加了 bank_id，但主键未同步更新。
+-- 导致 ON CONFLICT(user_id, bank_id, fingerprint) DO UPDATE 报错 42P10。
+-- 此迁移检测旧主键并重建为正确的三列主键（幂等，可重复执行）。
+DO $$
+BEGIN
+    -- 如果 sm2 主键不含 bank_id，则重建主键
+    IF NOT EXISTS (
+        SELECT 1
+        FROM   information_schema.key_column_usage kcu
+        JOIN   information_schema.table_constraints tc
+               ON tc.constraint_name = kcu.constraint_name
+               AND tc.table_name    = kcu.table_name
+        WHERE  kcu.table_name  = 'sm2'
+          AND  kcu.column_name = 'bank_id'
+          AND  tc.constraint_type = 'PRIMARY KEY'
+    ) THEN
+        -- 删除旧主键（名称固定为 sm2_pkey，PostgreSQL 默认命名规则）
+        ALTER TABLE sm2 DROP CONSTRAINT IF EXISTS sm2_pkey;
+        -- 重建三列主键
+        ALTER TABLE sm2 ADD PRIMARY KEY (user_id, bank_id, fingerprint);
+        RAISE NOTICE 'sm2 primary key rebuilt: (user_id, bank_id, fingerprint)';
+    END IF;
+END $$;
+
