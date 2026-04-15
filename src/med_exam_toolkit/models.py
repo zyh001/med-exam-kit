@@ -1,5 +1,53 @@
 from __future__ import annotations
+import unicodedata
 from dataclasses import dataclass, field
+
+
+def _is_likely_answer(s: str, max_opt: int = 10) -> bool:
+    """判断 s 是否为合法的选项字母组合（A 到第 max_opt 个字母，无重复）。"""
+    s = s.strip()
+    if not s:
+        return False
+    max_letter = chr(ord('A') + max_opt - 1)
+    seen: set[str] = set()
+    for ch in s:
+        if ch < 'A' or ch > max_letter:
+            return False
+        if ch in seen:
+            return False  # 重复字母不合法（如 'AA'）
+        seen.add(ch)
+    return True
+
+
+def _is_likely_discuss(s: str) -> bool:
+    """判断 s 是否像解析文字（含汉字/标点/空格，且长度 ≥ 4）。"""
+    s = s.strip()
+    if len(s) < 4:
+        return False
+    for ch in s:
+        cat = unicodedata.category(ch)
+        if cat.startswith('Lo') or cat.startswith('P') or ch == ' ':
+            return True
+    return False
+
+
+def sanitize_questions(questions: list) -> int:
+    """自动检测并修复答案与解析对调的题目，返回修复数量。
+    判定条件：answer 含汉字/标点（像解析），discuss 是纯合法选项字母（如 'A'/'BCE'）。
+    支持最多10个选项（A-J），利用实际 options 长度动态限定字母范围。
+    """
+    fixed = 0
+    for q in questions:
+        for sq in q.sub_questions:
+            ans = (sq.answer or '').strip()
+            dis = (sq.discuss or '').strip()
+            if not ans or not dis:
+                continue
+            max_opt = len(sq.options) if sq.options else 10
+            if _is_likely_discuss(ans) and _is_likely_answer(dis, max_opt):
+                sq.answer, sq.discuss = sq.discuss, sq.answer
+                fixed += 1
+    return fixed
 
 
 @dataclass

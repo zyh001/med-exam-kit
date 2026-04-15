@@ -1993,8 +1993,11 @@ def start_quiz(
         bp = Path(bp_str).resolve()
         print(f"[INFO] 加载题库: {bp}")
         questions = load_bank(bp, password)
+        from med_exam_toolkit.models import sanitize_questions as _sanitize
+        fixed = _sanitize(questions)
         sq_total = sum(len(q.sub_questions) for q in questions)
-        print(f"[INFO]   共 {len(questions)} 大题 / {sq_total} 小题")
+        print(f"[INFO]   共 {len(questions)} 大题 / {sq_total} 小题" +
+              (f"，自动修正 {fixed} 道答案/解析对调题目" if fixed else ""))
 
         db_path = None
         record_enabled = not no_record

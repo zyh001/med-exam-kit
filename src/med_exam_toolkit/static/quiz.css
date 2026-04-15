@@ -431,9 +431,9 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
   position:relative;
 }
-.quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.quiz-progress-text{display:flex;justify-content:space-between;align-items:baseline}
-.quiz-progress-cur{font-size:15px;font-weight:700}
+.quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;overflow:hidden}
+.quiz-progress-text{display:flex;justify-content:space-between;align-items:baseline;gap:4px}
+.quiz-progress-cur{font-size:15px;font-weight:700;flex-shrink:0;white-space:nowrap}
 .quiz-progress-total{
   font-size:12px;color:var(--muted);
   max-width:55%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
@@ -452,6 +452,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;
   color:var(--muted);padding:4px 10px;border-radius:8px;
   background:var(--card);border:1px solid var(--border);
+  flex-shrink:0;white-space:nowrap;
 }
 .quiz-timer.urgent{color:var(--danger);border-color:var(--danger);animation:pulse-timer 1s infinite}
 .flag-btn{
