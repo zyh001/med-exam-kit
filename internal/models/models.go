@@ -1,6 +1,34 @@
 package models
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+	"unicode"
+)
+
+// validAnswerRe matches a legitimate answer string: 1–5 uppercase A-E letters (single or multi).
+// Examples: "A", "B", "CE", "ABD"
+var validAnswerRe = regexp.MustCompile(`^[A-E]{1,5}$`)
+
+// isLikelyAnswer returns true if s looks like a multiple-choice answer (A/B/C/D/E combination).
+func isLikelyAnswer(s string) bool {
+	s = strings.TrimSpace(s)
+	return validAnswerRe.MatchString(s)
+}
+
+// isLikelyDiscuss returns true if s looks like an explanation text (contains CJK/punctuation/spaces).
+func isLikelyDiscuss(s string) bool {
+	s = strings.TrimSpace(s)
+	if len([]rune(s)) < 4 {
+		return false
+	}
+	for _, r := range s {
+		if unicode.Is(unicode.Han, r) || unicode.IsPunct(r) || unicode.IsSpace(r) {
+			return true
+		}
+	}
+	return false
+}
 
 // SubQuestion is a single question item (A1/A2 are also stored as one SubQuestion).
 type SubQuestion struct {
@@ -64,6 +92,29 @@ func (sq *SubQuestion) DiscussSource() string {
 	return ""
 }
 
+// IsAnswerDiscussSwapped reports whether answer and discuss appear to have been
+// accidentally swapped: answer looks like an explanation and discuss looks like
+// a valid option letter.
+func (sq *SubQuestion) IsAnswerDiscussSwapped() bool {
+	ans := strings.TrimSpace(sq.Answer)
+	dis := strings.TrimSpace(sq.Discuss)
+	if ans == "" || dis == "" {
+		return false
+	}
+	// Swapped when: answer is long explanation-like text AND discuss is a valid option
+	return isLikelyDiscuss(ans) && isLikelyAnswer(dis)
+}
+
+// SanitizeAnswerDiscuss fixes a swapped answer/discuss pair in-place.
+// Returns true if a swap was detected and corrected.
+func (sq *SubQuestion) SanitizeAnswerDiscuss() bool {
+	if !sq.IsAnswerDiscussSwapped() {
+		return false
+	}
+	sq.Answer, sq.Discuss = sq.Discuss, sq.Answer
+	return true
+}
+
 // Question is the unified question model all parsers normalise to.
 type Question struct {
 	Fingerprint   string         `json:"fingerprint"`
@@ -78,4 +129,18 @@ type Question struct {
 	Discuss       string         `json:"discuss"`
 	SourceFile    string         `json:"source_file"`
 	Raw           map[string]any `json:"raw,omitempty"` // original JSON, not persisted to .mqb
+}
+
+// SanitizeQuestions fixes answer/discuss swaps in-place across all questions.
+// It returns counts: fixed = number of sub-questions corrected.
+// Call this once after loading a bank to silently repair data quality issues.
+func SanitizeQuestions(questions []*Question) (fixed int) {
+	for _, q := range questions {
+		for i := range q.SubQuestions {
+			if q.SubQuestions[i].SanitizeAnswerDiscuss() {
+				fixed++
+			}
+		}
+	}
+	return fixed
 }
