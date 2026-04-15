@@ -1,5 +1,5 @@
 // Service Worker for 医考练习 PWA
-const CACHE_NAME = 'med-quiz-v1.7.2';
+const CACHE_NAME = 'med-quiz-v1.7.1';
 
 const STATIC_ASSETS = [
     '/static/common.css',
