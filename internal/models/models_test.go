@@ -130,3 +130,46 @@ func TestSanitizeQuestions_FixesSwapped(t *testing.T) {
 		t.Fatalf("second sq answer should remain E, got %q", qs[0].SubQuestions[1].Answer)
 	}
 }
+
+func TestSanitizeAnswerDiscuss_TenOptions(t *testing.T) {
+	// 10-option question: answer could be F/G/H/I/J
+	opts := make([]string, 10)
+	for i := range opts { opts[i] = string(rune('A'+i)) + ". 选项" }
+
+	sq := SubQuestion{
+		Options: opts,
+		Answer:  "本题考查心肌梗死的鉴别诊断，需要排除主动脉夹层，选F。",
+		Discuss: "F",
+	}
+	if !sq.IsAnswerDiscussSwapped() {
+		t.Fatal("10-option swap with letter F should be detected")
+	}
+	sq.SanitizeAnswerDiscuss()
+	if sq.Answer != "F" {
+		t.Fatalf("after fix: want F, got %q", sq.Answer)
+	}
+}
+
+func TestIsLikelyAnswerForOptions_Bounds(t *testing.T) {
+	tests := []struct {
+		s      string
+		maxOpt int
+		want   bool
+	}{
+		{"A", 5, true},
+		{"E", 5, true},
+		{"F", 5, false},  // F beyond 5 options
+		{"F", 6, true},   // F valid when 6 options
+		{"J", 10, true},  // J valid when 10 options
+		{"K", 10, false}, // K beyond 10 options
+		{"AA", 10, false},// duplicate letters invalid
+		{"AB", 5, true},  // multi-select
+		{"ABF", 10, true},// multi-select within range
+	}
+	for _, tc := range tests {
+		got := isLikelyAnswerForOptions(tc.s, tc.maxOpt)
+		if got != tc.want {
+			t.Errorf("isLikelyAnswerForOptions(%q, %d) = %v, want %v", tc.s, tc.maxOpt, got, tc.want)
+		}
+	}
+}

@@ -6,14 +6,44 @@ import (
 	"unicode"
 )
 
-// validAnswerRe matches a legitimate answer string: 1–5 uppercase A-E letters (single or multi).
-// Examples: "A", "B", "CE", "ABD"
-var validAnswerRe = regexp.MustCompile(`^[A-E]{1,5}$`)
+// validAnswerRe matches a legitimate answer string: 1–10 uppercase A-J letters.
+// Covers questions with up to 10 options (A through J).
+// Examples: "A", "B", "CE", "ABD", "FGJ"
+var validAnswerRe = regexp.MustCompile(`^[A-J]{1,10}$`)
 
-// isLikelyAnswer returns true if s looks like a multiple-choice answer (A/B/C/D/E combination).
+// isLikelyAnswer returns true if s looks like a multiple-choice answer
+// (combination of option letters, default A-J range).
 func isLikelyAnswer(s string) bool {
 	s = strings.TrimSpace(s)
 	return validAnswerRe.MatchString(s)
+}
+
+// isLikelyAnswerForOptions returns true if s looks like a valid answer
+// given the question's actual option count. More precise than isLikelyAnswer.
+// maxOpt is the number of options (e.g. 5 → letters A-E, 10 → letters A-J).
+func isLikelyAnswerForOptions(s string, maxOpt int) bool {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return false
+	}
+	if maxOpt <= 0 {
+		maxOpt = 10 // default: allow up to J
+	}
+	maxLetter := rune('A') + rune(maxOpt) - 1 // e.g. maxOpt=5 → 'E', maxOpt=10 → 'J'
+	for _, r := range s {
+		if r < 'A' || r > maxLetter {
+			return false
+		}
+	}
+	// All chars are valid option letters; must also be all unique (no "AABB")
+	seen := make(map[rune]bool)
+	for _, r := range s {
+		if seen[r] {
+			return false // duplicate letter → not a valid answer
+		}
+		seen[r] = true
+	}
+	return true
 }
 
 // isLikelyDiscuss returns true if s looks like an explanation text (contains CJK/punctuation/spaces).
@@ -95,14 +125,20 @@ func (sq *SubQuestion) DiscussSource() string {
 // IsAnswerDiscussSwapped reports whether answer and discuss appear to have been
 // accidentally swapped: answer looks like an explanation and discuss looks like
 // a valid option letter.
+// It uses the question's actual options count for precise letter-range checking.
 func (sq *SubQuestion) IsAnswerDiscussSwapped() bool {
 	ans := strings.TrimSpace(sq.Answer)
 	dis := strings.TrimSpace(sq.Discuss)
 	if ans == "" || dis == "" {
 		return false
 	}
+	// Use actual option count for more accurate detection (supports up to 10 options)
+	maxOpt := len(sq.Options)
+	if maxOpt == 0 {
+		maxOpt = 10 // no options info → be permissive, allow A-J
+	}
 	// Swapped when: answer is long explanation-like text AND discuss is a valid option
-	return isLikelyDiscuss(ans) && isLikelyAnswer(dis)
+	return isLikelyDiscuss(ans) && isLikelyAnswerForOptions(dis, maxOpt)
 }
 
 // SanitizeAnswerDiscuss fixes a swapped answer/discuss pair in-place.
