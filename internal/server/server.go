@@ -57,6 +57,12 @@ type shareStorer interface {
 	CleanExpiredShareTokens(ctx context.Context)
 }
 
+// favStorer is an optional interface for server-side favorites persistence (PG mode only).
+// SQLite mode keeps favorites in localStorage only.
+type favStorer interface {
+	SyncFavorites(ctx context.Context, userID string, bankID int, adds []store.FavItem, removes [][2]any) ([]store.FavItem, error)
+}
+
 // allowing server.go to stay decoupled from the concrete pgstore type.
 type pgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
@@ -472,6 +478,8 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/exam/reveal", s.handleExamReveal)
 	m.HandleFunc("POST /api/exam/share", s.handleExamShare)
 	m.HandleFunc("GET /api/exam/join", s.handleExamJoin)
+	// Favorites sync (PG mode only; SQLite falls back gracefully)
+	m.HandleFunc("POST /api/favorites/sync", s.handleFavSync)
 	// AI Q&A
 	m.HandleFunc("POST /api/ai/chat",   s.handleAIChat)
 	m.HandleFunc("POST /api/ai/report", s.handleAIReport)
@@ -1735,9 +1743,79 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// ── AI Q&A ────────────────────────────────────────────────────────────────
+// ── API: favorites sync ───────────────────────────────────────────
+//
+// POST /api/favorites/sync?bank=N
+//
+//	Body:    { "adds": [{"fp":"...","si":0,"ts":1234567890}], "removes": [{"fp":"...","si":0}] }
+//	Returns: { "ok": true, "items": [{"fp":"...","si":0,"added_at":1234567890}] }
+//
+// Single endpoint handles both upload (adds/removes) and download (full server list).
+// SQLite mode: returns ok:true with empty items so the frontend degrades gracefully.
+func (s *Server) handleFavSync(w http.ResponseWriter, r *http.Request) {
+	b, _, ok := s.bankForReq(r)
+	if !ok {
+		jsonError(w, "bank not found", http.StatusNotFound)
+		return
+	}
 
-// POST /api/ai/chat — streaming AI Q&A endpoint
+	// SQLite 模式：收藏仅本地存储，返回空列表让前端降级
+	fs, hasFavStore := b.PgStore.(favStorer)
+	if !hasFavStore {
+		jsonOK(w, map[string]any{"ok": true, "items": []any{}})
+		return
+	}
+
+	var body struct {
+		Adds    []struct {
+			FP string  `json:"fp"`
+			SI float64 `json:"si"`
+			Ts int64   `json:"ts"`
+		} `json:"adds"`
+		Removes []struct {
+			FP string  `json:"fp"`
+			SI float64 `json:"si"`
+		} `json:"removes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+
+	uid := getUserID(r)
+
+	adds := make([]store.FavItem, 0, len(body.Adds))
+	for _, a := range body.Adds {
+		if a.FP == "" {
+			continue
+		}
+		adds = append(adds, store.FavItem{
+			Fingerprint: a.FP,
+			SI:          int(a.SI),
+			AddedAt:     a.Ts,
+		})
+	}
+	removes := make([][2]any, 0, len(body.Removes))
+	for _, rm := range body.Removes {
+		if rm.FP == "" {
+			continue
+		}
+		removes = append(removes, [2]any{rm.FP, rm.SI})
+	}
+
+	items, err := fs.SyncFavorites(r.Context(), uid, b.BankID, adds, removes)
+	if err != nil {
+		log.Printf("[fav] SyncFavorites uid=%s bank=%d err=%v", uid, b.BankID, err)
+		jsonError(w, "sync failed", http.StatusInternalServerError)
+		return
+	}
+	if items == nil {
+		items = []store.FavItem{}
+	}
+	jsonOK(w, map[string]any{"ok": true, "items": items})
+}
+
+// ── AI Q&A ────────────────────────────────────────────────────────────────
 func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	if s.aiClient == nil {
 		jsonError(w, "AI 功能未配置", http.StatusServiceUnavailable)

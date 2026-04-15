@@ -672,14 +672,66 @@ func (s *Store) ClearUserData(ctx context.Context, userID string, bankID int) ma
 	}
 	// 显式写出每张表的 DELETE，避免 fmt.Sprintf 拼接表名（防御纵深）
 	uid, bid := userID, int64(bankID)
-	rA, _ := s.pool.Exec(ctx, "DELETE FROM attempts WHERE user_id=$1 AND bank_id=$2", uid, bid)
-	rS, _ := s.pool.Exec(ctx, "DELETE FROM sessions WHERE user_id=$1 AND bank_id=$2", uid, bid)
-	rM, _ := s.pool.Exec(ctx, "DELETE FROM sm2     WHERE user_id=$1 AND bank_id=$2", uid, bid)
+	rA, _ := s.pool.Exec(ctx, "DELETE FROM attempts  WHERE user_id=$1 AND bank_id=$2", uid, bid)
+	rS, _ := s.pool.Exec(ctx, "DELETE FROM sessions  WHERE user_id=$1 AND bank_id=$2", uid, bid)
+	rM, _ := s.pool.Exec(ctx, "DELETE FROM sm2       WHERE user_id=$1 AND bank_id=$2", uid, bid)
+	rF, _ := s.pool.Exec(ctx, "DELETE FROM favorites WHERE user_id=$1 AND bank_id=$2", uid, bid)
 	return map[string]int{
-		"attempts":  int(rA.RowsAffected()),
-		"sessions":  int(rS.RowsAffected()),
-		"sm2_cards": int(rM.RowsAffected()),
+		"attempts":   int(rA.RowsAffected()),
+		"sessions":   int(rS.RowsAffected()),
+		"sm2_cards":  int(rM.RowsAffected()),
+		"favorites":  int(rF.RowsAffected()),
 	}
+}
+
+// SyncFavorites applies adds/removes then returns the full current list for the user/bank.
+// adds:    items to upsert (fingerprint+si+added_at)
+// removes: items to delete (fingerprint+si pairs)
+func (s *Store) SyncFavorites(ctx context.Context, userID string, bankID int, adds []store.FavItem, removes [][2]any) ([]store.FavItem, error) {
+	if userID == "" {
+		userID = "_legacy"
+	}
+	bid := int64(bankID)
+
+	// Apply removes first
+	for _, r := range removes {
+		fp, _ := r[0].(string)
+		si, _ := r[1].(float64)
+		if fp == "" {
+			continue
+		}
+		s.pool.Exec(ctx, `DELETE FROM favorites WHERE user_id=$1 AND bank_id=$2 AND fingerprint=$3 AND si=$4`,
+			userID, bid, fp, int(si))
+	}
+
+	// Upsert adds (last-write-wins via added_at)
+	for _, a := range adds {
+		if a.Fingerprint == "" {
+			continue
+		}
+		s.pool.Exec(ctx, `
+			INSERT INTO favorites(user_id,bank_id,fingerprint,si,added_at)
+			VALUES($1,$2,$3,$4,$5)
+			ON CONFLICT(user_id,bank_id,fingerprint,si)
+			DO UPDATE SET added_at=EXCLUDED.added_at WHERE EXCLUDED.added_at > favorites.added_at`,
+			userID, bid, a.Fingerprint, a.SI, a.AddedAt)
+	}
+
+	// Return full current list
+	rows, err := s.pool.Query(ctx,
+		`SELECT fingerprint,si,added_at FROM favorites WHERE user_id=$1 AND bank_id=$2 ORDER BY added_at DESC`,
+		userID, bid)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.FavItem
+	for rows.Next() {
+		var item store.FavItem
+		rows.Scan(&item.Fingerprint, &item.SI, &item.AddedAt)
+		out = append(out, item)
+	}
+	return out, nil
 }
 
 func (s *Store) MigrateUserData(ctx context.Context, fromUID, toUID string) (map[string]int, error) {

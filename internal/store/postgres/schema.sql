@@ -153,3 +153,15 @@ CREATE TABLE IF NOT EXISTS share_tokens (
 );
 CREATE INDEX IF NOT EXISTS idx_share_expires ON share_tokens(expires_at);
 
+-- ── Favorites（收藏夹持久化）──────────────────────────────────────
+-- 仅存 fingerprint+si+时间戳，题目完整数据前端本地缓存，服务端不重复存储。
+CREATE TABLE IF NOT EXISTS favorites (
+    user_id     TEXT    NOT NULL,
+    bank_id     BIGINT  NOT NULL DEFAULT 0,
+    fingerprint TEXT    NOT NULL,
+    si          INTEGER NOT NULL DEFAULT 0,
+    added_at    BIGINT  NOT NULL,            -- unix ms，用于跨端冲突解决（最新时间戳胜出）
+    PRIMARY KEY (user_id, bank_id, fingerprint, si)
+);
+CREATE INDEX IF NOT EXISTS idx_fav_uid_bank ON favorites(user_id, bank_id);
+

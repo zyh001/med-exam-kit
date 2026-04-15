@@ -128,3 +128,10 @@ type WrongEntry struct {
 	Wrong       int    `json:"wrong"`
 	Accuracy    int    `json:"accuracy"`
 }
+
+// FavItem represents a single favorited sub-question.
+type FavItem struct {
+	Fingerprint string `json:"fp"`
+	SI          int    `json:"si"`
+	AddedAt     int64  `json:"added_at"` // unix ms
+}

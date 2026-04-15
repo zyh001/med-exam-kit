@@ -924,6 +924,7 @@ async function selectBankAndEnter(idx) {
 
     await loadBankAndRenderHome();
     showScreen('s-home');
+    _favLoadFromServer();  // 静默拉取服务端收藏，合并到本地（不阻塞主流程）
 
     // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
     // 锁定模式下跳过：防止分享接收者看到与他无关的历史存档
@@ -2699,9 +2700,15 @@ function toggleFavorite() {
     _deleteFavQuestion(fp);
   }
   _saveFavorites(favs);
+  const ts = adding ? Date.now() : 0;
   _recordFavTimestamp(fp, adding);  // 记录收藏时间戳
   refreshFavBadge();                // 刷新主页徽章
   _updateFlagBtn();
+  // 异步同步到服务端（静默，失败不影响本地体验）
+  { const [rawFp, rawSi] = fp.split(':');
+    const siNum = parseInt(rawSi || '0', 10);
+    if (adding) _favServerSync([{ fp: rawFp, si: siNum, ts }], []);
+    else        _favServerSync([], [{ fp: rawFp, si: siNum }]); }
   // 果冻动画
   const btn = document.getElementById('flag-btn');
   if (btn) {
@@ -4627,6 +4634,59 @@ function _recordFavTimestamp(fp, adding) {
   _saveFavTs(ts);
 }
 
+/**
+ * 向服务端同步收藏变更并把返回的服务端全量合并到本地。
+ * adds:    [{fp, si, ts}]  新增
+ * removes: [{fp, si}]      删除
+ * 失败静默 —— 离线时不影响本地操作，下次进入题库时 _favLoadFromServer 会补齐。
+ */
+async function _favServerSync(adds = [], removes = []) {
+  try {
+    const res = await apiFetch('/api/favorites/sync?' + bankQS(), {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ adds, removes }),
+    }).then(r => r.json());
+    if (!res.ok || !Array.isArray(res.items)) return;
+    _favMergeFromServer(res.items);
+  } catch(_) { /* 离线 / 服务端不支持，静默降级 */ }
+}
+
+/**
+ * 进入题库时从服务端拉取全量收藏（发空 adds/removes，仅请求下行数据）。
+ * 不 await，不阻塞主流程。
+ */
+function _favLoadFromServer() {
+  _favServerSync([], []).catch(() => {});
+}
+
+/**
+ * 把服务端返回的 items 合并进本地 localStorage。
+ * 策略：服务端有但本地没有的 → 加进来；本地有服务端没有的 → 保持（下次 push 会同步过去）。
+ * added_at 更大的胜出（last-write-wins）。
+ */
+function _favMergeFromServer(items) {
+  if (!items.length) return;
+  const favs  = _loadFavorites();
+  const favTs = _loadFavTs();
+  let changed = false;
+  for (const item of items) {
+    const key    = item.fp + ':' + item.si;
+    const srvTs  = item.added_at || 0;
+    const localTs = favTs[key] || 0;
+    if (!favs.has(key) || srvTs > localTs) {
+      favs.add(key);
+      favTs[key] = srvTs;
+      changed = true;
+    }
+  }
+  if (changed) {
+    _saveFavorites(favs);
+    _saveFavTs(favTs);
+    refreshFavBadge();
+  }
+}
+
 /** 更新主页收藏徽章 */
 function refreshFavBadge() {
   const cnt = _loadFavorites().size;
@@ -4812,6 +4872,12 @@ function startFavoritesQuiz(filter, unitName) {
 /** 清空所有收藏 */
 function confirmClearFavorites() {
   if (!confirm(`确认清空全部 ${_loadFavorites().size} 道收藏题目？`)) return;
+  // 先收集待删除列表，再清除本地
+  const favs = _loadFavorites();
+  const removes = [...favs].map(key => {
+    const [fp, si] = key.split(':');
+    return { fp, si: parseInt(si || '0', 10) };
+  });
   try {
     localStorage.removeItem(FAV_KEY);
     localStorage.removeItem(FAV_TS_KEY);
@@ -4820,6 +4886,8 @@ function confirmClearFavorites() {
   refreshFavBadge();
   _renderFavoritesScreen();
   toast('已清空收藏');
+  // 同步删除到服务端
+  if (removes.length) _favServerSync([], removes).catch(() => {});
 }
 
 
