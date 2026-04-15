@@ -294,12 +294,14 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 			if !ok {
 				continue
 			}
-			s.pool.Exec(ctx, `
+			if _, attErr := s.pool.Exec(ctx, `
 				INSERT INTO attempts(user_id,bank_id,fingerprint,session_id,result,mode,unit,ts)
 				VALUES($1,$2,$3,$4,$5,$6,$7,$8)`,
 				userID, bankID, str(item["fingerprint"]), sid,
 				intV(item["result"]), str(item["mode"]), str(item["unit"]),
-				time.Now().UnixMilli())
+				time.Now().UnixMilli()); attErr != nil {
+				log.Printf("[pgstore] attempts insert failed uid=%s fp=%s: %v", userID, str(item["fingerprint"]), attErr)
+			}
 			// SM-2: map result to quality (must match SQLite logic in progress.go)
 			res := intV(item["result"])
 			if res != -1 {
@@ -310,7 +312,9 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 				if qv, ok := item["quality"].(float64); ok {
 					quality = int(math.Max(0, math.Min(5, qv)))
 				}
-				s.updateSM2Tx(ctx, userID, bankID, str(item["fingerprint"]), quality, clientDate)
+				if sm2Err := s.updateSM2Tx(ctx, userID, bankID, str(item["fingerprint"]), quality, clientDate); sm2Err != nil {
+					log.Printf("[pgstore] SM-2 update failed uid=%s bank=%d fp=%s: %v", userID, bankID, str(item["fingerprint"]), sm2Err)
+				}
 			}
 		}
 	}
@@ -349,10 +353,23 @@ func (s *Store) GetDueFingerprints(ctx context.Context, userID string, bankID in
 	if today == "" || len(today) != 10 {
 		today = time.Now().Format("2006-01-02")
 	}
-	rows, err := s.pool.Query(ctx,
-		`SELECT fingerprint FROM sm2 WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND next_due<=$3 ORDER BY next_due ASC`,
+	// 主查询：SM-2 到期题目
+	// 兜底：有 attempts 记录但从未写入 SM-2（如旧数据、写入失败）的题目也纳入复习，
+	// 与 SQLite 版 GetDueFingerprintsByFP 行为保持一致。
+	rows, err := s.pool.Query(ctx, `
+		SELECT fingerprint FROM sm2
+		WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND next_due<=$3
+		UNION
+		SELECT DISTINCT fingerprint FROM attempts
+		WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND result != -1
+		  AND fingerprint NOT IN (
+		      SELECT fingerprint FROM sm2
+		      WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2)
+		  )
+		ORDER BY 1`,
 		userID, int64(bankID), today)
 	if err != nil {
+		log.Printf("[pgstore] GetDueFingerprints query failed uid=%s bank=%d: %v", userID, bankID, err)
 		return nil
 	}
 	defer rows.Close()
@@ -483,8 +500,19 @@ func (s *Store) GetOverallStats(ctx context.Context, userID string, bankID int, 
 		today = time.Now().Format("2006-01-02")
 	}
 	var due int64
-	s.pool.QueryRow(ctx,
-		`SELECT COUNT(*) FROM sm2 WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND next_due<=$3`, userID, int64(bankID), today).Scan(&due)
+	// 与 GetDueFingerprints 保持一致：SM-2 到期 + 有 attempts 但无 SM-2 记录的兜底
+	s.pool.QueryRow(ctx, `
+		SELECT COUNT(*) FROM (
+		    SELECT fingerprint FROM sm2
+		    WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND next_due<=$3
+		    UNION
+		    SELECT DISTINCT fingerprint FROM attempts
+		    WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2) AND result != -1
+		      AND fingerprint NOT IN (
+		          SELECT fingerprint FROM sm2
+		          WHERE user_id=$1 AND ($2::bigint=0 OR bank_id=$2)
+		      )
+		) sub`, userID, int64(bankID), today).Scan(&due)
 	st.DueToday = int(due)
 	return st
 }
