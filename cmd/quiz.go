@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zyh001/med-exam-kit/internal/auth"
 	"github.com/zyh001/med-exam-kit/internal/bank"
+	"github.com/zyh001/med-exam-kit/internal/models"
 	"github.com/zyh001/med-exam-kit/internal/progress"
 	"github.com/zyh001/med-exam-kit/internal/server"
 	pgstore "github.com/zyh001/med-exam-kit/internal/store/postgres"
@@ -143,6 +144,10 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		if err != nil {
 			return fmt.Errorf("加载 %s 失败: %w", bp, err)
 		}
+		// 自动修复答案与解析对调的题目（静默修正，不影响加载）
+		if fixed := models.SanitizeQuestions(questions); fixed > 0 {
+			fmt.Printf("   ⚙ 自动修正 %d 道答案/解析对调的题目\n", fixed)
+		}
 		fmt.Printf("   共 %d 道题\n", len(questions))
 
 		var db *sql.DB
@@ -179,6 +184,10 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 			qs, err := pg.GetBank(ctx, bid)
 			if err != nil || len(qs) == 0 {
 				return fmt.Errorf("数据库中未找到题库 #%d（请先运行 db import）", bid)
+			}
+			// 自动修复答案与解析对调的题目
+			if fixed := models.SanitizeQuestions(qs); fixed > 0 {
+				fmt.Printf("   ⚙ 自动修正 %d 道答案/解析对调的题目\n", fixed)
 			}
 			meta, _ := pg.ListBanks(ctx)
 			name := fmt.Sprintf("bank_%d", bid)
