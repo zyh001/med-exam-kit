@@ -316,7 +316,7 @@
         <span class="home-quick-icon">🔄</span><span>今日复习</span>
         <span class="due-badge" id="due-badge" style="display:none">0</span>
       </button>
-      <button class="home-quick-btn" onclick="startWrongBookReview()" id="wrongbook-btn">
+      <button class="home-quick-btn" onclick="openWrongBook()" id="wrongbook-btn">
         <span class="home-quick-icon">📕</span><span>错题练习</span>
         <span class="due-badge err" id="wrong-badge" style="display:none">0</span>
       </button>
@@ -386,6 +386,37 @@
           <div style="color:var(--muted);font-size:13px">加载中…</div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ WRONGBOOK ══════════════════════════════════════════════════ -->
+  <div id="s-wrongbook" class="screen slide-right">
+    <div class="fav-header">
+      <button class="back-btn" onclick="showScreen('s-home')">←</button>
+      <div class="fav-header-center">
+        <h2>错题练习</h2>
+        <span class="fav-header-sub" id="wb-bank-name"></span>
+      </div>
+      <span style="width:34px"></span>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="fav-stat-card">
+      <div class="fav-stat-item" id="wb-stat-all" onclick="startWrongBookReview('__all__')">
+        <div class="fav-stat-num" id="wb-cnt-all">0</div>
+        <div class="fav-stat-label">全部 <span class="fav-arrow">›</span></div>
+      </div>
+    </div>
+
+    <!-- 科目列表 -->
+    <div class="section-label" style="margin-top:8px">科目列表</div>
+    <div id="wb-unit-list" class="fav-unit-list"></div>
+
+    <!-- 空状态 -->
+    <div id="wb-empty" class="fav-empty" style="display:none">
+      <div class="fav-empty-icon">📗</div>
+      <div class="fav-empty-text">暂无错题记录</div>
+      <div class="fav-empty-hint">做完题目后答错的题会出现在这里</div>
     </div>
   </div>
 
