@@ -450,29 +450,32 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen .quiz-header{border-bottom-color:transparent;background:transparent}
 .s-quiz-zen .quiz-progress-cur{font-size:16px;font-weight:800;color:var(--accent)}
 
-/* 选项：去掉卡片感，纯行列表 */
+/* 选项：无边框、无分隔线，仅字母圈 + 轻间距 */
 .s-quiz-zen .opt{
-  background:transparent;border:none;border-radius:0;
-  padding:11px 0;border-bottom:1px solid var(--border);
-  transition:opacity .15s;
+  background:transparent;border:none;border-radius:8px;
+  padding:10px 0;transition:background .12s;
 }
 .s-quiz-zen .opt:last-child{border-bottom:none}
-.s-quiz-zen .opt:hover:not(:disabled){background:transparent;border-color:transparent;border-bottom:1px solid var(--border)}
+.s-quiz-zen .opt:hover:not(:disabled){background:transparent}
 .s-quiz-zen .opt:active:not(:disabled){transform:none}
-/* 选中状态：仅字母圈变色，行无背景 */
-.s-quiz-zen .opt.selected{background:transparent;border-bottom:1px solid var(--border)}
-.s-quiz-zen .opt.selected .opt-label{background:var(--accent);color:#fff;box-shadow:0 2px 6px rgba(var(--accent-rgb),.35)}
-/* 答对：字母圈绿，文字正常 */
-.s-quiz-zen .opt.correct{background:transparent;border-bottom:1px solid var(--border);animation:none}
-.s-quiz-zen .opt.correct .opt-label{background:var(--success);color:#fff;box-shadow:0 2px 6px rgba(40,190,80,.35)}
-/* 答错：字母圈红，文字正常 */
-.s-quiz-zen .opt.wrong{background:transparent;border-bottom:1px solid var(--border);animation:none}
-.s-quiz-zen .opt.wrong .opt-label{background:var(--danger);color:#fff;box-shadow:0 2px 6px rgba(220,50,50,.3)}
+/* 选中：仅字母圈变色 */
+.s-quiz-zen .opt.selected{background:transparent}
+.s-quiz-zen .opt.selected .opt-label{background:var(--accent);color:#fff}
+/* 答对：整行淡绿底色 + 字母圈深绿 */
+.s-quiz-zen .opt.correct{
+  background:var(--success-bg);border-radius:8px;animation:none;
+}
+.s-quiz-zen .opt.correct .opt-label{background:var(--success);color:#fff;box-shadow:none}
+/* 答错：整行淡红底色 + 字母圈深红 */
+.s-quiz-zen .opt.wrong{
+  background:var(--danger-bg);border-radius:8px;animation:none;
+}
+.s-quiz-zen .opt.wrong .opt-label{background:var(--danger);color:#fff;box-shadow:none}
 /* 多选选中 */
-.s-quiz-zen .opt.multi-selected{background:transparent;border-bottom:1px solid var(--border)}
+.s-quiz-zen .opt.multi-selected{background:transparent}
 .s-quiz-zen .opt.multi-selected .opt-label{background:var(--accent);color:#fff}
-/* dim 题目轻化 */
-.s-quiz-zen .opt.dim{opacity:.35}
+/* 暗淡其他选项 */
+.s-quiz-zen .opt.dim{opacity:.32}
 
 /* 共用题干框：去掉边框和背景，纯内容 */
 .s-quiz-zen .q-stem{
