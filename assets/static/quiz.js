@@ -2317,14 +2317,14 @@ function selectOpt(letter, btn) {
           if (S.cur !== answeredIdx) return;
           renderQ('none');  // 更新选项颜色（字母圈绿/红）
           if (isCorrectAns) {
-            // 答对：500ms 后自动切下一题
+            // 答对：250ms 后自动切下一题（快速）
             _autoAdvanceTimer = setTimeout(() => {
               _autoAdvanceTimer = null;
               if (S.cur !== answeredIdx) return;
               const total = S.questions.length;
               if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
               else finishPractice();
-            }, 500);
+            }, 250);
           }
           // 答错：停留，用户自行左右滑动切题
         }, 130);
