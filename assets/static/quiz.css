@@ -2081,101 +2081,63 @@ button,a,[role=button],label{touch-action:manipulation}
 .ck.has-mem::after{content:'';position:absolute;top:4px;right:4px;width:6px;height:6px;border-radius:50%;background:var(--accent)}
 
 /* ── 高级计算器模式 (Casio fx-991 风格) ── */
-.calc-adv-wrap{padding:0}
+/* ── 高级计算器 5分页 ──────────────────────────────────────────── */
+.calc-adv-wrap{padding:0;display:flex;flex-direction:column}
 
-/* LCD 显示屏 */
-.casio-lcd{
-  background:linear-gradient(180deg,#c8d8b0 0%,#b8c8a0 100%);
-  border:2px solid #8a9a78;border-radius:8px;
-  margin:8px 10px;padding:10px 12px 8px;
-  min-height:90px;display:flex;flex-direction:column;
-  font-family:'Courier New',monospace;
-  position:relative;
-  box-shadow:inset 0 1px 4px rgba(0,0,0,.15);
+/* LCD 显示区 */
+.cadv-lcd{
+  background:linear-gradient(180deg,#2c3a28 0%,#1c2818 100%);
+  border-radius:8px;margin:6px 8px 4px;padding:8px 10px;
+  font-family:'SF Mono','Courier New',monospace;
 }
-@media(prefers-color-scheme:dark){
-  .casio-lcd{background:linear-gradient(180deg,#2a3328 0%,#1e261c 100%);border-color:#3a4838}
+@media(prefers-color-scheme:dark){.cadv-lcd{background:linear-gradient(180deg,#1e2a1a 0%,#12180e 100%)}}
+.cadv-lcd-bar{
+  display:flex;justify-content:space-between;align-items:center;
+  font-size:11px;font-weight:700;letter-spacing:.5px;margin-bottom:4px;
+  color:#7a9a5a;
 }
-.casio-lcd-top{
-  display:flex;gap:8px;font-size:10px;color:#556b2f;
-  margin-bottom:4px;min-height:14px;
-}
-@media(prefers-color-scheme:dark){.casio-lcd-top{color:#7a9a5a}}
-.casio-ind{opacity:.4;font-weight:700;letter-spacing:.5px}
-.casio-ind.active{opacity:1}
-.casio-expr{
-  font-size:14px;color:#2c3e1a;min-height:22px;
-  overflow-x:auto;white-space:nowrap;text-align:right;
-  margin-bottom:2px;
-}
-@media(prefers-color-scheme:dark){.casio-expr{color:#a0c880}}
-.casio-expr .katex{font-size:14px}
-/* 高级模式文本输入框 */
+.cadv-ind{opacity:.9}
+.cadv-var-hint{font-size:10px;color:#6a8a4a;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}
+.cadv-ans-ind{font-size:10px}
 .cadv-text-input{
-  width:100%;box-sizing:border-box;
-  background:transparent;border:none;outline:none;
-  border-bottom:1px solid rgba(100,140,60,.4);
-  font-family:'Courier New',monospace;font-size:14px;
-  color:#2c3e1a;padding:2px 2px 3px;
-  margin-bottom:3px;
-  caret-color:#3a6020;
+  width:100%;background:transparent;border:none;border-bottom:1px solid rgba(120,180,70,.3);
+  color:#b8d890;font-size:15px;font-family:inherit;padding:3px 0 4px;outline:none;
+  caret-color:#90d060;
 }
-.cadv-text-input::placeholder{color:#8aaa6a;font-style:italic;font-size:12px}
-@media(prefers-color-scheme:dark){
-  .cadv-text-input{color:#a0c880;border-bottom-color:rgba(140,190,80,.35);caret-color:#90d060}
-  .cadv-text-input::placeholder{color:#5a7a45}
+.cadv-text-input::placeholder{color:#5a7a42;font-style:italic;font-size:12px}
+.cadv-preview-row{min-height:20px;margin-top:3px}
+.cadv-expr{color:#a0c870;font-size:13px;min-height:18px}
+.cadv-expr .katex{font-size:13px}
+.cadv-result{
+  color:#d8f0a0;font-size:26px;font-weight:700;text-align:right;
+  margin-top:2px;min-height:32px;
 }
-.cadv-preview-row{min-height:22px}
-/* 预览区透明度：完整表达式=1，猜测补全=0.6，纯文本fallback=0.45 */
-.casio-result{
-  font-size:24px;font-weight:700;color:#1a2e0a;
-  text-align:right;min-height:30px;
-  overflow-x:auto;white-space:nowrap;
-}
-@media(prefers-color-scheme:dark){.casio-result{color:#c0e8a0}}
-.casio-result .katex{font-size:24px}
+.cadv-result .katex{font-size:22px}
 
-/* 按键区 */
-.casio-keys{
+/* 分页标签 */
+.cadv-tabs{
+  display:flex;gap:2px;padding:4px 8px 0;
+  border-bottom:1px solid var(--border);
+}
+.cadv-tab{
+  flex:1;padding:6px 0;font-size:12px;font-weight:600;
+  border:none;border-radius:6px 6px 0 0;background:transparent;
+  color:var(--muted);cursor:pointer;transition:all .15s;
+}
+.cadv-tab.active{
+  background:var(--accent);color:#fff;
+}
+.cadv-tab:not(.active):hover{background:var(--card)}
+
+/* 分页键盘 */
+.cadv-keys{
   display:grid;grid-template-columns:repeat(5,1fr);
-  gap:4px;padding:6px 8px 12px;
+  gap:4px;padding:6px 8px 10px;
 }
-.cx{
-  font-size:13px;font-weight:600;border:none;border-radius:6px;
-  padding:12px 0;cursor:pointer;transition:all .1s;
-  user-select:none;-webkit-tap-highlight-color:transparent;
-  text-align:center;line-height:1.2;
+.cadv-deg-toggle{
+  background:var(--accent);color:#fff;font-weight:700;
 }
-.cx:active{transform:scale(.92);filter:brightness(.85)}
-.cx sup{font-size:9px;vertical-align:super}
 
-/* 数字键 - 深色 */
-.cx-num{background:#3c3c3c;color:#fff}
-@media(prefers-color-scheme:dark){.cx-num{background:#4a4a4a;color:#eee}}
-
-/* 运算符键 - 强调色 */
-.cx-op{background:var(--accent);color:#fff;font-size:16px;font-weight:700}
-
-/* 功能键 - 浅色 */
-.cx-fn{background:var(--surface);color:var(--text);font-size:12px}
-.cx-fn:active{background:var(--border)}
-
-/* 常量键 */
-.cx-const{background:#5a4a3a;color:#f0d8a0;font-size:14px}
-@media(prefers-color-scheme:dark){.cx-const{background:#5a4a3a;color:#f0d8a0}}
-
-/* 控制键 - SHIFT / DEL / AC */
-.cx-ctrl{background:#8b4513;color:#fff;font-size:11px;font-weight:700;letter-spacing:.5px}
-
-/* SHIFT 激活态 */
-.cx-ctrl.is-shift{background:#d4a520;color:#1a1a1a}
-
-/* = 等号 */
-.cx-eq{background:var(--accent);color:#fff;font-size:20px;font-weight:800}
-.cx-eq:active{background:var(--accent-hover)}
-
-/* hyp 激活态 */
-.cx-fn.is-hyp{background:var(--accent);color:#fff}
 
 /* ════════════════════════════════════════════
    AI 答疑面板

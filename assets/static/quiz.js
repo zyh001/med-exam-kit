@@ -5912,11 +5912,13 @@ function _ensureMathJS() {
 }
 
 // 加载 math.js + KaTeX（高级模式用）
+// ════════════════════════════════════════════════════════════════
+// 高级计算器 — 5分页表达式引擎 (math.js + KaTeX)
+// ════════════════════════════════════════════════════════════════
+
 function _loadAdvAssets() {
   var tasks = [];
-  if (!_mathJSLoaded && typeof math === 'undefined') {
-    tasks.push(_ensureMathJS());
-  }
+  if (typeof math === 'undefined') tasks.push(_ensureMathJS());
   if (typeof katex === 'undefined') {
     tasks.push(_loadScript('/static/katex.min.js'));
     if (!document.querySelector('link[href*="katex"]')) {
@@ -5928,290 +5930,311 @@ function _loadAdvAssets() {
   return tasks.length ? Promise.all(tasks) : Promise.resolve();
 }
 
-// ── Casio fx-991 风格高级计算器 ──
-var _casio = { expr: '', lastAns: 0, shift: false, hyp: false };
+// ── 状态 ────────────────────────────────────────────────────────
+var _cadv = {
+  deg:     true,     // DEG=true / RAD=false
+  lastAns: 0,        // Ans
+  scope:   {},       // 持久变量 {x:5, ...}
+  tab:     'basic',  // 当前分页
+};
+var _cadvPreviewTimer = null;
 
-function casioShift() {
-  _casio.shift = !_casio.shift;
-  var btn = document.getElementById('casio-shift');
-  var ind = document.getElementById('casio-shift-ind');
-  if (btn) btn.classList.toggle('is-shift', _casio.shift);
-  if (ind) { ind.textContent = _casio.shift ? 'SHIFT' : ''; ind.classList.toggle('active', _casio.shift); }
-  // Update button labels for shift variants
-  _casioUpdateLabels();
+// ── 分页切换 ────────────────────────────────────────────────────
+function cadvTab(name) {
+  var tabs = ['basic','trig','algebra','stat','matrix'];
+  tabs.forEach(function(t) {
+    var btn = document.getElementById('cadv-tab-' + t);
+    var pane = document.getElementById('cadv-keys-' + t);
+    if (btn) btn.classList.toggle('active', t === name);
+    if (pane) pane.style.display = t === name ? '' : 'none';
+  });
+  _cadv.tab = name;
 }
 
-function casioHyp() {
-  _casio.hyp = !_casio.hyp;
-  var btn = document.getElementById('casio-hyp');
-  if (btn) btn.classList.toggle('is-hyp', _casio.hyp);
+// ── 输入框光标感知插入 ─────────────────────────────────────────
+function _cadvGetInput() { return document.getElementById('cadv-input'); }
+
+function cadvIns(text) {
+  var inp = _cadvGetInput();
+  if (!inp) return;
+  var s = inp.selectionStart, e = inp.selectionEnd;
+  var v = inp.value;
+  inp.value = v.slice(0, s) + text + v.slice(e);
+  var pos = s + text.length;
+  inp.selectionStart = inp.selectionEnd = pos;
+  // 如果光标在括号内，向括号里移一步方便继续输入
+  _cadv._expr = inp.value;
+  _cadvSchedulePreview();
 }
 
-function _casioUpdateLabels() {
-  var s = _casio.shift;
-  var el;
-  el = document.getElementById('casio-sin'); if(el) el.textContent = s ? 'sin⁻¹' : 'sin';
-  el = document.getElementById('casio-cos'); if(el) el.textContent = s ? 'cos⁻¹' : 'cos';
-  el = document.getElementById('casio-tan'); if(el) el.textContent = s ? 'tan⁻¹' : 'tan';
-  el = document.getElementById('casio-log'); if(el) el.textContent = s ? '10ˣ' : 'log';
-  el = document.getElementById('casio-ln');  if(el) el.textContent = s ? 'eˣ' : 'ln';
+function cadvDigit(d) { cadvIns(d); }
+function cadvOp(op)   { cadvIns(op); }
+function cadvAns()    { cadvIns(String(_cadv.lastAns)); }
+
+function cadvDel() {
+  var inp = _cadvGetInput(); if (!inp) return;
+  var s = inp.selectionStart, e = inp.selectionEnd;
+  if (s !== e) { cadvIns(''); return; }
+  if (s === 0) return;
+  // 智能删除：整体删除多字符函数名如 'sqrt('、'mean(' 等
+  var before = inp.value.slice(0, s);
+  var fm = before.match(/(asinh|acosh|atanh|sinh|cosh|tanh|asin|acos|atan|sin|cos|tan|sqrt|cbrt|log10|log2|log|abs|simplify|derivative|rationalize|polynomialRoot|gcd|lcm|xgcd|invmod|floor|ceil|round|mean|median|variance|std|mad|sum|prod|min|max|gamma|lgamma|erf|cumsum|isPrime|permutations|combinations|quantileSeq|det|inv|transpose|trace|norm|eigs|pinv|cross|dot|kron|identity|zeros|ones|diag|hypot|sign|nthRoot|bitAnd|bitOr|bitXor|bitNot|leftShift|re|im|conj|arg|diff)\($/);
+  if (fm) {
+    inp.value = before.slice(0, before.length - fm[0].length) + inp.value.slice(s);
+    inp.selectionStart = inp.selectionEnd = s - fm[0].length;
+  } else {
+    inp.value = before.slice(0, -1) + inp.value.slice(s);
+    inp.selectionStart = inp.selectionEnd = s - 1;
+  }
+  _cadv._expr = inp.value;
+  _cadvSchedulePreview();
+}
+
+function cadvAC() {
+  var inp = _cadvGetInput(); if (!inp) return;
+  inp.value = '';
+  _cadv._expr = '';
+  var exprEl = document.getElementById('cadv-expr');
+  var resEl  = document.getElementById('cadv-result');
+  if (exprEl) exprEl.innerHTML = '';
+  if (resEl)  resEl.textContent = '0';
 }
 
 function cadvToggleDeg() {
-  _advDeg = !_advDeg;
-  var el = document.getElementById('casio-deg-btn');
-  var ind = document.getElementById('casio-deg-ind');
-  if (el) el.textContent = _advDeg ? 'DEG' : 'RAD';
-  if (ind) ind.textContent = _advDeg ? 'DEG' : 'RAD';
+  _cadv.deg = !_cadv.deg;
+  var btn = document.getElementById('cadv-deg-btn');
+  var ind = document.getElementById('cadv-deg-ind');
+  var lbl = _cadv.deg ? 'DEG' : 'RAD';
+  if (btn) btn.textContent = lbl;
+  if (ind) ind.textContent = lbl;
 }
 
-function casioDigit(d) {
-  _casio.expr += d;
-  _cadvSyncInput();
-}
-
-function casioOp(op) {
-  _casio.expr += op;
-  _cadvSyncInput();
-}
-
-function casioIns(text) {
-  _casio.expr += text;
-  _cadvSyncInput();
-}
-
-function casioNeg() {
-  _casio.expr += '(-';
-  _cadvSyncInput();
-}
-
-function casioAns() {
-  _casio.expr += String(_casio.lastAns);
-  _cadvSyncInput();
-}
-
-function casioFn(fn) {
-  var s = _casio.shift;
-  var h = _casio.hyp;
-  if (s) { _casio.shift = false; casioShift(); _casio.shift = false; var btn=document.getElementById('casio-shift'); if(btn) btn.classList.remove('is-shift'); var ind=document.getElementById('casio-shift-ind'); if(ind){ind.textContent='';ind.classList.remove('active');} _casioUpdateLabels(); }
-  if (h) { _casio.hyp = false; var hb=document.getElementById('casio-hyp'); if(hb) hb.classList.remove('is-hyp'); }
-
-  switch(fn) {
-    case 'sin': _casio.expr += (h ? (s ? 'asinh(' : 'sinh(') : (s ? 'asin(' : 'sin(')); break;
-    case 'cos': _casio.expr += (h ? (s ? 'acosh(' : 'cosh(') : (s ? 'acos(' : 'cos(')); break;
-    case 'tan': _casio.expr += (h ? (s ? 'atanh(' : 'tanh(') : (s ? 'atan(' : 'tan(')); break;
-    case 'log': _casio.expr += s ? '10^(' : 'log10('; break;
-    case 'ln':  _casio.expr += s ? 'e^(' : 'log('; break;
-    case 'sqrt': _casio.expr += s ? 'cbrt(' : 'sqrt('; break;
-    case 'pow': _casio.expr += '^'; break;
-    case 'abs': _casio.expr += 'abs('; break;
-    case 'factorial': _casio.expr += '!'; break;
-    case 'exp': _casio.expr += '*10^'; break;
-    case 'diff':
-      _casio.expr += 'diff(';
-      break;
-    case 'simplify':
-      _casio.expr += 'simplify(';
-      break;
-  }
-  _cadvSyncInput();
-}
-
-function casioDel() {
-  var e = _casio.expr;
-  // Remove trailing function names like 'sin(' , 'asin(' , 'log10(' , etc.
-  var fm = e.match(/(asinh|acosh|atanh|sinh|cosh|tanh|asin|acos|atan|sin|cos|tan|sqrt|cbrt|log10|log|abs|diff|simplify)\($/);
-  if (fm) _casio.expr = e.slice(0, -fm[0].length);
-  else if (e.match(/10\^$/)) _casio.expr = e.slice(0, -3);
-  else if (e.match(/\*10\^$/)) _casio.expr = e.slice(0, -4);
-  else _casio.expr = e.slice(0, -1);
-  _cadvSyncInput();
-}
-
-function casioAC() {
-  _casio.expr = '';
-  var inp = document.getElementById('cadv-input');
-  if (inp) { inp.value = ''; inp.focus(); }
-  var exprEl = document.getElementById('cadv-expr');
-  var resultEl = document.getElementById('cadv-result');
-  if (exprEl) exprEl.innerHTML = '';
-  if (resultEl) resultEl.textContent = '0';
-}
-
-// 把按钮操作结果同步回文本输入框并触发预览
-function _cadvSyncInput() {
-  var inp = document.getElementById('cadv-input');
-  if (inp) {
-    inp.value = _casio.expr;
-    inp.selectionStart = inp.selectionEnd = inp.value.length;
-    inp.focus();
-  }
-  _cadvRenderPreview();
-}
-
-// 文本输入框实时输入处理（防抖 80ms）
-var _cadvPreviewTimer = null;
+// ── 键盘事件 ────────────────────────────────────────────────────
 function _cadvInputChange() {
-  var inp = document.getElementById('cadv-input');
-  if (!inp) return;
-  _casio.expr = inp.value;
-  clearTimeout(_cadvPreviewTimer);
-  _cadvPreviewTimer = setTimeout(function() {
-    _cadvRenderPreview();
-  }, 80);
+  var inp = _cadvGetInput(); if (!inp) return;
+  _cadv._expr = inp.value;
+  _cadvSchedulePreview();
 }
 
 function _cadvInputKeyDown(e) {
-  if (e.key === 'Enter') { e.preventDefault(); casioEval(); }
+  if (e.key === 'Enter') { e.preventDefault(); cadvEval(); }
 }
 
-// 核心预览渲染：支持不完整表达式的渐进式 LaTeX 渲染
+// ── 实时 LaTeX 预览（防抖 80ms）───────────────────────────────
+function _cadvSchedulePreview() {
+  clearTimeout(_cadvPreviewTimer);
+  _cadvPreviewTimer = setTimeout(_cadvRenderPreview, 80);
+}
+
 function _cadvRenderPreview() {
   var exprEl = document.getElementById('cadv-expr');
   if (!exprEl) return;
-  var raw = (_casio.expr || '').trim();
+  var inp = _cadvGetInput();
+  var raw = (inp ? inp.value : (_cadv._expr || '')).trim();
   if (!raw) { exprEl.innerHTML = ''; return; }
 
-  // 如果库还没加载，触发懒加载后重试
   if (typeof math === 'undefined' || typeof katex === 'undefined') {
     exprEl.textContent = raw;
-    exprEl.style.opacity = '0.5';
-    _loadAdvAssets().then(function() { _cadvRenderPreview(); });
+    _loadAdvAssets().then(_cadvRenderPreview);
     return;
   }
 
-  // 渐进式尝试：原始 → 补 ) → 补 )) → 补 ))) → 补 ,x) → 补 ,x))
-  var candidates = [
-    { s: raw,         alpha: 1.0 },
-    { s: raw + ')',   alpha: 0.60 },
-    { s: raw + '))',  alpha: 0.55 },
-    { s: raw + ')))', alpha: 0.50 },
-    { s: raw + ',x)', alpha: 0.55 },
-  ];
-
-  for (var i = 0; i < candidates.length; i++) {
-    try {
-      var disp = _casioToDisplay(candidates[i].s);
-      var node = math.parse(disp);
-      var tex  = node.toTex({ parenthesis: 'auto' });
-      katex.render(tex, exprEl, { throwOnError: false, displayMode: false });
-      exprEl.style.opacity = String(candidates[i].alpha);
-      return;
-    } catch (_) { /* 继续下一种 */ }
+  // 跳过赋值语句的 LaTeX 预览（直接显示原文）
+  if (/^[a-zA-Z_]\w*\s*=/.test(raw)) {
+    exprEl.textContent = raw;
+    exprEl.style.opacity = '0.7';
+    return;
   }
 
-  // 全部失败：纯文本占位
+  var tryList = [raw, raw+')', raw+'))', raw+')))', raw+',x)', raw+',x))'];
+  for (var i = 0; i < tryList.length; i++) {
+    try {
+      var node = math.parse(_cadvPreProcess(tryList[i]));
+      var tex = node.toTex({ parenthesis: 'auto' });
+      katex.render(tex, exprEl, { throwOnError: false, displayMode: false });
+      exprEl.style.opacity = i === 0 ? '1' : String(0.65 - i * 0.05);
+      return;
+    } catch(_) {}
+  }
   exprEl.textContent = raw;
   exprEl.style.opacity = '0.45';
 }
 
-function _casioRefresh() {
-  // 按钮触发时：同步输入框，然后调用预览渲染
-  var inp = document.getElementById('cadv-input');
-  if (inp) inp.value = _casio.expr;
-  _cadvRenderPreview();
-}
-
-// Convert internal representation for display (parse-safe)
-function _casioToDisplay(expr) {
+// ── 预处理：将用户习惯写法转为 math.js 可识别形式 ────────────
+function _cadvPreProcess(expr) {
   var s = expr;
-  s = s.replace(/\blog10\(/g, 'log('); // math.js: log10 → we'll handle separately
+  // DEG 模式：用 scope 注入三角函数覆盖
+  // mod 关键字
+  s = s.replace(/\bmod\b/g, ' mod ');
+  // lgamma → 用 log(abs(gamma(x))) 近似（math.js 无内置）
+  // phi → golden ratio
+  s = s.replace(/\bphi\b/g, '(1+sqrt(5))/2');
   return s;
 }
 
-function casioEval() {
-  var exprEl = document.getElementById('cadv-expr');
-  var resultEl = document.getElementById('cadv-result');
-  var raw = _casio.expr.trim();
-  if (!raw) return;
+// ── 构建 DEG 模式 scope ────────────────────────────────────────
+function _cadvScope() {
+  var base = Object.assign({}, _cadv.scope);
+  base.Ans = _cadv.lastAns;
+  if (_cadv.deg) {
+    var toRad = Math.PI / 180, fromRad = 180 / Math.PI;
+    var wrap = function(fn) { return function(x) { return Math[fn](x * toRad); }; };
+    var iwrap = function(fn) { return function(x) { return Math[fn](x) * fromRad; }; };
+    base.sin = wrap('sin'); base.cos = wrap('cos'); base.tan = wrap('tan');
+    base.cot = function(x) { return 1 / Math.tan(x * toRad); };
+    base.sec = function(x) { return 1 / Math.cos(x * toRad); };
+    base.csc = function(x) { return 1 / Math.sin(x * toRad); };
+    base.asin = iwrap('asin'); base.acos = iwrap('acos'); base.atan = iwrap('atan');
+    base.atan2 = function(y,x) { return Math.atan2(y,x) * fromRad; };
+    base.acot = function(x) { return fromRad * (Math.PI/2 - Math.atan(x)); };
+    base.asec = function(x) { return iwrap('acos')(1/x); };
+    base.acsc = function(x) { return iwrap('asin')(1/x); };
+  }
+  // lgamma via log(gamma)
+  base.lgamma = function(x) { return Math.log(Math.abs(math.gamma(x))); };
+  // acoth
+  base.acoth = function(x) { return 0.5 * Math.log((x+1)/(x-1)); };
+  return base;
+}
+
+// ── 求值 ────────────────────────────────────────────────────────
+function cadvEval() {
+  var inp = _cadvGetInput(); if (!inp) return;
+  var raw = inp.value.trim(); if (!raw) return;
+  var exprEl  = document.getElementById('cadv-expr');
+  var resEl   = document.getElementById('cadv-result');
+  var ansDisp = document.getElementById('cadv-ans-disp');
 
   _loadAdvAssets().then(function() {
-    var processed = raw;
-    // ln → log (math.js natural log)
-    // log10 stays as log10
-    processed = processed.replace(/\bln\(/g, 'log(');
-
+    var processed = _cadvPreProcess(raw);
     var resultTex = '', exprTex = '';
 
-    // Build expression TeX
-    try {
-      var dispExpr = processed;
-      var node = math.parse(dispExpr);
-      exprTex = node.toTex({ parenthesis: 'auto' });
-    } catch (e) {
-      exprTex = raw;
-    }
-
-    try {
-      var result;
-      if (/^diff\(/.test(processed)) {
-        var m = processed.match(/^diff\((.+),\s*([a-z])\)$/i);
-        if (m) {
-          result = math.derivative(m[1], m[2]);
-          resultTex = result.toTex({ parenthesis: 'auto' });
-        } else {
-          var inner = processed.slice(5, -1);
-          result = math.derivative(inner, 'x');
-          resultTex = result.toTex({ parenthesis: 'auto' });
-        }
-      } else if (/^simplify\(/.test(processed)) {
-        var inner = processed.slice(9, -1);
-        result = math.simplify(inner);
-        resultTex = result.toTex({ parenthesis: 'auto' });
-      } else {
-        var scope = {};
-        if (_advDeg) {
-          var toRad = Math.PI / 180;
-          var fromRad = 180 / Math.PI;
-          scope = {
-            sin: function(x) { return Math.sin(x * toRad); },
-            cos: function(x) { return Math.cos(x * toRad); },
-            tan: function(x) { return Math.tan(x * toRad); },
-            asin: function(x) { return Math.asin(x) * fromRad; },
-            acos: function(x) { return Math.acos(x) * fromRad; },
-            atan: function(x) { return Math.atan(x) * fromRad; },
-          };
-        }
-        result = math.evaluate(processed, scope);
-
-        if (typeof result === 'number') {
-          if (result === Infinity) { resultTex = '\\infty'; }
-          else if (result === -Infinity) { resultTex = '-\\infty'; }
-          else if (isNaN(result)) { resultTex = '\\text{Error}'; }
-          else if (Number.isInteger(result) && Math.abs(result) < 1e15) {
-            resultTex = String(result);
-          } else {
-            resultTex = parseFloat(result.toPrecision(12)).toString();
-          }
-          _casio.lastAns = result;
-          _calc.input = resultTex;
-          _calc.done = true;
-        } else if (result && result.toTex) {
-          resultTex = result.toTex({ parenthesis: 'auto' });
-        } else {
-          resultTex = String(result);
-        }
+    // 赋值语句：x = expr
+    var assignM = raw.match(/^([a-zA-Z_]\w*)\s*=\s*(.+)$/);
+    if (assignM) {
+      var varName = assignM[1];
+      var valExpr = _cadvPreProcess(assignM[2]);
+      try {
+        var val = math.evaluate(valExpr, _cadvScope());
+        _cadv.scope[varName] = val;
+        _updateVarHint();
+        resultTex = varName + ' = ' + _formatResult(val);
+        exprTex = varName + ' \\leftarrow ' + _toTex(valExpr);
+        _renderKatex(exprEl, exprTex);
+        _renderKatex(resEl, resultTex);
+        inp.value = '';
+      } catch(e) {
+        _showError(resEl, e);
       }
-    } catch (e) {
-      resultTex = '\\color{red}{\\text{' + (e.message || e).replace(/[{}\\]/g, '').substring(0, 40) + '}}';
+      return;
     }
 
-    if (typeof katex !== 'undefined') {
-      try { katex.render(exprTex + ' =', exprEl, { throwOnError: false, displayMode: false }); }
-      catch(e) { exprEl.textContent = raw + ' ='; }
-      try { katex.render(resultTex, resultEl, { throwOnError: false, displayMode: false }); }
-      catch(e) { resultEl.textContent = resultTex; }
-    } else {
-      exprEl.textContent = raw + ' =';
-      resultEl.textContent = resultTex;
+    // 求导
+    if (/^d(?:erivative)?\s*\(/.test(processed) || processed.startsWith('derivative(')) {
+      try {
+        var m = processed.match(/derivative\((.+),\s*"?([a-z])"?\)$/i);
+        var inner = m ? m[1] : processed.slice(processed.indexOf('(')+1, -1);
+        var vari  = m ? m[2] : 'x';
+        var node  = math.derivative(inner, vari);
+        resultTex = node.toTex({ parenthesis:'auto' });
+        exprTex   = '\\frac{d}{d' + vari + '}(' + _toTex(inner) + ')';
+        _renderKatex(exprEl, exprTex + ' =');
+        _renderKatex(resEl, resultTex);
+        inp.value = '';
+      } catch(e) { _showError(resEl, e); }
+      return;
     }
 
-    // 计算完成后清空输入，准备下一次计算
-    _casio.expr = '';
-  }).catch(function(e) {
-    if (resultEl) resultEl.textContent = 'Error: ' + e.message;
-  });
+    // 化简
+    if (processed.startsWith('simplify(')) {
+      try {
+        var inner = processed.slice(9, -1);
+        var node = math.simplify(inner);
+        resultTex = node.toTex({ parenthesis:'auto' });
+        exprTex   = '\\text{simplify}(' + _toTex(inner) + ')';
+        _renderKatex(exprEl, exprTex + ' =');
+        _renderKatex(resEl, resultTex);
+        inp.value = '';
+      } catch(e) { _showError(resEl, e); }
+      return;
+    }
+
+    // 通用求值
+    try {
+      var scope = _cadvScope();
+      var result = math.evaluate(processed, scope);
+      resultTex = _formatResult(result);
+      exprTex   = _toTex(processed);
+      _cadv.lastAns = (typeof result === 'number') ? result : _cadv.lastAns;
+      if (ansDisp) ansDisp.textContent = _shortNum(_cadv.lastAns);
+      _renderKatex(exprEl, exprTex + ' =');
+      _renderKatex(resEl, resultTex);
+      // 推入历史
+      _cadvPushHistory(raw, _latexToText(resultTex));
+      inp.value = '';
+    } catch(e) { _showError(resEl, e); }
+  }).catch(function(e) { if (resEl) resEl.textContent = 'Load error'; });
 }
+
+// ── 辅助 ────────────────────────────────────────────────────────
+function _toTex(expr) {
+  try { return math.parse(expr).toTex({ parenthesis:'auto' }); }
+  catch(_) { return expr; }
+}
+function _formatResult(val) {
+  if (typeof val === 'number') {
+    if (!isFinite(val)) return val > 0 ? '\\infty' : '-\\infty';
+    if (isNaN(val)) return '\\text{NaN}';
+    if (Number.isInteger(val) && Math.abs(val) < 1e15) return String(val);
+    return String(parseFloat(val.toPrecision(12)));
+  }
+  if (val && typeof val.toTex === 'function') return val.toTex({ parenthesis:'auto' });
+  if (Array.isArray(val) || (val && val.isMatrix)) {
+    try { return math.parse(math.format(val, {precision:6})).toTex({parenthesis:'auto'}); }
+    catch(_) { return '\\text{' + math.format(val,{precision:6}).replace(/[{}\\_^]/g,'') + '}'; }
+  }
+  return '\\text{' + String(val).replace(/[{}\\_^]/g, '').slice(0,60) + '}';
+}
+function _shortNum(v) {
+  if (typeof v !== 'number') return String(v);
+  if (!isFinite(v)) return v > 0 ? '∞' : '-∞';
+  if (Number.isInteger(v) && Math.abs(v) < 1e9) return String(v);
+  return parseFloat(v.toPrecision(6)).toString();
+}
+function _renderKatex(el, tex) {
+  if (!el) return;
+  try { katex.render(tex, el, { throwOnError:false, displayMode:false }); }
+  catch(_) { el.textContent = tex; }
+}
+function _showError(el, e) {
+  if (!el) return;
+  var msg = (e && e.message) ? e.message.replace(/[{}\\_]/g,'').slice(0,50) : '错误';
+  el.innerHTML = '<span style="color:var(--danger);font-size:13px">⚠ ' + msg + '</span>';
+}
+function _latexToText(tex) { return tex.replace(/\\[a-zA-Z]+\{([^}]+)\}/g,'$1').replace(/\\/g,'').slice(0,30); }
+
+function _updateVarHint() {
+  var el = document.getElementById('cadv-var-hint');
+  if (!el) return;
+  var keys = Object.keys(_cadv.scope).filter(function(k){ return k !== 'Ans'; });
+  el.textContent = keys.length ? keys.slice(0,4).map(function(k){ return k+'='+_shortNum(_cadv.scope[k]); }).join('  ') : '';
+}
+
+// 简易历史显示（复用 calc-history 区域但仅在高级模式下，
+// 改为插入到 cadv-lcd 上方的一个历史行）
+function _cadvPushHistory(expr, result) {
+  // 用已有的 calc-history 元素
+  var hist = document.getElementById('calc-history');
+  if (!hist) return;
+  var item = document.createElement('div');
+  item.className = 'calc-history-item';
+  item.innerHTML = '<div class="ch-expr">' + expr.slice(0,40) + '</div><div class="ch-val">' + result + '</div>';
+  hist.appendChild(item);
+  // 只保留最近5条
+  while (hist.children.length > 5) hist.removeChild(hist.firstChild);
+  hist.scrollTop = hist.scrollHeight;
+}
+
 
 function _showCalcBtn(show) {
   var btn = document.getElementById('calc-toggle-btn');

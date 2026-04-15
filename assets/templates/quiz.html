@@ -826,83 +826,236 @@
         <button class="ck" onclick="calcDigit('.')">.</button>
         <button class="ck eq" onclick="calcEval()">=</button>
       </div>
-      <!-- 高级模式 (Casio fx-991 风格 · LaTeX + math.js) -->
+      <!-- 高级模式：5分页表达式计算器 -->
       <div class="calc-adv-wrap" id="calc-keys-adv" style="display:none">
-        <div class="casio-lcd">
-          <div class="casio-lcd-top">
-            <span class="casio-ind" id="casio-shift-ind"></span>
-            <span class="casio-ind" id="casio-deg-ind">DEG</span>
-            <span class="casio-ind" id="casio-m-ind"></span>
+        <!-- LCD 显示区 -->
+        <div class="cadv-lcd">
+          <div class="cadv-lcd-bar">
+            <span class="cadv-ind" id="cadv-deg-ind">DEG</span>
+            <span class="cadv-var-hint" id="cadv-var-hint"></span>
+            <span class="cadv-ind cadv-ans-ind">Ans=<span id="cadv-ans-disp">0</span></span>
           </div>
           <input type="text" id="cadv-input" class="cadv-text-input"
-            placeholder="直接输入表达式，如 sin(pi/3) …"
+            placeholder="输入表达式，如 mean([1,2,3]) 或 x=5"
             oninput="_cadvInputChange()" onkeydown="_cadvInputKeyDown(event)"
             autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
           <div class="cadv-preview-row">
-            <div class="casio-expr" id="cadv-expr"></div>
+            <div class="cadv-expr" id="cadv-expr"></div>
           </div>
-          <div class="casio-result" id="cadv-result">0</div>
+          <div class="cadv-result" id="cadv-result">0</div>
         </div>
-        <div class="casio-keys">
-          <!-- Row 1: SHIFT, MODE/角度, 函数 -->
-          <button class="cx cx-ctrl" id="casio-shift" onclick="casioShift()">SHIFT</button>
-          <button class="cx cx-fn" id="casio-deg-btn" onclick="cadvToggleDeg()">DEG</button>
-          <button class="cx cx-fn" id="casio-hyp" onclick="casioHyp()">hyp</button>
-          <button class="cx cx-fn" onclick="casioFn('diff')">d/dx</button>
-          <button class="cx cx-fn" onclick="casioFn('simplify')">化简</button>
 
-          <!-- Row 2: 三角 + 幂/根 -->
-          <button class="cx cx-fn" id="casio-sin" onclick="casioFn('sin')">sin</button>
-          <button class="cx cx-fn" id="casio-cos" onclick="casioFn('cos')">cos</button>
-          <button class="cx cx-fn" id="casio-tan" onclick="casioFn('tan')">tan</button>
-          <button class="cx cx-fn" onclick="casioFn('pow')">x<sup>y</sup></button>
-          <button class="cx cx-fn" onclick="casioFn('sqrt')">√</button>
+        <!-- 分页标签 -->
+        <div class="cadv-tabs">
+          <button class="cadv-tab active" id="cadv-tab-basic"   onclick="cadvTab('basic')">基本</button>
+          <button class="cadv-tab"        id="cadv-tab-trig"    onclick="cadvTab('trig')">三角</button>
+          <button class="cadv-tab"        id="cadv-tab-algebra" onclick="cadvTab('algebra')">代数</button>
+          <button class="cadv-tab"        id="cadv-tab-stat"    onclick="cadvTab('stat')">统计</button>
+          <button class="cadv-tab"        id="cadv-tab-matrix"  onclick="cadvTab('matrix')">矩阵</button>
+        </div>
 
-          <!-- Row 3: log/ln + 常量 + 变量 -->
-          <button class="cx cx-fn" id="casio-log" onclick="casioFn('log')">log</button>
-          <button class="cx cx-fn" id="casio-ln" onclick="casioFn('ln')">ln</button>
-          <button class="cx cx-fn" onclick="casioFn('abs')">|x|</button>
-          <button class="cx cx-fn" onclick="casioFn('factorial')">x!</button>
-          <button class="cx cx-fn" onclick="casioIns('x')">x</button>
+        <!-- 基本 页 -->
+        <div class="cadv-keys" id="cadv-keys-basic">
+          <button class="cx cx-fn" onclick="cadvIns('abs(')">|x|</button>
+          <button class="cx cx-fn" onclick="cadvIns('sqrt(')">√x</button>
+          <button class="cx cx-fn" onclick="cadvIns('cbrt(')">∛x</button>
+          <button class="cx cx-fn" onclick="cadvIns('^2')">x²</button>
+          <button class="cx cx-fn" onclick="cadvIns('^')">xʸ</button>
 
-          <!-- Row 4: 括号 + π + e + Ans -->
-          <button class="cx cx-fn" onclick="casioIns('(')">(</button>
-          <button class="cx cx-fn" onclick="casioIns(')')">)</button>
-          <button class="cx cx-const" onclick="casioIns('pi')">π</button>
-          <button class="cx cx-const" onclick="casioIns('e')">e</button>
-          <button class="cx cx-fn" onclick="casioAns()">Ans</button>
+          <button class="cx cx-fn" onclick="cadvIns('floor(')">⌊x⌋</button>
+          <button class="cx cx-fn" onclick="cadvIns('ceil(')">⌈x⌉</button>
+          <button class="cx cx-fn" onclick="cadvIns('round(')">rnd</button>
+          <button class="cx cx-fn" onclick="cadvIns(' mod ')">mod</button>
+          <button class="cx cx-fn" onclick="cadvIns('!')">n!</button>
 
-          <!-- Row 5: 7 8 9 DEL AC -->
-          <button class="cx cx-num" onclick="casioDigit('7')">7</button>
-          <button class="cx cx-num" onclick="casioDigit('8')">8</button>
-          <button class="cx cx-num" onclick="casioDigit('9')">9</button>
-          <button class="cx cx-ctrl" onclick="casioDel()">DEL</button>
-          <button class="cx cx-ctrl" onclick="casioAC()">AC</button>
+          <button class="cx cx-num" onclick="cadvDigit('7')">7</button>
+          <button class="cx cx-num" onclick="cadvDigit('8')">8</button>
+          <button class="cx cx-num" onclick="cadvDigit('9')">9</button>
+          <button class="cx cx-ctrl" onclick="cadvDel()">⌫</button>
+          <button class="cx cx-ctrl" onclick="cadvAC()">AC</button>
 
-          <!-- Row 6: 4 5 6 × ÷ -->
-          <button class="cx cx-num" onclick="casioDigit('4')">4</button>
-          <button class="cx cx-num" onclick="casioDigit('5')">5</button>
-          <button class="cx cx-num" onclick="casioDigit('6')">6</button>
-          <button class="cx cx-op" onclick="casioOp('*')">×</button>
-          <button class="cx cx-op" onclick="casioOp('/')">÷</button>
+          <button class="cx cx-num" onclick="cadvDigit('4')">4</button>
+          <button class="cx cx-num" onclick="cadvDigit('5')">5</button>
+          <button class="cx cx-num" onclick="cadvDigit('6')">6</button>
+          <button class="cx cx-op"  onclick="cadvOp('*')">×</button>
+          <button class="cx cx-op"  onclick="cadvOp('/')">÷</button>
 
-          <!-- Row 7: 1 2 3 + − -->
-          <button class="cx cx-num" onclick="casioDigit('1')">1</button>
-          <button class="cx cx-num" onclick="casioDigit('2')">2</button>
-          <button class="cx cx-num" onclick="casioDigit('3')">3</button>
-          <button class="cx cx-op" onclick="casioOp('+')">+</button>
-          <button class="cx cx-op" onclick="casioOp('-')">−</button>
+          <button class="cx cx-num" onclick="cadvDigit('1')">1</button>
+          <button class="cx cx-num" onclick="cadvDigit('2')">2</button>
+          <button class="cx cx-num" onclick="cadvDigit('3')">3</button>
+          <button class="cx cx-op"  onclick="cadvOp('+')">+</button>
+          <button class="cx cx-op"  onclick="cadvOp('-')">−</button>
 
-          <!-- Row 8: 0 . ×10^x (−) = -->
-          <button class="cx cx-num" onclick="casioDigit('0')">0</button>
-          <button class="cx cx-num" onclick="casioDigit('.')">.</button>
-          <button class="cx cx-fn" onclick="casioFn('exp')">×10<sup>x</sup></button>
-          <button class="cx cx-fn" onclick="casioNeg()">(−)</button>
-          <button class="cx cx-eq" onclick="casioEval()">=</button>
+          <button class="cx cx-num" onclick="cadvDigit('0')">0</button>
+          <button class="cx cx-num" onclick="cadvDigit('.')">.</button>
+          <button class="cx cx-fn"  onclick="cadvOp('(')">(</button>
+          <button class="cx cx-fn"  onclick="cadvOp(')')">)</button>
+          <button class="cx cx-fn"  onclick="cadvOp(',')">，</button>
+
+          <button class="cx cx-const" onclick="cadvIns('pi')">π</button>
+          <button class="cx cx-const" onclick="cadvIns('e')">e</button>
+          <button class="cx cx-const" onclick="cadvIns('phi')">φ</button>
+          <button class="cx cx-fn"    onclick="cadvAns()">Ans</button>
+          <button class="cx cx-eq"    onclick="cadvEval()">=</button>
+        </div>
+
+        <!-- 三角 页 -->
+        <div class="cadv-keys" id="cadv-keys-trig" style="display:none">
+          <button class="cx cx-fn" onclick="cadvIns('sin(')">sin</button>
+          <button class="cx cx-fn" onclick="cadvIns('cos(')">cos</button>
+          <button class="cx cx-fn" onclick="cadvIns('tan(')">tan</button>
+          <button class="cx cx-fn" onclick="cadvIns('cot(')">cot</button>
+          <button class="cx cx-fn cadv-deg-toggle" id="cadv-deg-btn" onclick="cadvToggleDeg()">DEG</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('asin(')">sin⁻¹</button>
+          <button class="cx cx-fn" onclick="cadvIns('acos(')">cos⁻¹</button>
+          <button class="cx cx-fn" onclick="cadvIns('atan(')">tan⁻¹</button>
+          <button class="cx cx-fn" onclick="cadvIns('atan2(')">atan2</button>
+          <button class="cx cx-fn" onclick="cadvIns('sec(')">sec</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('sinh(')">sinh</button>
+          <button class="cx cx-fn" onclick="cadvIns('cosh(')">cosh</button>
+          <button class="cx cx-fn" onclick="cadvIns('tanh(')">tanh</button>
+          <button class="cx cx-fn" onclick="cadvIns('coth(')">coth</button>
+          <button class="cx cx-fn" onclick="cadvIns('csc(')">csc</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('asinh(')">sinh⁻¹</button>
+          <button class="cx cx-fn" onclick="cadvIns('acosh(')">cosh⁻¹</button>
+          <button class="cx cx-fn" onclick="cadvIns('atanh(')">tanh⁻¹</button>
+          <button class="cx cx-fn" onclick="cadvIns('acoth(')">coth⁻¹</button>
+          <button class="cx cx-fn" onclick="cadvIns('asec(')">sec⁻¹</button>
+
+          <button class="cx cx-const" onclick="cadvIns('pi/6')">π/6</button>
+          <button class="cx cx-const" onclick="cadvIns('pi/4')">π/4</button>
+          <button class="cx cx-const" onclick="cadvIns('pi/3')">π/3</button>
+          <button class="cx cx-const" onclick="cadvIns('pi/2')">π/2</button>
+          <button class="cx cx-const" onclick="cadvIns('2*pi')">2π</button>
+
+          <button class="cx cx-num" onclick="cadvDigit('7')">7</button>
+          <button class="cx cx-num" onclick="cadvDigit('8')">8</button>
+          <button class="cx cx-num" onclick="cadvDigit('9')">9</button>
+          <button class="cx cx-ctrl" onclick="cadvDel()">⌫</button>
+          <button class="cx cx-eq"  onclick="cadvEval()">=</button>
+        </div>
+
+        <!-- 代数 页 -->
+        <div class="cadv-keys" id="cadv-keys-algebra" style="display:none">
+          <button class="cx cx-fn" onclick="cadvIns('simplify(')">化简</button>
+          <button class="cx cx-fn" onclick="cadvIns('derivative(')">d/dx</button>
+          <button class="cx cx-fn" onclick="cadvIns('rationalize(')">有理化</button>
+          <button class="cx cx-fn" onclick="cadvIns('polynomialRoot(')">多项根</button>
+          <button class="cx cx-fn" onclick="cadvIns('x')">x</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('log(')">ln</button>
+          <button class="cx cx-fn" onclick="cadvIns('log10(')">log₁₀</button>
+          <button class="cx cx-fn" onclick="cadvIns('log2(')">log₂</button>
+          <button class="cx cx-fn" onclick="cadvIns('exp(')">eˣ</button>
+          <button class="cx cx-fn" onclick="cadvIns('y')">y</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('gcd(')">gcd</button>
+          <button class="cx cx-fn" onclick="cadvIns('lcm(')">lcm</button>
+          <button class="cx cx-fn" onclick="cadvIns('xgcd(')">xgcd</button>
+          <button class="cx cx-fn" onclick="cadvIns('invmod(')">逆模</button>
+          <button class="cx cx-fn" onclick="cadvIns('n')">n</button>
+
+          <button class="cx cx-num" onclick="cadvDigit('7')">7</button>
+          <button class="cx cx-num" onclick="cadvDigit('8')">8</button>
+          <button class="cx cx-num" onclick="cadvDigit('9')">9</button>
+          <button class="cx cx-ctrl" onclick="cadvDel()">⌫</button>
+          <button class="cx cx-ctrl" onclick="cadvAC()">AC</button>
+
+          <button class="cx cx-num" onclick="cadvDigit('4')">4</button>
+          <button class="cx cx-num" onclick="cadvDigit('5')">5</button>
+          <button class="cx cx-num" onclick="cadvDigit('6')">6</button>
+          <button class="cx cx-op"  onclick="cadvOp('*')">×</button>
+          <button class="cx cx-op"  onclick="cadvOp('/')">÷</button>
+
+          <button class="cx cx-num" onclick="cadvDigit('1')">1</button>
+          <button class="cx cx-num" onclick="cadvDigit('2')">2</button>
+          <button class="cx cx-num" onclick="cadvDigit('3')">3</button>
+          <button class="cx cx-op"  onclick="cadvOp('+')">+</button>
+          <button class="cx cx-op"  onclick="cadvOp('-')">−</button>
+
+          <button class="cx cx-num" onclick="cadvDigit('0')">0</button>
+          <button class="cx cx-fn"  onclick="cadvOp('(')">(</button>
+          <button class="cx cx-fn"  onclick="cadvOp(')')">)</button>
+          <button class="cx cx-fn"  onclick="cadvOp(',')">，</button>
+          <button class="cx cx-eq"  onclick="cadvEval()">=</button>
+        </div>
+
+        <!-- 统计 页 -->
+        <div class="cadv-keys" id="cadv-keys-stat" style="display:none">
+          <button class="cx cx-fn" onclick="cadvIns('mean(')">均值</button>
+          <button class="cx cx-fn" onclick="cadvIns('median(')">中位</button>
+          <button class="cx cx-fn" onclick="cadvIns('mode(')">众数</button>
+          <button class="cx cx-fn" onclick="cadvIns('mad(')">MAD</button>
+          <button class="cx cx-fn" onclick="cadvIns('[')"> [ </button>
+
+          <button class="cx cx-fn" onclick="cadvIns('std(')">std</button>
+          <button class="cx cx-fn" onclick="cadvIns('variance(')">方差</button>
+          <button class="cx cx-fn" onclick="cadvIns('sum(')"> Σ </button>
+          <button class="cx cx-fn" onclick="cadvIns('prod(')"> Π </button>
+          <button class="cx cx-fn" onclick="cadvIns(']')"> ] </button>
+
+          <button class="cx cx-fn" onclick="cadvIns('min(')">min</button>
+          <button class="cx cx-fn" onclick="cadvIns('max(')">max</button>
+          <button class="cx cx-fn" onclick="cadvIns('cumsum(')">累积和</button>
+          <button class="cx cx-fn" onclick="cadvIns('diff(')">差分</button>
+          <button class="cx cx-fn" onclick="cadvOp(',')">，</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('factorial(')">n!</button>
+          <button class="cx cx-fn" onclick="cadvIns('combinations(')">C(n,k)</button>
+          <button class="cx cx-fn" onclick="cadvIns('permutations(')">P(n,k)</button>
+          <button class="cx cx-fn" onclick="cadvIns('gamma(')">Γ</button>
+          <button class="cx cx-fn" onclick="cadvIns('lgamma(')">lnΓ</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('isPrime(')">质数?</button>
+          <button class="cx cx-fn" onclick="cadvIns('erf(')">erf</button>
+          <button class="cx cx-fn" onclick="cadvIns('quantileSeq(')">分位</button>
+          <button class="cx cx-ctrl" onclick="cadvDel()">⌫</button>
+          <button class="cx cx-eq"  onclick="cadvEval()">=</button>
+        </div>
+
+        <!-- 矩阵/复数 页 -->
+        <div class="cadv-keys" id="cadv-keys-matrix" style="display:none">
+          <button class="cx cx-const" onclick="cadvIns('i')">i</button>
+          <button class="cx cx-fn"   onclick="cadvIns('re(')">Re</button>
+          <button class="cx cx-fn"   onclick="cadvIns('im(')">Im</button>
+          <button class="cx cx-fn"   onclick="cadvIns('conj(')">conj</button>
+          <button class="cx cx-fn"   onclick="cadvIns('arg(')">arg</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('det(')">det</button>
+          <button class="cx cx-fn" onclick="cadvIns('inv(')">inv</button>
+          <button class="cx cx-fn" onclick="cadvIns('transpose(')">转置</button>
+          <button class="cx cx-fn" onclick="cadvIns('trace(')">迹</button>
+          <button class="cx cx-fn" onclick="cadvIns('norm(')">范数</button>
+
+          <button class="cx cx-fn" onclick="cadvIns('eigs(')">特征值</button>
+          <button class="cx cx-fn" onclick="cadvIns('pinv(')">伪逆</button>
+          <button class="cx cx-fn" onclick="cadvIns('cross(')">叉积</button>
+          <button class="cx cx-fn" onclick="cadvIns('dot(')">点积</button>
+          <button class="cx cx-fn" onclick="cadvIns('kron(')">Kron</button>
+
+          <button class="cx cx-fn"   onclick="cadvIns('identity(')">I(n)</button>
+          <button class="cx cx-fn"   onclick="cadvIns('zeros(')">零阵</button>
+          <button class="cx cx-fn"   onclick="cadvIns('ones(')">全1阵</button>
+          <button class="cx cx-fn"   onclick="cadvIns('diag(')">diag</button>
+          <button class="cx cx-fn"   onclick="cadvIns('[[')">[[</button>
+
+          <button class="cx cx-fn" onclick="cadvIns(' bitAnd(')"> &amp; </button>
+          <button class="cx cx-fn" onclick="cadvIns(' bitOr(')"> | </button>
+          <button class="cx cx-fn" onclick="cadvIns(' bitXor(')">xor</button>
+          <button class="cx cx-fn" onclick="cadvIns('bitNot(')"> ~ </button>
+          <button class="cx cx-fn" onclick="cadvIns(' leftShift(')"> &lt;&lt; </button>
+
+          <button class="cx cx-fn"   onclick="cadvIns('hypot(')">hypot</button>
+          <button class="cx cx-fn"   onclick="cadvIns('sign(')">sign</button>
+          <button class="cx cx-fn"   onclick="cadvIns('nthRoot(')">ⁿ√</button>
+          <button class="cx cx-ctrl" onclick="cadvDel()">⌫</button>
+          <button class="cx cx-eq"   onclick="cadvEval()">=</button>
         </div>
       </div>
-    </div>
-  </div>
+
 
   <div id="toast"></div>
 
