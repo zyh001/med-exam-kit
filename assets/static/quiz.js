@@ -2070,7 +2070,7 @@ function renderQ(dir = 'none') {
   document.getElementById('q-total').textContent = total;
   document.getElementById('q-unit-tag').textContent = (S.mode === 'exam') ? '' : (q.unit || '');
   document.getElementById('progress-fill').style.width = ((S.cur + 1) / total * 100).toFixed(1) + '%';
-  document.getElementById('flag-btn').classList.toggle('active', S.marked.has(S.cur));
+  _updateFlagBtn();
 
   // ── Footer 按钮 ──
   const btnPrev = document.getElementById('btn-prev');
@@ -2543,9 +2543,99 @@ function prevQ() {
   }
 }
 
+// ── 收藏系统 ────────────────────────────────────────────────────
+const FAV_KEY = 'med_exam_favorites';
+
+function _loadFavorites() {
+  try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')); }
+  catch(_) { return new Set(); }
+}
+function _saveFavorites(set) {
+  try { localStorage.setItem(FAV_KEY, JSON.stringify([...set])); } catch(_) {}
+}
+
+function _curFingerprint() {
+  const q = S.questions && S.questions[S.cur];
+  return q ? (q.fingerprint + ':' + (q.si ?? 0)) : null;
+}
+
+function toggleFavorite() {
+  const fp = _curFingerprint();
+  if (!fp) return;
+  const favs = _loadFavorites();
+  const adding = !favs.has(fp);
+  if (adding) favs.add(fp); else favs.delete(fp);
+  _saveFavorites(favs);
+  _updateFlagBtn();
+  // 果冻动画
+  const btn = document.getElementById('flag-btn');
+  if (btn) {
+    btn.classList.remove('jelly');
+    void btn.offsetWidth; // reflow 触发重播
+    btn.classList.add('jelly');
+    btn.addEventListener('animationend', () => btn.classList.remove('jelly'), { once: true });
+  }
+  toast(adding ? '⭐ 已收藏' : '已取消收藏');
+}
+
+/** 更新 flag-btn 的标记(active) + 收藏(fav) 状态及图标 */
+function _updateFlagBtn() {
+  const btn = document.getElementById('flag-btn');
+  if (!btn) return;
+  const isMarked = S.marked.has(S.cur);
+  const fp = _curFingerprint();
+  const isFav = fp ? _loadFavorites().has(fp) : false;
+  btn.classList.toggle('active', isMarked && !isFav);
+  btn.classList.toggle('fav', isFav);
+  btn.textContent = isFav ? '★' : '⚑';
+  btn.title = isFav ? '已收藏（长按取消）' : '标记（长按收藏）';
+}
+
+// 长按检测（移动端 + PC 均支持）
+(function _bindFlagLongPress() {
+  let _timer = null;
+  let _longFired = false;
+  const LONG_MS = 450;
+
+  function _start(e) {
+    if (!e.currentTarget || e.currentTarget.id !== 'flag-btn') return;
+    _longFired = false;
+    _timer = setTimeout(() => {
+      _timer = null;
+      _longFired = true;
+      toggleFavorite();
+    }, LONG_MS);
+  }
+  function _cancel() { clearTimeout(_timer); _timer = null; }
+  function _click(e) {
+    _cancel();
+    if (_longFired) {
+      // 长按已触发，吃掉这次 click，重置标记
+      _longFired = false;
+      e.preventDefault();
+      return;
+    }
+    // 短按：走原有标记逻辑
+    toggleFlag();
+  }
+
+  document.addEventListener('DOMContentLoaded', function() {
+    const btn = document.getElementById('flag-btn');
+    if (!btn) return;
+    btn.removeAttribute('onclick');
+    btn.addEventListener('mousedown',   _start);
+    btn.addEventListener('touchstart',  _start,  { passive: true });
+    btn.addEventListener('mouseup',     _cancel);
+    btn.addEventListener('mouseleave',  _cancel);
+    btn.addEventListener('touchend',    _cancel);
+    btn.addEventListener('touchcancel', _cancel);
+    btn.addEventListener('click',       _click);
+  });
+})();
+
 function toggleFlag() {
   if (S.marked.has(S.cur)) S.marked.delete(S.cur); else S.marked.add(S.cur);
-  document.getElementById('flag-btn').classList.toggle('active', S.marked.has(S.cur));
+  _updateFlagBtn();
   updateGridDot();
   if (S.mode === 'exam') saveExamSession();
 }

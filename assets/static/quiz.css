@@ -461,6 +461,19 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   display:flex;align-items:center;justify-content:center;transition:all .15s;flex-shrink:0;
 }
 .flag-btn.active{background:var(--warn-bg);border-color:var(--warning);color:var(--warning)}
+/* 收藏状态：金色星星 */
+.flag-btn.fav{background:#fff7e0;border-color:#f0b800;color:#f0b800}
+@media(prefers-color-scheme:dark){.flag-btn.fav{background:#2e2600;border-color:#c89800;color:#f0c800}}
+/* 果冻动画 */
+@keyframes jelly{
+  0%,100%{transform:scale(1)}
+  20%{transform:scale(1.35,0.7)}
+  40%{transform:scale(0.75,1.3)}
+  55%{transform:scale(1.2,0.85)}
+  70%{transform:scale(0.9,1.1)}
+  85%{transform:scale(1.05,0.95)}
+}
+.flag-btn.jelly{animation:jelly .55s cubic-bezier(.36,.07,.19,.97) both}
 
 /* Question body */
 .quiz-body{
