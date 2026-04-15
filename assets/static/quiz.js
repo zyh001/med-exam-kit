@@ -285,6 +285,12 @@ function bankQS() { return 'bank=' + S.bankID; }
   }
 
   function _onTouchStart(e) {
+    // 关闭按钮 / 工具栏：不阻止默认行为，让 click 事件正常触发
+    var tgt = e.target;
+    if (tgt && (tgt.id === 'img-lightbox-close' ||
+        tgt.closest && (tgt.closest('#img-lightbox-close') || tgt.closest('#lb-toolbar')))) {
+      return; // 不 preventDefault，让 click 触发
+    }
     e.preventDefault();
     var ts = e.touches;
     if (ts.length === 2) {
@@ -353,8 +359,24 @@ function bankQS() { return 'bank=' + S.bankID; }
     // 捏合结束后重置参考距离
     if (e.touches.length < 2) _pinchDist0 = 0;
     if (e.touches.length === 0) {
-      // 没有放大时单次点击背景关闭（touchend 在目标上）
-      // 双击已在 touchstart 处理，这里只处理单击
+      var tgt = e.changedTouches[0];
+      // 触摸关闭按钮 → 关闭（补充 click 的保障）
+      var el = document.elementFromPoint(tgt.clientX, tgt.clientY);
+      if (el && (el.id === 'img-lightbox-close' || (el.closest && el.closest('#img-lightbox-close')))) {
+        _close();
+        return;
+      }
+      // 未放大时，点击背景区域（非图片/工具栏）→ 关闭
+      if (_scale <= 1.01 && el) {
+        var isBackground = (el === _lb) ||
+          (el.id === 'lb-wrap') ||
+          (el === _lbWrap);
+        // 排除工具栏和关闭按钮本身
+        var isToolbar = el.closest && (el.closest('#lb-toolbar') || el.closest('#img-lightbox-close'));
+        if (isBackground && !isToolbar) {
+          _close();
+        }
+      }
     }
   }
 
@@ -3450,6 +3472,15 @@ async function showAIReport() {
     return;
   }
 
+  // 预加载 quiz_ai.js（含 markedRender / marked），确保 Markdown 可渲染
+  try { await _loadQuizAI(); } catch(e) { /* 静默，降级为纯文本 */ }
+
+  // ── 辅助：反序列化 R.ans 中经 _serializeAns 序列化的 Set ──────────
+  function _deser(v) {
+    if (v && typeof v === 'object' && v.__set) return new Set(v.v || []);
+    return v;
+  }
+
   // 构建传给后端的数据
   // ── 收集考试数据（全量，不截断）─────────────────────────────────
   // 策略：
@@ -3474,7 +3505,7 @@ async function showAIReport() {
     const mode = q.mode || '未知';
     if (!byModeMap[mode]) byModeMap[mode] = { correct: 0, total: 0 };
     byModeMap[mode].total++;
-    const sel = R.ans[i];
+    let sel = _deser(R.ans[i]);
     const empty = !sel || (sel instanceof Set && sel.size === 0);
     if (!empty) {
       const isMulti = typeof isMultiQ === 'function' ? isMultiQ(q) : false;
@@ -3498,7 +3529,7 @@ async function showAIReport() {
   const wrongSample = [];
 
   (R.qs || []).forEach((q, i) => {
-    const sel = R.ans[i];
+    let sel = _deser(R.ans[i]);
     const empty = !sel || (sel instanceof Set && sel.size === 0);
     if (empty) return;
     const isMulti = typeof isMultiQ === 'function' ? isMultiQ(q) : false;
@@ -5564,11 +5595,20 @@ function toggleCalc() {
   var opening = m.style.display !== 'flex';
   m.style.display = opening ? 'flex' : 'none';
   if (opening) {
-    // 打开时聚焦输入框，显示光标
-    setTimeout(function() {
-      var inp = document.getElementById('calc-result');
-      if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
-    }, 50);
+    // 简易/科学模式：输入框设为 readonly，阻止移动端弹出键盘
+    // 高级模式需要手动输入，不设 readonly
+    var inp = document.getElementById('calc-result');
+    if (inp) {
+      var adv = document.getElementById('calc-keys-adv');
+      var isAdv = adv && adv.style.display !== 'none';
+      if (isAdv) {
+        inp.removeAttribute('readonly');
+        setTimeout(function() { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }, 50);
+      } else {
+        inp.setAttribute('readonly', 'readonly');
+        inp.blur();
+      }
+    }
   }
 }
 
@@ -5582,11 +5622,16 @@ function setCalcMode(mode) {
   document.getElementById('calc-mode-sci').classList.toggle('active', mode === 'sci');
   document.getElementById('calc-mode-adv').classList.toggle('active', mode === 'adv');
   if (mode === 'adv') _loadAdvAssets();
-  if (mode !== 'adv') {
-    setTimeout(function() {
-      var inp = document.getElementById('calc-result');
-      if (inp) { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }
-    }, 30);
+  var inp = document.getElementById('calc-result');
+  if (inp) {
+    if (mode !== 'adv') {
+      // 简易/科学：readonly，阻止移动端键盘弹出
+      inp.setAttribute('readonly', 'readonly');
+      inp.blur();
+    } else {
+      inp.removeAttribute('readonly');
+      setTimeout(function() { inp.focus(); inp.selectionStart = inp.selectionEnd = inp.value.length; }, 30);
+    }
   }
 }
 
