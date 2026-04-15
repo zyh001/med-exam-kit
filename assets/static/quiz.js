@@ -4682,8 +4682,9 @@ function _renderFavoritesScreen() {
 
   listEl.innerHTML = Object.entries(unitMap).map(([unit, fps]) => {
     const disabled = fps.length === 0;
-    const clickAttr = disabled ? '' : `onclick="startFavoritesQuiz('unit', ${JSON.stringify(unit)})"`;
-    return `<div class="fav-unit-row${disabled ? ' fav-unit-row-disabled' : ''}" ${clickAttr}>
+    // 用 data-unit 属性存储章节名，避免 onclick 内引号冲突导致点击无效
+    return `<div class="fav-unit-row${disabled ? ' fav-unit-row-disabled' : ''}"
+      ${disabled ? '' : `data-unit="${esc(unit)}"`}>
       <div class="fav-unit-left">
         <div class="fav-unit-name">${esc(unit)}</div>
         <div class="fav-unit-count">${fps.length} 题${disabled ? '　需重新收藏' : ''}</div>
@@ -4691,6 +4692,13 @@ function _renderFavoritesScreen() {
       ${disabled ? '' : '<span class="fav-unit-chevron">›</span>'}
     </div>`;
   }).join('');
+
+  // 事件委托：点击整行触发刷题
+  listEl.onclick = function(e) {
+    const row = e.target.closest('.fav-unit-row:not(.fav-unit-row-disabled)');
+    if (!row || !row.dataset.unit) return;
+    startFavoritesQuiz('unit', row.dataset.unit);
+  };
 }
 
 /** 开始做收藏题目（使用本地缓存数据，不依赖 S.questions） */
