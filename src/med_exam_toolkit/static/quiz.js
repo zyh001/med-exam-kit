@@ -6024,7 +6024,7 @@ function casioDel() {
 function casioAC() {
   _casio.expr = '';
   var inp = document.getElementById('cadv-input');
-  if (inp) { inp.value = ''; inp.focus(); }
+  if (inp) { inp.value = ''; }  // 不调用 focus()，防止移动端弹出键盘
   var exprEl = document.getElementById('cadv-expr');
   var resultEl = document.getElementById('cadv-result');
   if (exprEl) exprEl.innerHTML = '';
@@ -6037,7 +6037,8 @@ function _cadvSyncInput() {
   if (inp) {
     inp.value = _casio.expr;
     inp.selectionStart = inp.selectionEnd = inp.value.length;
-    inp.focus();
+    // 不调用 inp.focus()，防止移动端按键盘按钮时弹出系统键盘。
+    // 只有用户主动点击输入框时才弹出键盘。
   }
   _cadvRenderPreview();
 }
