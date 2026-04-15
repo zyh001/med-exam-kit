@@ -453,7 +453,9 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 /* 选项：无边框、无分隔线，仅字母圈 + 轻间距 */
 .s-quiz-zen .opt{
   background:transparent;border:none;border-radius:8px;
-  padding:10px 0;transition:background .12s;
+  padding:10px 8px 10px 4px;transition:background .12s;
+  /* 负外边距让背景延伸到选项区左右边缘 */
+  margin-left:-8px;margin-right:-8px;padding-left:8px;padding-right:8px;
 }
 .s-quiz-zen .opt:last-child{border-bottom:none}
 .s-quiz-zen .opt:hover:not(:disabled){background:transparent}
@@ -2243,8 +2245,19 @@ button,a,[role=button],label{touch-action:manipulation}
   color:#7a9a5a;
 }
 .cadv-ind{opacity:.9}
-.cadv-var-hint{font-size:10px;color:#6a8a4a;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:40%}
+.cadv-var-hint{font-size:10px;color:#6a8a4a;opacity:.8;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:35%}
 .cadv-ans-ind{font-size:10px}
+/* BigNumber 切换按钮 */
+.cadv-bn-toggle{
+  font-size:10px;font-weight:700;letter-spacing:.5px;
+  border:1px solid rgba(120,180,70,.4);border-radius:4px;
+  background:transparent;color:#6a8a4a;cursor:pointer;
+  padding:1px 5px;transition:all .15s;flex-shrink:0;
+}
+.cadv-bn-toggle.bn-active{
+  background:rgba(120,180,70,.3);color:#a0d070;
+  border-color:rgba(120,180,70,.7);
+}
 .cadv-text-input{
   width:100%;background:transparent;border:none;border-bottom:1px solid rgba(120,180,70,.3);
   color:#b8d890;font-size:15px;font-family:inherit;padding:3px 0 4px;outline:none;
@@ -2342,7 +2355,7 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-report-backdrop{
   position:fixed;inset:0;z-index:9000;
   background:rgba(0,0,0,.55);
-  display:flex;align-items:flex-end;
+  align-items:flex-end;  /* display controlled by JS only */
 }
 .ai-report-sheet{
   width:100%;max-height:82vh;display:flex;flex-direction:column;

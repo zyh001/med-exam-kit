@@ -3695,7 +3695,7 @@ async function showAIReport() {
   const modal = document.getElementById('ai-report-modal');
   const messagesEl = document.getElementById('ai-report-messages');
   if (!modal || !messagesEl) return;
-  modal.style.display = 'flex';
+  modal.style.display = 'flex';  // 必须显式设 flex，CSS 类不再包含 display
   messagesEl.innerHTML = '';
 
   // Loading 占位
@@ -3881,7 +3881,7 @@ function _enterExamReview() {
     bar = document.createElement('div');
     bar.id = 'exam-review-bar';
     bar.className = 'exam-review-bar';
-    bar.innerHTML = '🔍 回看模式——可自由翻页，答案不可修改 &nbsp;<button onclick="submitExam()" style="background:#4f46e5;color:#fff;border:none;border-radius:6px;padding:3px 12px;cursor:pointer;font-size:12px;font-weight:700">交卷 ✓</button>';
+    bar.innerHTML = '🔍 回看模式——可自由翻页，答案不可修改，底部「交卷 ✓」提交';
     const quizScreen = document.getElementById('s-quiz');
     if (quizScreen) quizScreen.prepend(bar);
   }
@@ -6274,8 +6274,32 @@ var _cadv = {
   lastAns: 0,        // Ans
   scope:   {},       // 持久变量 {x:5, ...}
   tab:     'basic',  // 当前分页
+  bn:      false,    // BigNumber 高精度模式
 };
+var _mathBN = null;   // BigNumber 实例（24位精度）
 var _cadvPreviewTimer = null;
+
+/** 切换 BigNumber 高精度模式 */
+function cadvToggleBN() {
+  _cadv.bn = !_cadv.bn;
+  var btn = document.getElementById('cadv-bn-btn');
+  if (btn) btn.classList.toggle('bn-active', _cadv.bn);
+  // 初始化 BigNumber math 实例
+  if (_cadv.bn && typeof math !== 'undefined' && !_mathBN) {
+    try { _mathBN = math.create({ number: 'BigNumber', precision: 24 }); } catch(e) {}
+  }
+}
+
+/** 返回当前应使用的 math 实例 */
+function _mathInst() {
+  if (_cadv.bn) {
+    if (!_mathBN && typeof math !== 'undefined') {
+      try { _mathBN = math.create({ number: 'BigNumber', precision: 24 }); } catch(e) {}
+    }
+    return _mathBN || math;
+  }
+  return math;
+}
 
 // ── 分页切换 ────────────────────────────────────────────────────
 function cadvTab(name) {
@@ -6470,7 +6494,7 @@ function cadvEval() {
       var varName = assignM[1];
       var valExpr = _cadvPreProcess(assignM[2]);
       try {
-        var val = math.evaluate(valExpr, _cadvScope());
+        var val = _mathInst().evaluate(valExpr, _cadvScope());
         _cadv.scope[varName] = val;
         _updateVarHint();
         resultTex = varName + ' = ' + _formatResult(val);
@@ -6490,7 +6514,7 @@ function cadvEval() {
         var m = processed.match(/derivative\((.+),\s*"?([a-z])"?\)$/i);
         var inner = m ? m[1] : processed.slice(processed.indexOf('(')+1, -1);
         var vari  = m ? m[2] : 'x';
-        var node  = math.derivative(inner, vari);
+        var node  = _mathInst().derivative(inner, vari);
         resultTex = node.toTex({ parenthesis:'auto' });
         exprTex   = '\\frac{d}{d' + vari + '}(' + _toTex(inner) + ')';
         _renderKatex(exprEl, exprTex + ' =');
@@ -6504,7 +6528,7 @@ function cadvEval() {
     if (processed.startsWith('simplify(')) {
       try {
         var inner = processed.slice(9, -1);
-        var node = math.simplify(inner);
+        var node = _mathInst().simplify(inner);
         resultTex = node.toTex({ parenthesis:'auto' });
         exprTex   = '\\text{simplify}(' + _toTex(inner) + ')';
         _renderKatex(exprEl, exprTex + ' =');
@@ -6517,10 +6541,10 @@ function cadvEval() {
     // 通用求值
     try {
       var scope = _cadvScope();
-      var result = math.evaluate(processed, scope);
+      var result = _mathInst().evaluate(processed, scope);
       resultTex = _formatResult(result);
       exprTex   = _toTex(processed);
-      _cadv.lastAns = (typeof result === 'number') ? result : _cadv.lastAns;
+      _cadv.lastAns = (typeof result === 'number' || (result && result.isBigNumber)) ? result : _cadv.lastAns;
       if (ansDisp) ansDisp.textContent = _shortNum(_cadv.lastAns);
       _renderKatex(exprEl, exprTex + ' =');
       _renderKatex(resEl, resultTex);
@@ -6537,6 +6561,14 @@ function _toTex(expr) {
   catch(_) { return expr; }
 }
 function _formatResult(val) {
+  var m = _mathInst();
+  // BigNumber 类型：直接转字符串，显示全部精度
+  if (val && val.isBigNumber) {
+    var s = val.toSignificantDigits(24).toFixed();
+    // 如果是整数且不太长，去掉小数点
+    if (/^\.?0+$/.test(s.replace(/^-?\d+/, ''))) s = val.toFixed();
+    return '\\text{' + s.replace(/[{}\\^]/g,'').slice(0, 80) + '}';
+  }
   if (typeof val === 'number') {
     if (!isFinite(val)) return val > 0 ? '\\infty' : '-\\infty';
     if (isNaN(val)) return '\\text{NaN}';
@@ -6551,6 +6583,7 @@ function _formatResult(val) {
   return '\\text{' + String(val).replace(/[{}\\_^]/g, '').slice(0,60) + '}';
 }
 function _shortNum(v) {
+  if (v && v.isBigNumber) return v.toSignificantDigits(8).toString();
   if (typeof v !== 'number') return String(v);
   if (!isFinite(v)) return v > 0 ? '∞' : '-∞';
   if (Number.isInteger(v) && Math.abs(v) < 1e9) return String(v);
