@@ -4832,7 +4832,7 @@ async function openStats() {
   }
   try {
     const [d, wb, rs] = await Promise.all([
-      apiFetch('/api/stats?' + bankQS()).then(r => r.json()),
+      apiFetch('/api/stats?' + bankQS() + '&date=' + _localDate()).then(r => r.json()),
       apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json()),
       apiFetch('/api/record/status?' + bankQS()).then(r => r.json()),
     ]);
