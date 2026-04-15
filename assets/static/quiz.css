@@ -496,6 +496,8 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 
 /* 选项列表容器去掉额外间距 */
 .s-quiz-zen .opts-list{gap:0}
+/* 极简模式：题目body里的章节标签不显示（header已显示） */
+.s-quiz-zen .unit-tag{display:none}
 
 /* 答对/答错无背景闪动，已删除 flash 动画类 */
 .zen-mode-hint{
@@ -2278,21 +2280,19 @@ button,a,[role=button],label{touch-action:manipulation}
   display:grid;grid-template-columns:repeat(5,1fr);
   gap:4px;padding:6px 8px 10px;
 }
-/* DEG/RAD 切换按钮：橙色强调，与科学模式一致 */
+/* 高级模式按钮全部复用 .ck / .ck.sc — 与科学模式完全一致 */
+/* DEG/RAD 切换按钮：橙色强调 */
 .cadv-deg-toggle{background:#b87820 !important;color:#fff !important;font-weight:700}
 .cadv-deg-toggle.is-rad{background:var(--accent) !important}
 
-/* 帮助按钮（LCD 右上角） */
-.cadv-lcd{position:relative}
-.cadv-help-btn{
-  position:absolute;right:6px;top:6px;
-  width:22px;height:22px;border-radius:50%;border:none;
-  background:rgba(120,180,70,.25);color:#90c060;
-  font-size:12px;font-weight:700;cursor:pointer;
-  display:flex;align-items:center;justify-content:center;
-  transition:background .15s;
+/* 帮助按钮移到分页标签行末尾，不再遮挡 Ans */
+.cadv-help-tab{
+  padding:6px 10px;font-size:15px;font-weight:700;
+  border:none;background:transparent;color:var(--muted);
+  cursor:pointer;border-radius:6px 6px 0 0;transition:all .15s;flex-shrink:0;
 }
-.cadv-help-btn:hover{background:rgba(120,180,70,.45)}
+.cadv-help-tab:hover{background:var(--card);color:var(--accent)}
+
 
 /* 帮助弹层 */
 .cadv-help-modal{
