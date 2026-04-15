@@ -2307,26 +2307,49 @@ function selectOpt(letter, btn) {
       // 练习：立即揭示答案，原地重渲
       document.querySelectorAll('.opt').forEach(b => b.disabled = true);
       S.revealed.add(S.cur);
-      _trackStreak(letter === q.answer);
-      savePracticeSession();  // 每次答题立即保存进度
-      const answeredIdx = S.cur;  // 捕获当前题号，防止计时器触发时 S.cur 已变
-      setTimeout(() => {
-        if (S.cur !== answeredIdx) return;  // 用户已手动导航，跳过
-        renderQ('none');
-        if (letter === q.answer) {
-          _autoAdvanceTimer = setTimeout(() => {
-            _autoAdvanceTimer = null;
-            if (S.cur !== answeredIdx) return;  // 再次检查
-            const total = S.questions.length;
-            if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
-            else finishPractice();
-          }, 1000);
-        }
+      const isCorrectAns = (letter === q.answer);
+      _trackStreak(isCorrectAns);
+      savePracticeSession();
+      const answeredIdx = S.cur;
+      if (_zenMode) {
+        // 极简模式：闪动 + 快速处理
+        _zenFlash(isCorrectAns);
         setTimeout(() => {
-          const explain = document.getElementById('explain-panel');
-          if (explain) explain.scrollIntoView({ behavior:'smooth', block:'nearest' });
-        }, 100);
-      }, 180);
+          if (S.cur !== answeredIdx) return;
+          renderQ('none');  // 更新选项颜色高亮
+          if (isCorrectAns) {
+            // 答对：400ms 后自动下一题，不展开解析
+            _autoAdvanceTimer = setTimeout(() => {
+              _autoAdvanceTimer = null;
+              if (S.cur !== answeredIdx) return;
+              const total = S.questions.length;
+              if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
+              else finishPractice();
+            }, 400);
+          }
+          // 答错：停留，用户自行左右滑动切题
+        }, 130);
+      } else {
+        // 普通练习模式
+        const capturedIdx = S.cur;
+        setTimeout(() => {
+          if (S.cur !== capturedIdx) return;
+          renderQ('none');
+          if (letter === q.answer) {
+            _autoAdvanceTimer = setTimeout(() => {
+              _autoAdvanceTimer = null;
+              if (S.cur !== capturedIdx) return;
+              const total = S.questions.length;
+              if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
+              else finishPractice();
+            }, 1000);
+          }
+          setTimeout(() => {
+            const explain = document.getElementById('explain-panel');
+            if (explain) explain.scrollIntoView({ behavior:'smooth', block:'nearest' });
+          }, 100);
+        }, 180);
+      }
     }
   }
 }
@@ -2544,6 +2567,74 @@ function prevQ() {
   }
 }
 
+// ── 极简刷题模式 ────────────────────────────────────────────────
+var _zenMode = false;
+var _zenHintTimer = null;
+var _zenHintEl = null;
+
+function _ensureZenHint() {
+  if (!_zenHintEl) {
+    _zenHintEl = document.createElement('div');
+    _zenHintEl.className = 'zen-mode-hint';
+    document.body.appendChild(_zenHintEl);
+  }
+  return _zenHintEl;
+}
+function _showZenHint(text) {
+  var el = _ensureZenHint();
+  el.textContent = text;
+  el.classList.add('show');
+  clearTimeout(_zenHintTimer);
+  _zenHintTimer = setTimeout(function() { el.classList.remove('show'); }, 1300);
+}
+function enterZenMode() {
+  _zenMode = true;
+  var s = document.getElementById('s-quiz');
+  if (s) s.classList.add('s-quiz-zen');
+  _showZenHint('⚡ 极简模式  长按再次退出');
+}
+function exitZenMode() {
+  _zenMode = false;
+  var s = document.getElementById('s-quiz');
+  if (s) s.classList.remove('s-quiz-zen');
+  _showZenHint('已退出极简模式');
+}
+
+// 长按进度区 ≥500ms 进入/退出极简模式
+(function() {
+  var _zt = null, _zFired = false;
+  function _start() {
+    _zFired = false;
+    _zt = setTimeout(function() {
+      _zt = null; _zFired = true;
+      if (S.mode === 'practice' || S.mode === 'exam') {
+        if (_zenMode) exitZenMode(); else enterZenMode();
+      }
+    }, 500);
+  }
+  function _cancel() { clearTimeout(_zt); _zt = null; }
+  document.addEventListener('DOMContentLoaded', function() {
+    var el = document.getElementById('quiz-progress-wrap');
+    if (!el) return;
+    el.addEventListener('mousedown',   _start);
+    el.addEventListener('touchstart',  _start, { passive: true });
+    el.addEventListener('mouseup',     _cancel);
+    el.addEventListener('mouseleave',  _cancel);
+    el.addEventListener('touchend',    _cancel);
+    el.addEventListener('touchcancel', _cancel);
+  });
+})();
+
+function _zenFlash(correct) {
+  var wrap = document.getElementById('question-wrap');
+  if (!wrap) return;
+  var cls = correct ? 'flash-correct' : 'flash-wrong';
+  wrap.classList.remove('flash-correct', 'flash-wrong');
+  void wrap.offsetWidth;
+  wrap.classList.add(cls);
+  wrap.addEventListener('animationend', function() { wrap.classList.remove(cls); }, { once: true });
+}
+
 // ── 收藏系统 ────────────────────────────────────────────────────
 const FAV_KEY = 'med_exam_favorites';
 
@@ -2646,6 +2737,7 @@ function toggleFlag() {
 function quitQuiz() {
   clearInterval(S.timerInterval);
   if (typeof clearAICache === 'function') clearAICache();
+  if (_zenMode) exitZenMode();
   if (S.mode === 'exam') {
     if (!confirm('确认退出考试？本次记录不会保存')) {
       const elapsed = Math.floor((Date.now() - S.examStart) / 1000);
