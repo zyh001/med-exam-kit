@@ -5641,9 +5641,22 @@ function setCalcMode(mode) {
 function _calcInsert(text) {
   var inp = document.getElementById('calc-result');
   if (!inp) { _calc.input += text; return; }
+
+  // 当前显示为 "0"（初始状态）且输入数字/字母 → 直接替换
+  if (inp.value === '0' && /^[\d.(]/.test(text)) {
+    inp.value = ''; _calc.input = '';
+    inp.selectionStart = inp.selectionEnd = 0;
+  }
+
+  // 当前显示为 "Error" → 任何按键都先清空
+  if (inp.value === 'Error') {
+    inp.value = ''; _calc.input = ''; _calc.done = false;
+    inp.selectionStart = inp.selectionEnd = 0;
+  }
+
   if (_calc.done) {
     // 计算完成后按数字/函数键：清空重新开始
-    if (/^[\d.(π e]/.test(text)) {
+    if (/^[\d.(πe]/.test(text)) {
       inp.value = ''; _calc.input = ''; _calc.done = false;
     } else {
       // 按运算符：延续结果继续运算
@@ -5957,12 +5970,20 @@ function _cadvGetInput() { return document.getElementById('cadv-input'); }
 function cadvIns(text) {
   var inp = _cadvGetInput();
   if (!inp) return;
-  var s = inp.selectionStart, e = inp.selectionEnd;
+  // 若输入框未获焦点（移动端点按钮时），追加到末尾
+  // 若已获焦点（用户主动点击后），在光标处插入
+  var isFocused = (document.activeElement === inp);
+  var s, e;
+  if (isFocused) {
+    s = inp.selectionStart;
+    e = inp.selectionEnd;
+  } else {
+    s = e = inp.value.length;  // 追加到末尾
+  }
   var v = inp.value;
   inp.value = v.slice(0, s) + text + v.slice(e);
   var pos = s + text.length;
   inp.selectionStart = inp.selectionEnd = pos;
-  // 如果光标在括号内，向括号里移一步方便继续输入
   _cadv._expr = inp.value;
   _cadvSchedulePreview();
 }
@@ -6005,8 +6026,17 @@ function cadvToggleDeg() {
   var btn = document.getElementById('cadv-deg-btn');
   var ind = document.getElementById('cadv-deg-ind');
   var lbl = _cadv.deg ? 'DEG' : 'RAD';
-  if (btn) btn.textContent = lbl;
+  if (btn) { btn.textContent = lbl; btn.classList.toggle('is-rad', !_cadv.deg); }
   if (ind) ind.textContent = lbl;
+}
+
+function cadvShowHelp() {
+  var m = document.getElementById('cadv-help-modal');
+  if (m) m.style.display = 'flex';
+}
+function cadvHideHelp() {
+  var m = document.getElementById('cadv-help-modal');
+  if (m) m.style.display = 'none';
 }
 
 // ── 键盘事件 ────────────────────────────────────────────────────

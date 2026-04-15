@@ -2134,9 +2134,52 @@ button,a,[role=button],label{touch-action:manipulation}
   display:grid;grid-template-columns:repeat(5,1fr);
   gap:4px;padding:6px 8px 10px;
 }
-.cadv-deg-toggle{
-  background:var(--accent);color:#fff;font-weight:700;
+/* DEG/RAD 切换按钮：橙色强调，与科学模式一致 */
+.cadv-deg-toggle{background:#b87820 !important;color:#fff !important;font-weight:700}
+.cadv-deg-toggle.is-rad{background:var(--accent) !important}
+
+/* 帮助按钮（LCD 右上角） */
+.cadv-lcd{position:relative}
+.cadv-help-btn{
+  position:absolute;right:6px;top:6px;
+  width:22px;height:22px;border-radius:50%;border:none;
+  background:rgba(120,180,70,.25);color:#90c060;
+  font-size:12px;font-weight:700;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;
+  transition:background .15s;
 }
+.cadv-help-btn:hover{background:rgba(120,180,70,.45)}
+
+/* 帮助弹层 */
+.cadv-help-modal{
+  position:fixed;inset:0;z-index:10000;
+  background:rgba(0,0,0,.65);display:flex;align-items:flex-end;
+}
+.cadv-help-box{
+  width:100%;max-height:82vh;overflow-y:auto;
+  background:var(--surface);border-radius:16px 16px 0 0;
+  padding:14px 14px 36px;
+}
+.cadv-help-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.cadv-help-title{font-size:15px;font-weight:700;color:var(--text)}
+.cadv-help-close{
+  background:var(--card);border:none;border-radius:50%;
+  width:26px;height:26px;font-size:15px;cursor:pointer;color:var(--muted);
+}
+.cadv-help-sec{margin-top:10px}
+.cadv-help-sec h4{
+  font-size:12px;font-weight:700;color:var(--accent);
+  margin:8px 0 4px;text-transform:uppercase;letter-spacing:.5px;
+}
+.cadv-help-row{
+  display:flex;gap:8px;padding:4px 0;
+  border-bottom:1px solid var(--border);font-size:12px;line-height:1.4;
+}
+.cadv-help-fn{
+  min-width:150px;font-family:'SF Mono','Courier New',monospace;
+  color:var(--text);font-weight:600;flex-shrink:0;
+}
+.cadv-help-desc{color:var(--muted)}
 
 
 /* ════════════════════════════════════════════
