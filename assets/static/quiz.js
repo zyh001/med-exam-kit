@@ -2636,7 +2636,8 @@ function _zenFlash(correct) {
 }
 
 // ── 收藏系统 ────────────────────────────────────────────────────
-const FAV_KEY = 'med_exam_favorites';
+const FAV_KEY      = 'med_exam_favorites';
+const FAV_DATA_KEY = 'med_exam_fav_data';  // {fp:si → questionObj}
 
 function _loadFavorites() {
   try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')); }
@@ -2644,6 +2645,40 @@ function _loadFavorites() {
 }
 function _saveFavorites(set) {
   try { localStorage.setItem(FAV_KEY, JSON.stringify([...set])); } catch(_) {}
+}
+
+/** 读取收藏题目完整数据 */
+function _loadFavData() {
+  try { return JSON.parse(localStorage.getItem(FAV_DATA_KEY) || '{}'); }
+  catch(_) { return {}; }
+}
+/** 保存一道题的完整数据（收藏时调用） */
+function _saveFavQuestion(fp, q) {
+  try {
+    const data = _loadFavData();
+    data[fp] = {
+      fingerprint: q.fingerprint,
+      si:      q.si ?? 0,
+      mode:    q.mode    || '',
+      unit:    q.unit    || '',
+      text:    q.text    || q.stem || '',
+      stem:    q.stem    || '',
+      options: q.options || [],
+      shared_options: q.shared_options || q.sharedOptions || [],
+      answer:  q.answer  || '',
+      discuss: q.discuss || '',
+      rate:    q.rate    || '',
+    };
+    localStorage.setItem(FAV_DATA_KEY, JSON.stringify(data));
+  } catch(_) {}
+}
+/** 删除一道题的缓存数据（取消收藏时调用） */
+function _deleteFavQuestion(fp) {
+  try {
+    const data = _loadFavData();
+    delete data[fp];
+    localStorage.setItem(FAV_DATA_KEY, JSON.stringify(data));
+  } catch(_) {}
 }
 
 function _curFingerprint() {
@@ -2656,7 +2691,15 @@ function toggleFavorite() {
   if (!fp) return;
   const favs = _loadFavorites();
   const adding = !favs.has(fp);
-  if (adding) favs.add(fp); else favs.delete(fp);
+  if (adding) {
+    favs.add(fp);
+    // 同时把完整题目数据缓存到本地，保证跨 session 可以刷题
+    const q = S.questions && S.questions[S.cur];
+    if (q) _saveFavQuestion(fp, q);
+  } else {
+    favs.delete(fp);
+    _deleteFavQuestion(fp);
+  }
   _saveFavorites(favs);
   _recordFavTimestamp(fp, adding);  // 记录收藏时间戳
   refreshFavBadge();                // 刷新主页徽章
@@ -4647,31 +4690,20 @@ function openFavorites() {
 }
 
 function _renderFavoritesScreen() {
-  const favs    = _loadFavorites();   // Set<fp:si>
-  const favTs   = _loadFavTs();       // {fp:si → timestamp}
-  const qs      = S.questions || [];  // 当前题库
+  const favs    = _loadFavorites();
+  const favTs   = _loadFavTs();
+  const favData = _loadFavData();
 
-  // 银行名
   const bankNameEl = document.getElementById('fav-bank-name');
   if (bankNameEl) bankNameEl.textContent = (S.bankInfo && S.bankInfo.name) || '';
 
   const clearBtn = document.getElementById('fav-clear-btn');
   if (clearBtn) clearBtn.style.display = favs.size > 0 ? '' : 'none';
 
-  // 把 favs 里的 fp:si 对应到 questions 里的题目
-  const fpMap = {};  // "fp:si" → question flat item
-  qs.forEach(q => {
-    const key = (q.fingerprint || '') + ':' + (q.si ?? 0);
-    fpMap[key] = q;
-  });
+  const validFavs = [...favs].filter(fp => favData[fp]);
 
-  // 只取当前题库有对应题目的收藏
-  const validFavs = [...favs].filter(fp => fpMap[fp]);
-
-  const now = Date.now();
-  const dayMs = 86400000;
   const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-  const yestStart  = new Date(todayStart - dayMs);
+  const yestStart  = new Date(todayStart.getTime() - 86400000);
 
   let cntToday = 0, cntYest = 0;
   validFavs.forEach(fp => {
@@ -4682,93 +4714,95 @@ function _renderFavoritesScreen() {
 
   document.getElementById('fav-cnt-today').textContent     = cntToday;
   document.getElementById('fav-cnt-yesterday').textContent = cntYest;
-  document.getElementById('fav-cnt-all').textContent       = validFavs.length;
+  document.getElementById('fav-cnt-all').textContent       = Math.max(favs.size, validFavs.length);
 
   const listEl  = document.getElementById('fav-unit-list');
   const emptyEl = document.getElementById('fav-empty');
 
-  if (validFavs.length === 0) {
-    listEl.innerHTML = '';
-    emptyEl.style.display = '';
-    return;
-  }
+  if (favs.size === 0) { listEl.innerHTML = ''; emptyEl.style.display = ''; return; }
   emptyEl.style.display = 'none';
 
-  // 按 unit 分组
-  const unitMap = {};  // unit → [fp, ...]
+  const unitMap = {};
   validFavs.forEach(fp => {
-    const q = fpMap[fp];
-    const unit = q.unit || '未分类';
+    const unit = (favData[fp] && favData[fp].unit) || '未分类';
     if (!unitMap[unit]) unitMap[unit] = [];
     unitMap[unit].push(fp);
   });
 
+  const uncached = favs.size - validFavs.length;
+  if (uncached > 0) unitMap['（需重新收藏以恢复）'] = [];
+
   listEl.innerHTML = Object.entries(unitMap).map(([unit, fps]) => {
-    const done = fps.filter(fp => {
-      // 简单标记：看 S.ans 里有没有答案（当前 session）
-      return false; // 默认 0（跨session无法知道，显示0/n）
-    }).length;
+    const disabled = fps.length === 0;
     return `<div class="fav-unit-row">
       <div class="fav-unit-left">
         <div class="fav-unit-name">${esc(unit)}</div>
-        <div class="fav-unit-count">0 / ${fps.length}</div>
+        <div class="fav-unit-count">${fps.length} 题</div>
       </div>
-      <button class="fav-unit-action" onclick="startFavoritesQuiz('unit', ${JSON.stringify(unit)})">
-        继续做题 ›
-      </button>
+      ${disabled
+        ? `<span class="fav-unit-action fav-unit-disabled" style="opacity:.4;cursor:default">重新收藏</span>`
+        : `<button class="fav-unit-action" onclick="startFavoritesQuiz('unit', ${JSON.stringify(unit)})">继续做题 ›</button>`
+      }
     </div>`;
   }).join('');
 }
 
-/** 开始做收藏题目 */
+/** 开始做收藏题目（使用本地缓存数据，不依赖 S.questions） */
 function startFavoritesQuiz(filter, unitName) {
-  const favs  = _loadFavorites();
-  const favTs = _loadFavTs();
-  const qs    = S.questions || [];
+  const favs    = _loadFavorites();
+  const favTs   = _loadFavTs();
+  const favData = _loadFavData();
 
-  const fpMap = {};
-  qs.forEach(q => { fpMap[(q.fingerprint||'') + ':' + (q.si??0)] = q; });
+  let fps = [...favs].filter(fp => favData[fp]);
 
-  let fps = [...favs].filter(fp => fpMap[fp]);
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const yestStart  = new Date(todayStart.getTime() - 86400000);
 
   if (filter === 'today') {
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
     fps = fps.filter(fp => (favTs[fp] || 0) >= todayStart.getTime());
   } else if (filter === 'yesterday') {
-    const dayMs = 86400000;
-    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
-    const yestStart  = new Date(todayStart - dayMs);
-    fps = fps.filter(fp => {
-      const ts = favTs[fp] || 0;
-      return ts >= yestStart.getTime() && ts < todayStart.getTime();
-    });
+    fps = fps.filter(fp => { const ts = favTs[fp]||0; return ts >= yestStart.getTime() && ts < todayStart.getTime(); });
   } else if (filter === 'unit' && unitName) {
-    fps = fps.filter(fp => (fpMap[fp] && fpMap[fp].unit === unitName));
+    fps = fps.filter(fp => favData[fp] && favData[fp].unit === unitName);
   }
 
-  if (fps.length === 0) { toast('该范围暂无收藏题目'); return; }
+  if (fps.length === 0) { toast('该范围暂无可做的收藏题目'); return; }
 
-  const items = fps.map(fp => fpMap[fp]).filter(Boolean);
-  S.mode = 'practice';
-  S.questions = items;
+  const items = fps.map(fp => {
+    const d = favData[fp];
+    return {
+      fingerprint: d.fingerprint, si: d.si ?? 0,
+      mode: d.mode||'', unit: d.unit||'', text: d.text||'',
+      stem: d.stem||'', options: d.options||[],
+      shared_options: d.shared_options||[], sharedOptions: d.shared_options||[],
+      answer: d.answer||'', discuss: d.discuss||'', rate: d.rate||'',
+    };
+  });
+
+  S.mode = 'practice'; S.questions = items;
   S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
   S.examStart = Date.now(); S.streak = 0;
   S.modeGroups = buildModeGroups(items);
   S.currentGroupIdx = 0; S.caseMaxReached = {};
   S.practiceSessionId = String(Date.now());
-  toast(`⭐ 开始做收藏题目（${items.length} 题）`);
-  startQuiz();
   showScreen('s-quiz');
+  startQuiz();
+  toast(`⭐ 收藏题目：${items.length} 题`);
 }
 
 /** 清空所有收藏 */
 function confirmClearFavorites() {
   if (!confirm(`确认清空全部 ${_loadFavorites().size} 道收藏题目？`)) return;
-  try { localStorage.removeItem(FAV_KEY); localStorage.removeItem(FAV_TS_KEY); } catch(_) {}
+  try {
+    localStorage.removeItem(FAV_KEY);
+    localStorage.removeItem(FAV_TS_KEY);
+    localStorage.removeItem(FAV_DATA_KEY);
+  } catch(_) {}
   refreshFavBadge();
   _renderFavoritesScreen();
   toast('已清空收藏');
 }
+
 
 /** 打开统计页面 */
 async function openStats() {
