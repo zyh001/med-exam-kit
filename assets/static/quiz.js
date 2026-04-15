@@ -2487,6 +2487,13 @@ function buildExplain(q, selected) {
 
 function nextOrSubmit() {
   const total = S.questions.length;
+
+  // 回看模式下，无论当前在第几题，底部「交卷 ✓」直接提交
+  if (S.mode === 'exam' && S.examReviewMode) {
+    submitExam();
+    return;
+  }
+
   if (S.mode === 'exam' && S.cur === total - 1) {
     // 检查是否全部作答
     const unanswered = S.questions.filter((_, i) => {
