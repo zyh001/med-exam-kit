@@ -830,6 +830,7 @@
       <div class="calc-adv-wrap" id="calc-keys-adv" style="display:none">
         <!-- LCD 显示区 -->
         <div class="cadv-lcd">
+          <button class="cadv-help-btn" onclick="cadvShowHelp()" title="使用帮助">?</button>
           <div class="cadv-lcd-bar">
             <span class="cadv-ind" id="cadv-deg-ind">DEG</span>
             <span class="cadv-var-hint" id="cadv-var-hint"></span>
@@ -1056,6 +1057,102 @@
         </div>
       </div>
 
+
+  <!-- 高级计算器帮助弹层 -->
+  <div class="cadv-help-modal" id="cadv-help-modal" style="display:none" onclick="if(event.target===this)cadvHideHelp()">
+    <div class="cadv-help-box">
+      <div class="cadv-help-hd">
+        <span class="cadv-help-title">📐 高级计算器使用说明</span>
+        <button class="cadv-help-close" onclick="cadvHideHelp()">✕</button>
+      </div>
+      <p style="font-size:12px;color:var(--muted);margin-bottom:6px">
+        直接在输入框打表达式或点按钮，按 <b>=</b> 或 <b>Enter</b> 求值。<br>
+        持久变量：输入 <code>x=5</code> 回车后，后续表达式可用 x。Ans 引用上次结果。
+      </p>
+
+      <div class="cadv-help-sec">
+        <h4>📌 基本</h4>
+        <div class="cadv-help-row"><span class="cadv-help-fn">abs(-5)</span><span class="cadv-help-desc">绝对值 → 5</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">sqrt(9)</span><span class="cadv-help-desc">平方根 → 3</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">cbrt(27)</span><span class="cadv-help-desc">立方根 → 3</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">2^10</span><span class="cadv-help-desc">幂运算 → 1024</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">floor(3.7)</span><span class="cadv-help-desc">向下取整 → 3</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">ceil(3.2)</span><span class="cadv-help-desc">向上取整 → 4</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">round(3.567, 2)</span><span class="cadv-help-desc">保留两位小数 → 3.57</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">17 mod 5</span><span class="cadv-help-desc">取余 → 2</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">10!</span><span class="cadv-help-desc">阶乘 → 3628800</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">x = 3.14</span><span class="cadv-help-desc">赋值，后续可直接用 x</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">2 * Ans + 1</span><span class="cadv-help-desc">引用上次结果</span></div>
+      </div>
+
+      <div class="cadv-help-sec">
+        <h4>📐 三角（DEG/RAD 可切换）</h4>
+        <div class="cadv-help-row"><span class="cadv-help-fn">sin(30)  cos(60)</span><span class="cadv-help-desc">DEG 模式：→ 0.5 / 0.5</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">asin(0.5)</span><span class="cadv-help-desc">反正弦（DEG → 30°）</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">atan2(1, 1)</span><span class="cadv-help-desc">四象限反正切 → 45°</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">cot(45)  sec(60)  csc(30)</span><span class="cadv-help-desc">余切/正割/余割</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">sinh(1)  cosh(1)  tanh(1)</span><span class="cadv-help-desc">双曲函数</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">asinh(1) acosh(2) atanh(0.5)</span><span class="cadv-help-desc">反双曲函数</span></div>
+      </div>
+
+      <div class="cadv-help-sec">
+        <h4>🔣 代数</h4>
+        <div class="cadv-help-row"><span class="cadv-help-fn">simplify("x^2+2x+x^2")</span><span class="cadv-help-desc">化简 → 2x²+2x</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">derivative("x^3+2x", "x")</span><span class="cadv-help-desc">求导 → 3x²+2</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">rationalize("1/(1+sqrt(2))")</span><span class="cadv-help-desc">有理化分母</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">log(e)  log10(100)  log2(8)</span><span class="cadv-help-desc">自然对数/常用/二进制 → 1/2/3</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">exp(1)</span><span class="cadv-help-desc">e¹ ≈ 2.718</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">gcd(12, 8)  lcm(4, 6)</span><span class="cadv-help-desc">最大公因数/最小公倍数</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">xgcd(12, 8)</span><span class="cadv-help-desc">扩展欧几里得算法</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">invmod(3, 7)</span><span class="cadv-help-desc">模逆元：3⁻¹ mod 7 = 5</span></div>
+      </div>
+
+      <div class="cadv-help-sec">
+        <h4>📊 统计</h4>
+        <div class="cadv-help-row"><span class="cadv-help-fn">mean([1,2,3,4,5])</span><span class="cadv-help-desc">均值 → 3</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">median([3,1,4,1,5])</span><span class="cadv-help-desc">中位数 → 3</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">std([2,4,4,4,5,5,7,9])</span><span class="cadv-help-desc">标准差 → 2</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">variance([1,2,3])</span><span class="cadv-help-desc">方差</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">mad([1,2,3,4,5])</span><span class="cadv-help-desc">平均绝对偏差</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">sum([1,2,3])  prod([1,2,3,4])</span><span class="cadv-help-desc">求和→6 / 连乘→24</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">min([3,1,4])  max([3,1,4])</span><span class="cadv-help-desc">最小/最大值</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">combinations(5, 2)</span><span class="cadv-help-desc">组合数 C(5,2) = 10</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">permutations(5, 2)</span><span class="cadv-help-desc">排列数 P(5,2) = 20</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">gamma(5)</span><span class="cadv-help-desc">Gamma函数 Γ(5) = 24</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">isPrime(997)</span><span class="cadv-help-desc">质数判断 → true</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">erf(1)</span><span class="cadv-help-desc">误差函数 ≈ 0.843</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">cumsum([1,2,3])</span><span class="cadv-help-desc">累积和 → [1,3,6]</span></div>
+      </div>
+
+      <div class="cadv-help-sec">
+        <h4>🔢 矩阵 / 复数 / 位运算</h4>
+        <div class="cadv-help-row"><span class="cadv-help-fn">[[1,2],[3,4]]</span><span class="cadv-help-desc">定义矩阵</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">det([[1,2],[3,4]])</span><span class="cadv-help-desc">行列式 → -2</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">inv([[1,2],[3,4]])</span><span class="cadv-help-desc">逆矩阵</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">transpose([[1,2],[3,4]])</span><span class="cadv-help-desc">转置矩阵</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">trace([[1,0],[0,2]])</span><span class="cadv-help-desc">迹（对角线之和）→ 3</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">identity(3)</span><span class="cadv-help-desc">3×3 单位矩阵</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">zeros(2,3)  ones(2,2)</span><span class="cadv-help-desc">全零/全一矩阵</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">cross([1,0,0],[0,1,0])</span><span class="cadv-help-desc">叉积 → [0,0,1]</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">dot([1,2],[3,4])</span><span class="cadv-help-desc">点积 → 11</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">2+3i</span><span class="cadv-help-desc">复数</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">re(2+3i)  im(2+3i)</span><span class="cadv-help-desc">实部→2 / 虚部→3</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">conj(2+3i)  arg(2+3i)</span><span class="cadv-help-desc">共轭复数 / 辐角</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">bitAnd(6,3)  bitOr(6,3)</span><span class="cadv-help-desc">位与→2 / 位或→7</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">bitXor(6,3)  bitNot(6)</span><span class="cadv-help-desc">异或→5 / 取反</span></div>
+      </div>
+
+      <div class="cadv-help-sec">
+        <h4>💡 高级用法</h4>
+        <div class="cadv-help-row"><span class="cadv-help-fn">5 inch to cm</span><span class="cadv-help-desc">单位换算 → 12.7 cm</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">x=5; x^2+1</span><span class="cadv-help-desc">赋值后立即使用</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">nthRoot(32, 5)</span><span class="cadv-help-desc">n次方根：32的5次根→2</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">hypot(3, 4)</span><span class="cadv-help-desc">斜边长 √(3²+4²) → 5</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">sign(-7)  sign(3)</span><span class="cadv-help-desc">符号函数 → -1 / 1</span></div>
+        <div class="cadv-help-row"><span class="cadv-help-fn">lgamma(10)</span><span class="cadv-help-desc">ln(Γ(10)) ≈ 12.8</span></div>
+      </div>
+    </div>
+  </div>
 
   <div id="toast"></div>
 
