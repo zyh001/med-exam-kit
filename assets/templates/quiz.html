@@ -320,6 +320,10 @@
         <span class="home-quick-icon">📕</span><span>错题练习</span>
         <span class="due-badge err" id="wrong-badge" style="display:none">0</span>
       </button>
+      <button class="home-quick-btn" onclick="openFavorites()" id="favorites-btn">
+        <span class="home-quick-icon">⭐</span><span>我的收藏</span>
+        <span class="due-badge fav" id="fav-badge" style="display:none">0</span>
+      </button>
     </div>
   </div>
 
@@ -382,6 +386,47 @@
           <div style="color:var(--muted);font-size:13px">加载中…</div>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- ═══ FAVORITES ══════════════════════════════════════════════════ -->
+  <div id="s-favorites" class="screen slide-right">
+    <div class="fav-header">
+      <button class="back-btn" onclick="showScreen('s-home')">←</button>
+      <div class="fav-header-center">
+        <h2>我的收藏</h2>
+        <span class="fav-header-sub" id="fav-bank-name"></span>
+      </div>
+      <button class="icon-btn fav-clear-btn" id="fav-clear-btn" onclick="confirmClearFavorites()" title="清空收藏" style="display:none">🗑</button>
+    </div>
+
+    <!-- 统计卡片 -->
+    <div class="fav-stat-card">
+      <div class="fav-stat-item" onclick="startFavoritesQuiz('today')">
+        <div class="fav-stat-num" id="fav-cnt-today">0</div>
+        <div class="fav-stat-label">今日 <span class="fav-arrow">›</span></div>
+      </div>
+      <div class="fav-stat-divider"></div>
+      <div class="fav-stat-item" onclick="startFavoritesQuiz('yesterday')">
+        <div class="fav-stat-num" id="fav-cnt-yesterday">0</div>
+        <div class="fav-stat-label">昨日 <span class="fav-arrow">›</span></div>
+      </div>
+      <div class="fav-stat-divider"></div>
+      <div class="fav-stat-item" onclick="startFavoritesQuiz('all')">
+        <div class="fav-stat-num" id="fav-cnt-all">0</div>
+        <div class="fav-stat-label">全部 <span class="fav-arrow">›</span></div>
+      </div>
+    </div>
+
+    <!-- 科目列表 -->
+    <div class="section-label" style="margin-top:8px">科目列表</div>
+    <div id="fav-unit-list" class="fav-unit-list"></div>
+
+    <!-- 空状态 -->
+    <div id="fav-empty" class="fav-empty" style="display:none">
+      <div class="fav-empty-icon">⭐</div>
+      <div class="fav-empty-text">还没有收藏题目</div>
+      <div class="fav-empty-hint">做题时长按 ⚑ 按钮即可收藏</div>
     </div>
   </div>
 

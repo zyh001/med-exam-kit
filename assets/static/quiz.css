@@ -1496,7 +1496,64 @@ button,a,[role=button],label{touch-action:manipulation}
 .diff-pct{width:36px;text-align:right;font-size:13px;font-weight:700;color:var(--text);font-variant-numeric:tabular-nums;flex-shrink:0}
 
 /* ════ 主页快捷操作行 ════ */
-.home-quick-row{display:flex;gap:10px;padding:0 20px 20px}
+.home-quick-row{display:flex;gap:10px;padding:0 20px 20px;flex-wrap:wrap}
+/* 收藏徽章 */
+.due-badge.fav{background:#f0b800;color:#fff}
+
+/* ── 收藏页 ─────────────────────────────────────────────────── */
+.fav-header{
+  display:flex;align-items:center;gap:10px;
+  padding:max(env(safe-area-inset-top),14px) 16px 12px;
+  background:var(--surface);border-bottom:1px solid var(--border);
+}
+.fav-header-center{flex:1;text-align:center}
+.fav-header-center h2{font-size:17px;font-weight:700;margin:0}
+.fav-header-sub{display:block;font-size:11px;color:var(--muted);margin-top:1px}
+.fav-clear-btn{color:var(--muted)}
+
+.fav-stat-card{
+  display:flex;align-items:center;
+  background:var(--card);border-radius:var(--r);
+  margin:16px 16px 0;border:1px solid var(--border);
+  overflow:hidden;
+}
+.fav-stat-item{
+  flex:1;text-align:center;padding:14px 4px;cursor:pointer;
+  transition:background .15s;
+}
+.fav-stat-item:hover{background:var(--accent-bg)}
+.fav-stat-item:active{background:var(--accent-bg)}
+.fav-stat-num{font-size:24px;font-weight:700;color:var(--text)}
+.fav-stat-label{font-size:12px;color:var(--muted);margin-top:2px}
+.fav-arrow{color:var(--accent);font-size:13px}
+.fav-stat-divider{width:1px;height:36px;background:var(--border)}
+
+.fav-unit-list{padding:0 16px 32px}
+.fav-unit-row{
+  display:flex;align-items:center;justify-content:space-between;
+  padding:14px 0;border-bottom:1px solid var(--border);
+}
+.fav-unit-row:last-child{border-bottom:none}
+.fav-unit-left{flex:1;min-width:0}
+.fav-unit-name{font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px}
+.fav-unit-count{font-size:12px;color:var(--muted)}
+.fav-unit-action{
+  font-size:13px;font-weight:600;color:var(--accent);
+  padding:6px 10px;border-radius:8px;border:1px solid var(--accent);
+  background:var(--accent-bg);cursor:pointer;white-space:nowrap;
+  display:flex;align-items:center;gap:3px;
+}
+.fav-unit-action:active{opacity:.7}
+
+.fav-empty{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  padding:60px 20px;gap:10px;
+}
+.fav-empty-icon{font-size:48px;opacity:.4}
+.fav-empty-text{font-size:16px;font-weight:600;color:var(--muted)}
+.fav-empty-hint{font-size:13px;color:var(--muted);opacity:.7}
+
+
 .home-quick-btn{
   flex:1;display:flex;align-items:center;justify-content:center;gap:7px;
   padding:13px 10px;border-radius:13px;font-size:13px;font-weight:600;

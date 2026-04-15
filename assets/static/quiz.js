@@ -776,6 +776,7 @@ async function refreshHomeData() {
       _refreshProgressBadges(),    // 刷新徽章
     ]);
   } catch (e) { /* 静默失败 */ }
+  refreshFavBadge();  // 刷新收藏徽章（本地，无需 await）
 }
 
 function renderHome() {
@@ -2566,6 +2567,8 @@ function toggleFavorite() {
   const adding = !favs.has(fp);
   if (adding) favs.add(fp); else favs.delete(fp);
   _saveFavorites(favs);
+  _recordFavTimestamp(fp, adding);  // 记录收藏时间戳
+  refreshFavBadge();                // 刷新主页徽章
   _updateFlagBtn();
   // 果冻动画
   const btn = document.getElementById('flag-btn');
@@ -4513,6 +4516,166 @@ function _showSharedLockEndScreen() {
     `;
     document.body.appendChild(el);
   }
+}
+
+// ── 收藏功能 ────────────────────────────────────────────────────
+
+// 收藏元数据 key（存收藏时间戳，fp→timestamp）
+const FAV_TS_KEY = 'med_exam_fav_ts';
+
+function _loadFavTs() {
+  try { return JSON.parse(localStorage.getItem(FAV_TS_KEY) || '{}'); }
+  catch(_) { return {}; }
+}
+function _saveFavTs(map) {
+  try { localStorage.setItem(FAV_TS_KEY, JSON.stringify(map)); } catch(_) {}
+}
+
+/** 在 toggleFavorite 保存时同时记录时间戳 */
+function _recordFavTimestamp(fp, adding) {
+  const ts = _loadFavTs();
+  if (adding) ts[fp] = Date.now();
+  else delete ts[fp];
+  _saveFavTs(ts);
+}
+
+/** 更新主页收藏徽章 */
+function refreshFavBadge() {
+  const cnt = _loadFavorites().size;
+  const badge = document.getElementById('fav-badge');
+  if (!badge) return;
+  if (cnt > 0) { badge.textContent = cnt > 99 ? '99+' : cnt; badge.style.display = ''; }
+  else badge.style.display = 'none';
+}
+
+/** 打开收藏页 */
+function openFavorites() {
+  showScreen('s-favorites');
+  _renderFavoritesScreen();
+}
+
+function _renderFavoritesScreen() {
+  const favs    = _loadFavorites();   // Set<fp:si>
+  const favTs   = _loadFavTs();       // {fp:si → timestamp}
+  const qs      = S.questions || [];  // 当前题库
+
+  // 银行名
+  const bankNameEl = document.getElementById('fav-bank-name');
+  if (bankNameEl) bankNameEl.textContent = (S.bankInfo && S.bankInfo.name) || '';
+
+  const clearBtn = document.getElementById('fav-clear-btn');
+  if (clearBtn) clearBtn.style.display = favs.size > 0 ? '' : 'none';
+
+  // 把 favs 里的 fp:si 对应到 questions 里的题目
+  const fpMap = {};  // "fp:si" → question flat item
+  qs.forEach(q => {
+    const key = (q.fingerprint || '') + ':' + (q.si ?? 0);
+    fpMap[key] = q;
+  });
+
+  // 只取当前题库有对应题目的收藏
+  const validFavs = [...favs].filter(fp => fpMap[fp]);
+
+  const now = Date.now();
+  const dayMs = 86400000;
+  const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+  const yestStart  = new Date(todayStart - dayMs);
+
+  let cntToday = 0, cntYest = 0;
+  validFavs.forEach(fp => {
+    const ts = favTs[fp] || 0;
+    if (ts >= todayStart.getTime()) cntToday++;
+    else if (ts >= yestStart.getTime()) cntYest++;
+  });
+
+  document.getElementById('fav-cnt-today').textContent     = cntToday;
+  document.getElementById('fav-cnt-yesterday').textContent = cntYest;
+  document.getElementById('fav-cnt-all').textContent       = validFavs.length;
+
+  const listEl  = document.getElementById('fav-unit-list');
+  const emptyEl = document.getElementById('fav-empty');
+
+  if (validFavs.length === 0) {
+    listEl.innerHTML = '';
+    emptyEl.style.display = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  // 按 unit 分组
+  const unitMap = {};  // unit → [fp, ...]
+  validFavs.forEach(fp => {
+    const q = fpMap[fp];
+    const unit = q.unit || '未分类';
+    if (!unitMap[unit]) unitMap[unit] = [];
+    unitMap[unit].push(fp);
+  });
+
+  listEl.innerHTML = Object.entries(unitMap).map(([unit, fps]) => {
+    const done = fps.filter(fp => {
+      // 简单标记：看 S.ans 里有没有答案（当前 session）
+      return false; // 默认 0（跨session无法知道，显示0/n）
+    }).length;
+    return `<div class="fav-unit-row">
+      <div class="fav-unit-left">
+        <div class="fav-unit-name">${esc(unit)}</div>
+        <div class="fav-unit-count">0 / ${fps.length}</div>
+      </div>
+      <button class="fav-unit-action" onclick="startFavoritesQuiz('unit', ${JSON.stringify(unit)})">
+        继续做题 ›
+      </button>
+    </div>`;
+  }).join('');
+}
+
+/** 开始做收藏题目 */
+function startFavoritesQuiz(filter, unitName) {
+  const favs  = _loadFavorites();
+  const favTs = _loadFavTs();
+  const qs    = S.questions || [];
+
+  const fpMap = {};
+  qs.forEach(q => { fpMap[(q.fingerprint||'') + ':' + (q.si??0)] = q; });
+
+  let fps = [...favs].filter(fp => fpMap[fp]);
+
+  if (filter === 'today') {
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    fps = fps.filter(fp => (favTs[fp] || 0) >= todayStart.getTime());
+  } else if (filter === 'yesterday') {
+    const dayMs = 86400000;
+    const todayStart = new Date(); todayStart.setHours(0,0,0,0);
+    const yestStart  = new Date(todayStart - dayMs);
+    fps = fps.filter(fp => {
+      const ts = favTs[fp] || 0;
+      return ts >= yestStart.getTime() && ts < todayStart.getTime();
+    });
+  } else if (filter === 'unit' && unitName) {
+    fps = fps.filter(fp => (fpMap[fp] && fpMap[fp].unit === unitName));
+  }
+
+  if (fps.length === 0) { toast('该范围暂无收藏题目'); return; }
+
+  const items = fps.map(fp => fpMap[fp]).filter(Boolean);
+  S.mode = 'practice';
+  S.questions = items;
+  S.cur = 0; S.ans = {}; S.revealed = new Set(); S.marked = new Set();
+  S.examStart = Date.now(); S.streak = 0;
+  S.modeGroups = buildModeGroups(items);
+  S.currentGroupIdx = 0; S.caseMaxReached = {};
+  S.practiceSessionId = String(Date.now());
+  toast(`⭐ 开始做收藏题目（${items.length} 题）`);
+  startQuiz();
+  showScreen('s-quiz');
+}
+
+/** 清空所有收藏 */
+function confirmClearFavorites() {
+  if (!confirm(`确认清空全部 ${_loadFavorites().size} 道收藏题目？`)) return;
+  try { localStorage.removeItem(FAV_KEY); localStorage.removeItem(FAV_TS_KEY); } catch(_) {}
+  refreshFavBadge();
+  _renderFavoritesScreen();
+  toast('已清空收藏');
 }
 
 /** 打开统计页面 */
