@@ -76,6 +76,37 @@ func splitSQL(script string) []string {
 }
 func min(a, b int) int { if a < b { return a }; return b }
 
+// fixSM2PrimaryKey rebuilds the sm2 primary key to include bank_id if needed.
+// Old installs have PK(user_id, fingerprint); new schema requires (user_id, bank_id, fingerprint).
+// Runs two plain ALTER TABLE statements so execSchemaSQL's semicolon-splitter is not involved.
+func fixSM2PrimaryKey(ctx context.Context, pool *pgxpool.Pool) error {
+	var hasBankID bool
+	pool.QueryRow(ctx, `
+		SELECT EXISTS (
+			SELECT 1
+			FROM   information_schema.key_column_usage  kcu
+			JOIN   information_schema.table_constraints tc
+			       ON tc.constraint_name = kcu.constraint_name
+			       AND tc.table_name     = kcu.table_name
+			WHERE  kcu.table_name    = 'sm2'
+			  AND  kcu.column_name   = 'bank_id'
+			  AND  tc.constraint_type = 'PRIMARY KEY'
+		)`).Scan(&hasBankID)
+
+	if hasBankID {
+		return nil // already correct, nothing to do
+	}
+	log.Println("[pgstore] sm2 primary key missing bank_id — rebuilding...")
+	if _, err := pool.Exec(ctx, `ALTER TABLE sm2 DROP CONSTRAINT IF EXISTS sm2_pkey`); err != nil {
+		return fmt.Errorf("drop old PK: %w", err)
+	}
+	if _, err := pool.Exec(ctx, `ALTER TABLE sm2 ADD PRIMARY KEY (user_id, bank_id, fingerprint)`); err != nil {
+		return fmt.Errorf("add new PK: %w", err)
+	}
+	log.Println("[pgstore] sm2 primary key rebuilt: (user_id, bank_id, fingerprint) ✅")
+	return nil
+}
+
 func New(ctx context.Context, dsn string) (*Store, error) {
 	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
@@ -89,6 +120,15 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 	if err := execSchemaSQL(ctx, pool, schemaSQL); err != nil {
 		pool.Close()
 		return nil, fmt.Errorf("pgstore: schema: %w", err)
+	}
+	// Migration: fix sm2 PRIMARY KEY to include bank_id.
+	// Old installs created sm2 with PK(user_id, fingerprint); bank_id was added later
+	// via ALTER TABLE ADD COLUMN, leaving the PK unchanged. This caused
+	// ON CONFLICT(user_id, bank_id, fingerprint) to fail with SQLSTATE 42P10.
+	// Done in Go to avoid splitting issues with $$ dollar-quoting in execSchemaSQL.
+	if err := fixSM2PrimaryKey(ctx, pool); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("pgstore: sm2 PK migration: %w", err)
 	}
 	// Also open via database/sql for backward-compat code
 	sqlDB, err := sql.Open("pgx", dsn)
