@@ -136,6 +136,8 @@ type Server struct {
 	mux          *http.ServeMux
 	rateMu       sync.Mutex
 	rateBuckets  map[string][]time.Time
+	// 扫描器封禁：IP → 解封时间（零值表示永久封禁）
+	scanBans     map[string]time.Time
 	httpServer   *http.Server
 	// 图标 PNG 缓存（启动时按需生成一次，避免每次请求重复编码）
 	iconOnce sync.Once
@@ -202,6 +204,7 @@ func New(cfg Config) *Server {
 		assetVer:     hex.EncodeToString(ver),
 		mux:          http.NewServeMux(),
 		rateBuckets:  map[string][]time.Time{},
+		scanBans:     map[string]time.Time{},
 	}
 	// 初始化 Web Push
 	pushStores := map[string]*pushStore{}
@@ -320,6 +323,13 @@ func (s *Server) runUserCleanup() {
 			delete(s.rateBuckets, ip)
 		}
 	}
+	// 清理已过期的扫描器封禁条目
+	now := time.Now()
+	for ip, until := range s.scanBans {
+		if !until.IsZero() && now.After(until) {
+			delete(s.scanBans, ip)
+		}
+	}
 	s.rateMu.Unlock()
 }
 
@@ -332,6 +342,22 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	auth.ApplySecurityHeaders(wrapped)
 
+	ip := remoteIP(r)
+
+	// ── 扫描器检测：命中可疑路径立即封禁 24h ──────────────────────
+	if s.isScannerPath(r.URL.Path, r.Method) {
+		s.banIP(ip, 24*time.Hour)
+		log.Printf("[ban] scanner detected ip=%s path=%s ua=%s", ip, r.URL.Path, r.UserAgent())
+		wrapped.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	// ── 封禁检查：已封禁 IP 直接丢弃 ──────────────────────────────
+	if s.isBanned(ip) {
+		wrapped.WriteHeader(http.StatusForbidden)
+		return
+	}
+
 	// 健康检查端点不需要认证
 	if r.URL.Path == "/api/health" {
 		s.mux.ServeHTTP(wrapped, r)
@@ -340,7 +366,6 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	if r.URL.Path == "/auth" && r.Method == http.MethodPost {
 		if s.cfg.AccessCode != "" {
-			ip := remoteIP(r)
 			if ok, retry := auth.CheckBruteForce(ip); !ok {
 				minutes := (retry + 59) / 60
 				msg := fmt.Sprintf("尝试次数过多，请 %d 分钟后重试", minutes)
@@ -372,7 +397,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if (r.URL.Path == "/" || r.URL.Path == "") && r.Method == http.MethodGet {
 			wrapped.Header().Set("Content-Type", "text/html; charset=utf-8")
 			var tok, svg string
-			if auth.NeedsCaptcha(remoteIP(r)) {
+			if auth.NeedsCaptcha(ip) {
 				tok, svg = auth.NewCaptcha()
 			}
 			io.WriteString(wrapped, auth.RenderPINPage("医考练习", "", s.cfg.PinLen, tok, svg))
@@ -398,7 +423,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
 			return
 		}
-		if !s.checkRate(remoteIP(r)) {
+		if !s.checkRate(ip) {
 			jsonError(wrapped, "Too Many Requests", http.StatusTooManyRequests)
 			return
 		}
@@ -2707,6 +2732,87 @@ func (s *Server) checkRate(ip string) bool {
 	}
 	s.rateBuckets[ip] = append(fresh, now)
 	return true
+}
+
+// banIP 封禁指定 IP 一段时间（duration=0 表示永久）。
+func (s *Server) banIP(ip string, duration time.Duration) {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	var until time.Time
+	if duration > 0 {
+		until = time.Now().Add(duration)
+	}
+	s.scanBans[ip] = until
+}
+
+// isBanned 检查 IP 是否在封禁名单内（过期自动移除）。
+func (s *Server) isBanned(ip string) bool {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	until, ok := s.scanBans[ip]
+	if !ok {
+		return false
+	}
+	// 零值 = 永久封禁
+	if until.IsZero() {
+		return true
+	}
+	if time.Now().Before(until) {
+		return true
+	}
+	// 过期，自动移除
+	delete(s.scanBans, ip)
+	return false
+}
+
+// isScannerPath 判断请求路径是否为扫描器特征路径。
+// 只要命中任意一条规则，立即封禁该 IP。
+func (s *Server) isScannerPath(path, method string) bool {
+	// 常见扫描路径前缀
+	scanPrefixes := []string{
+		"/wp-", "/wordpress", "/xmlrpc", "/wp-admin", "/wp-login",
+		"/phpmyadmin", "/pma", "/myadmin",
+		"/.env", "/.git", "/.svn", "/.htaccess", "/.well-known/acme-challenge",
+		"/admin", "/administrator",
+		"/cgi-bin", "/cgi/",
+		"/shell", "/cmd", "/exec",
+		"/boaform", "/boa/",
+		"/solr", "/actuator", "/jolokia",
+		"/telescope", "/vendor/",
+		"/config", "/setup",
+		"/invoke.js",                 // Ivanti/Pulse 漏洞扫描
+		"/dana-na/", "/dana-cached/", // Juniper VPN 扫描
+		"/remote/", "/remote/fgt",    // Fortinet 扫描
+		"/Autodiscover", "/autodiscover",
+		"/owa/", "/ecp/",             // Exchange 扫描
+		"/.aws",
+		"/etc/passwd",
+		"/proc/",
+	}
+	p := strings.ToLower(path)
+	for _, prefix := range scanPrefixes {
+		if strings.HasPrefix(p, strings.ToLower(prefix)) {
+			return true
+		}
+	}
+
+	// 常见扫描文件后缀
+	scanSuffixes := []string{
+		".php", ".asp", ".aspx", ".jsp", ".cgi",
+		".bak", ".sql", ".tar", ".gz", ".zip",
+		".pem", ".key", ".crt", ".p12",
+		".DS_Store",
+		".xml",  // 单独的 .xml 不拦（manifest.xml 合法），由前缀规则过滤
+	}
+	for _, suffix := range scanSuffixes {
+		if strings.HasSuffix(p, suffix) {
+			return true
+		}
+	}
+
+	// 合法路径白名单（避免误封）：到这里才检查，短路逻辑
+	_ = method
+	return false
 }
 
 func (s *Server) validHost(r *http.Request) bool {
