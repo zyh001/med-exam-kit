@@ -418,6 +418,11 @@
       <div class="fav-empty-text">暂无错题记录</div>
       <div class="fav-empty-hint">做完题目后答错的题会出现在这里</div>
     </div>
+    <!-- 多选底栏 -->
+    <div id="wb-multibar" class="unit-multibar" style="display:none">
+      <button class="unit-multibar-cancel" onclick="_wbCancelMulti()">取消</button>
+      <button class="unit-multibar-start" onclick="_wbStartMulti()">练习已选（<span id="wb-sel-count">0</span>项）</button>
+    </div>
   </div>
 
   <!-- ═══ FAVORITES ══════════════════════════════════════════════════ -->
@@ -458,6 +463,11 @@
       <div class="fav-empty-icon">⭐</div>
       <div class="fav-empty-text">还没有收藏题目</div>
       <div class="fav-empty-hint">做题时长按 ⚑ 按钮即可收藏</div>
+    </div>
+    <!-- 多选底栏 -->
+    <div id="fav-multibar" class="unit-multibar" style="display:none">
+      <button class="unit-multibar-cancel" onclick="_favCancelMulti()">取消</button>
+      <button class="unit-multibar-start" onclick="_favStartMulti()">练习已选（<span id="fav-sel-count">0</span>项）</button>
     </div>
   </div>
 
