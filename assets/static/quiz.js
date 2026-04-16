@@ -5914,6 +5914,7 @@ function _isTouchInHScrollable(el) {
 (function setupQuizSwipe(){
   const THRESHOLD=70, VELOCITY=0.32, RESIST=0.35;
   let tx=0,ty=0,t0=0,locked=null,dragging=false,touchTarget=null;
+  let _dragStage=null;  // 本次手势锁定的 stage 元素
 
   const quizScreen = document.getElementById('s-quiz');
   if(!quizScreen) return;
@@ -5922,7 +5923,8 @@ function _isTouchInHScrollable(el) {
   const hintL = document.getElementById('swipe-hint-left');
   const hintR = document.getElementById('swipe-hint-right');
 
-  function stage(){ return quizBody.querySelector('.q-stage'); }
+  // 始终取 DOM 中最后一个 q-stage（_slideQ 动画期间新旧共存，最后一个是当前题）
+  function stage(){ const all=quizBody.querySelectorAll('.q-stage'); return all[all.length-1]||null; }
   function canPrev(){
     if(S.cur<=0) return false;
     if(S.mode==='exam') return examCanGoBack(S.cur);
@@ -5953,7 +5955,7 @@ function _isTouchInHScrollable(el) {
   quizBody.addEventListener('touchstart', e=>{
     if(document.querySelector('.screen.active')?.id!=='s-quiz') return;
     const t=e.touches[0]; tx=t.clientX; ty=t.clientY; t0=Date.now();
-    locked=null; dragging=false; touchTarget=e.target;
+    locked=null; dragging=false; touchTarget=e.target; _dragStage=null;
   },{passive:true});
 
   quizBody.addEventListener('touchmove', e=>{
@@ -5966,7 +5968,9 @@ function _isTouchInHScrollable(el) {
     if(locked==='vertical') return;
     e.preventDefault();
     dragging=true;
-    const s=stage(); if(!s) return;
+    // 锁定本次手势拖动的 stage（手势开始时取当前最新 stage，之后不再切换）
+    if(!_dragStage) _dragStage=stage();
+    const s=_dragStage; if(!s) return;
     s.classList.add('is-dragging');
     let move=dx;
     if((dx>0&&!canPrev())||(dx<0&&!canNext())) move=dx*RESIST;
@@ -5975,9 +5979,10 @@ function _isTouchInHScrollable(el) {
   },{passive:false});
 
   quizBody.addEventListener('touchend', e=>{
-    if(!dragging){dragging=false;return;}
+    if(!dragging){dragging=false;_dragStage=null;return;}
     dragging=false; resetHints();
-    const s=stage(); if(!s) return;
+    const s=_dragStage||stage(); _dragStage=null;
+    if(!s) return;
     s.classList.remove('is-dragging');
     s.style.transform='';
     const dx=e.changedTouches[0].clientX-tx;
@@ -5992,6 +5997,7 @@ function _isTouchInHScrollable(el) {
         vibrate(10); S.cur++; renderQ('forward');
         if(S.mode==='exam') updateGridDot();
       } else {
+        // 弹回：在 renderQ 之前操作当前 stage，动画结束后让 _slideQ 接管
         s.style.transition='transform .22s cubic-bezier(.25,.46,.45,.94)';
         s.style.transform=`translateX(${dx>0?5:-5}px)`;
         setTimeout(()=>{s.style.transition='';s.style.transform='';},230);
