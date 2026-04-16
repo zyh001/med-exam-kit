@@ -2002,15 +2002,16 @@ let _autoAdvanceTimer = null;  // 练习模式答对后自动跳转计时器
 function _slideQ(dir, buildFn) {
   const body = document.querySelector('.quiz-body');
 
-  // ① 若上一次动画还没结束，立即取消清理计划并强制移除所有旧 stage，
-  //    防止快速连点时多个 stage 堆叠。
+  // 取消上一次尚未执行的清理计时器
   if (_slideCleanTimer) {
     clearTimeout(_slideCleanTimer);
     _slideCleanTimer = null;
   }
-  body.querySelectorAll('.q-stage').forEach(el => el.remove());
 
-  // ② 构建新 stage
+  // 保留现有 stage 作为退出动画用的 ghost（不提前删除，避免白屏）
+  const oldStages = [...body.querySelectorAll('.q-stage')];
+
+  // 构建新 stage（先填内容，再插入 DOM）
   const newStage = document.createElement('div');
   newStage.className = 'q-stage';
   const wrap = document.createElement('div');
@@ -2020,27 +2021,24 @@ function _slideQ(dir, buildFn) {
   buildFn(wrap);
 
   if (dir === 'none') {
+    // 无动画：直接替换，不出现空帧
+    oldStages.forEach(el => el.remove());
     body.appendChild(newStage);
     return;
   }
 
-  // ③ 构建一个纯用于退出动画的"幽灵"占位 stage（空内容，仅负责滑出）
-  //    这样新 stage 的内容就绝对不会和旧内容混在一起。
-  const ghostStage = document.createElement('div');
-  ghostStage.className = 'q-stage';
-  ghostStage.style.background = 'var(--bg)';   // 用背景色盖住，干净退出
-  body.appendChild(ghostStage);
+  // 先 append 新 stage（旧 stage 仍在 DOM → 不出现空白帧）
   body.appendChild(newStage);
 
-  // ④ 旧内容（ghost）滑出，新 stage 从对侧滑入
+  // 旧 stage 滑出，新 stage 从对侧滑入
   const exitCls  = dir === 'forward' ? 'exit-left'  : 'exit-right';
   const enterCls = dir === 'forward' ? 'enter-right' : 'enter-left';
-  ghostStage.classList.add(exitCls);
+  oldStages.forEach(el => el.classList.add(exitCls));
   newStage.classList.add(enterCls);
 
   const DUR = 230;
   _slideCleanTimer = setTimeout(() => {
-    ghostStage.remove();
+    oldStages.forEach(el => el.remove());
     newStage.classList.remove(enterCls);
     _slideCleanTimer = null;
   }, DUR);
