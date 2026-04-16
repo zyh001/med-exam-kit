@@ -499,6 +499,31 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen .opts-list{gap:0}
 /* 极简模式：题目body里的章节标签不显示（header已显示） */
 .s-quiz-zen .unit-tag{display:none}
+/* ── 极简模式解析面板 ── */
+/* 隐藏：答对/答错横幅、动作栏、考点、AI入口、shared_opts展示 */
+.s-quiz-zen .explain-result,
+.s-quiz-zen .explain-actions,
+.s-quiz-zen .explain-point,
+.s-quiz-zen .ai-entry-btn,
+.s-quiz-zen .explain-shared-opts{display:none !important}
+/* 去掉 inner 卡片的边框和背景 */
+.s-quiz-zen .explain-inner{
+  background:transparent;border:none;border-radius:0;margin-bottom:0;
+}
+/* 答案行：简洁一行，无背景无边框 */
+.s-quiz-zen .explain-correct-row{
+  padding:10px 0 4px;border-bottom:none;background:transparent;
+  font-size:13px;font-weight:600;color:var(--muted);
+}
+.s-quiz-zen .explain-correct-row span{color:var(--success);font-weight:700}
+/* 解析正文：小字灰色，无内边距 padding-top */
+.s-quiz-zen .explain-body{
+  padding:4px 0 12px;font-size:13px;color:var(--muted);line-height:1.75;
+}
+/* 去掉外层 panel 的动画（答错时直接显示，不需要过渡） */
+.s-quiz-zen .explain-panel{
+  max-height:none;opacity:1;overflow:visible;transition:none;
+}
 
 /* 答对/答错无背景闪动，已删除 flash 动画类 */
 .zen-opt-rate{
@@ -638,7 +663,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .q-shared-opts.is-collapsed .q-shared-opts-content{max-height:0!important;opacity:0}
 .q-shared-opts:not(.is-collapsed) .q-shared-opts-content{max-height:none;opacity:1}
 .q-shared-opts-content{overflow:hidden;transition:max-height .3s ease,opacity .25s}
-.q-shared-opts.is-collapsed{background:var(--card);border-style:dashed;opacity:.75}
+.q-shared-opts.is-collapsed{background:transparent;border-color:transparent;opacity:.6}
 .q-shared-opts.is-collapsed .q-shared-opts-label{color:var(--muted)}
 .q-shared-opt-row{
   display:flex;align-items:flex-start;gap:8px;
@@ -1223,7 +1248,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .q-stem.q-stem-collapsible:not(.is-collapsed) .q-stem-content{max-height:none;opacity:1}
 .stem-toggle-hint{font-size:10px;margin-left:6px;opacity:.65;font-weight:400}
 /* 折叠后 header 变淡 */
-.q-stem.q-stem-collapsible.is-collapsed{background:var(--card);border-style:dashed;opacity:.75}
+.q-stem.q-stem-collapsible.is-collapsed{background:transparent;border-color:transparent;opacity:.6}
 .q-stem.q-stem-collapsible.is-collapsed .q-stem-label{color:var(--muted)}
 /* 多选题标记 */
 .multi-badge{
