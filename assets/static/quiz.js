@@ -2322,24 +2322,19 @@ function selectOpt(letter, btn) {
       savePracticeSession();
       const answeredIdx = S.cur;
       if (_zenMode) {
-        // 极简模式：渲染选项颜色 + 显示解析
+        // 极简模式：渲染选项颜色 + 显示解析（不自动滚动）
         setTimeout(() => {
           if (S.cur !== answeredIdx) return;
-          renderQ('none');  // 更新选项颜色
-          // 滚动到解析
-          setTimeout(() => {
-            const explain = document.getElementById('explain-panel');
-            if (explain) explain.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
-          }, 80);
+          renderQ('none');
           if (isCorrectAns) {
-            // 答对：800ms 后自动切下一题（留时间看解析）
+            // 答对：250ms 后自动切下一题
             _autoAdvanceTimer = setTimeout(() => {
               _autoAdvanceTimer = null;
               if (S.cur !== answeredIdx) return;
               const total = S.questions.length;
               if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
               else finishPractice();
-            }, 800);
+            }, 250);
           }
           // 答错：停留，用户自行左右滑动切题
         }, 130);
