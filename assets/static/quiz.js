@@ -2322,12 +2322,47 @@ function selectOpt(letter, btn) {
       savePracticeSession();
       const answeredIdx = S.cur;
       if (_zenMode) {
-        // 极简模式：渲染选项颜色 + 显示解析（不自动滚动）
+        // 极简模式：原地更新 DOM（不调用 renderQ，避免白屏闪烁）
         setTimeout(() => {
           if (S.cur !== answeredIdx) return;
-          renderQ('none');
+          const q2 = S.questions[S.cur];
+          const correctSet2 = new Set(isMultiQ(q2) ? q2.answer.split('') : [q2.answer]);
+
+          // 更新选项颜色（在现有 btn 上直接改 class）
+          document.querySelectorAll('.opt').forEach(btn => {
+            const lbl = btn.querySelector('.opt-label');
+            if (!lbl) return;
+            const L = lbl.textContent.trim();
+            btn.classList.remove('selected', 'multi-selected');
+            btn.disabled = true;
+            if (correctSet2.has(L)) {
+              btn.classList.add('correct');
+              // 追加正确率标注（仅一次）
+              if (!btn.querySelector('.zen-opt-rate') && q2.rate) {
+                let rv = typeof q2.rate === 'string'
+                  ? parseFloat(q2.rate.replace('%','')) : q2.rate;
+                if (!isNaN(rv) && rv > 0) {
+                  const sp = document.createElement('span');
+                  sp.className = 'zen-opt-rate';
+                  sp.textContent = rv.toFixed(1) + '%';
+                  btn.appendChild(sp);
+                }
+              }
+            } else {
+              const wasSel = isMultiQ(q2)
+                ? (S.ans[S.cur] instanceof Set && S.ans[S.cur].has(L))
+                : S.ans[S.cur] === L;
+              btn.classList.add(wasSel ? 'wrong' : 'dim');
+            }
+          });
+
+          // 追加极简解析块（仅当不存在时）
+          const wrap2 = document.getElementById('question-wrap');
+          if (wrap2 && !wrap2.querySelector('.explain-panel')) {
+            wrap2.appendChild(buildExplain(q2, S.ans[S.cur]));
+          }
+
           if (isCorrectAns) {
-            // 答对：250ms 后自动切下一题
             _autoAdvanceTimer = setTimeout(() => {
               _autoAdvanceTimer = null;
               if (S.cur !== answeredIdx) return;
