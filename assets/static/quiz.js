@@ -2002,16 +2002,15 @@ let _autoAdvanceTimer = null;  // 练习模式答对后自动跳转计时器
 function _slideQ(dir, buildFn) {
   const body = document.querySelector('.quiz-body');
 
-  // 取消上一次尚未执行的清理计时器
+  // ① 若上一次动画还没结束，立即取消清理计划并强制移除所有旧 stage，
+  //    防止快速连点时多个 stage 堆叠。
   if (_slideCleanTimer) {
     clearTimeout(_slideCleanTimer);
     _slideCleanTimer = null;
   }
+  body.querySelectorAll('.q-stage').forEach(el => el.remove());
 
-  // 保留现有 stage 作为退出动画用的 ghost（不提前删除，避免白屏）
-  const oldStages = [...body.querySelectorAll('.q-stage')];
-
-  // 构建新 stage（先填内容，再插入 DOM）
+  // ② 构建新 stage
   const newStage = document.createElement('div');
   newStage.className = 'q-stage';
   const wrap = document.createElement('div');
@@ -2021,24 +2020,27 @@ function _slideQ(dir, buildFn) {
   buildFn(wrap);
 
   if (dir === 'none') {
-    // 无动画：直接替换，不出现空帧
-    oldStages.forEach(el => el.remove());
     body.appendChild(newStage);
     return;
   }
 
-  // 先 append 新 stage（旧 stage 仍在 DOM → 不出现空白帧）
+  // ③ 构建一个纯用于退出动画的"幽灵"占位 stage（空内容，仅负责滑出）
+  //    这样新 stage 的内容就绝对不会和旧内容混在一起。
+  const ghostStage = document.createElement('div');
+  ghostStage.className = 'q-stage';
+  ghostStage.style.background = 'var(--bg)';   // 用背景色盖住，干净退出
+  body.appendChild(ghostStage);
   body.appendChild(newStage);
 
-  // 旧 stage 滑出，新 stage 从对侧滑入
+  // ④ 旧内容（ghost）滑出，新 stage 从对侧滑入
   const exitCls  = dir === 'forward' ? 'exit-left'  : 'exit-right';
   const enterCls = dir === 'forward' ? 'enter-right' : 'enter-left';
-  oldStages.forEach(el => el.classList.add(exitCls));
+  ghostStage.classList.add(exitCls);
   newStage.classList.add(enterCls);
 
   const DUR = 230;
   _slideCleanTimer = setTimeout(() => {
-    oldStages.forEach(el => el.remove());
+    ghostStage.remove();
     newStage.classList.remove(enterCls);
     _slideCleanTimer = null;
   }, DUR);
@@ -2105,7 +2107,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
   if (q.mode) tags.innerHTML += `<span class="q-tag mode-tag">${esc(q.mode)}</span>`;
   // 考试模式不显示章节（防止泄露分组信息），极简模式也不显示（header已有）
   if (q.unit && !isExam && !_zenMode) tags.innerHTML += `<span class="q-tag unit-tag">${esc(q.unit)}</span>`;
-  if (q.rate != null && q.rate !== '' && q.rate !== undefined && !isExam && !_zenMode) {
+  if (q.rate != null && q.rate !== '' && q.rate !== undefined && !isExam) {
     let rateVal = q.rate;
     if (typeof rateVal === 'string') rateVal = parseFloat(rateVal.replace('%',''));
     if (!isNaN(rateVal) && rateVal > 0) {
@@ -2204,16 +2206,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
     }
     // 剥离选项文本里可能自带的字母前缀（"A." "A、" "A．" 等），避免字母重复显示
     const cleanOpt = opt.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
-    // 极简模式且已揭示：在正确选项右侧显示正确率
-    let rateHtml = '';
-    if (_zenMode && isRevealed && inCorrect && q.rate != null && q.rate !== '') {
-      let rv = q.rate;
-      if (typeof rv === 'string') rv = parseFloat(rv.replace('%',''));
-      if (!isNaN(rv) && rv > 0) {
-        rateHtml = `<span class="zen-opt-rate">${rv.toFixed(1)}%</span>`;
-      }
-    }
-    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>${rateHtml}`;
+    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>`;
     opts.appendChild(btn);
   });
   wrap.appendChild(opts);
@@ -2320,47 +2313,12 @@ function selectOpt(letter, btn) {
       savePracticeSession();
       const answeredIdx = S.cur;
       if (_zenMode) {
-        // 极简模式：原地更新 DOM（不调用 renderQ，避免白屏闪烁）
+        // 极简模式：renderQ('none') 更新颜色并展示解析（isRevealed=true 时自动渲染）
         setTimeout(() => {
           if (S.cur !== answeredIdx) return;
-          const q2 = S.questions[S.cur];
-          const correctSet2 = new Set(isMultiQ(q2) ? q2.answer.split('') : [q2.answer]);
-
-          // 更新选项颜色（在现有 btn 上直接改 class）
-          document.querySelectorAll('.opt').forEach(btn => {
-            const lbl = btn.querySelector('.opt-label');
-            if (!lbl) return;
-            const L = lbl.textContent.trim();
-            btn.classList.remove('selected', 'multi-selected');
-            btn.disabled = true;
-            if (correctSet2.has(L)) {
-              btn.classList.add('correct');
-              // 追加正确率标注（仅一次）
-              if (!btn.querySelector('.zen-opt-rate') && q2.rate) {
-                let rv = typeof q2.rate === 'string'
-                  ? parseFloat(q2.rate.replace('%','')) : q2.rate;
-                if (!isNaN(rv) && rv > 0) {
-                  const sp = document.createElement('span');
-                  sp.className = 'zen-opt-rate';
-                  sp.textContent = rv.toFixed(1) + '%';
-                  btn.appendChild(sp);
-                }
-              }
-            } else {
-              const wasSel = isMultiQ(q2)
-                ? (S.ans[S.cur] instanceof Set && S.ans[S.cur].has(L))
-                : S.ans[S.cur] === L;
-              btn.classList.add(wasSel ? 'wrong' : 'dim');
-            }
-          });
-
-          // 追加极简解析块（仅当不存在时）
-          const wrap2 = document.getElementById('question-wrap');
-          if (wrap2 && !wrap2.querySelector('.explain-panel')) {
-            wrap2.appendChild(buildExplain(q2, S.ans[S.cur]));
-          }
-
+          renderQ('none');
           if (isCorrectAns) {
+            // 答对：250ms 后自动切下一题
             _autoAdvanceTimer = setTimeout(() => {
               _autoAdvanceTimer = null;
               if (S.cur !== answeredIdx) return;
@@ -2368,8 +2326,13 @@ function selectOpt(letter, btn) {
               if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
               else finishPractice();
             }, 250);
+          } else {
+            // 答错：停留，滚到解析，等用户手动翻页
+            setTimeout(() => {
+              const explain = document.getElementById('explain-panel');
+              if (explain) explain.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 80);
           }
-          // 答错：停留，用户自行左右滑动切题
         }, 130);
       } else {
         // 普通练习模式
@@ -5914,7 +5877,6 @@ function _isTouchInHScrollable(el) {
 (function setupQuizSwipe(){
   const THRESHOLD=70, VELOCITY=0.32, RESIST=0.35;
   let tx=0,ty=0,t0=0,locked=null,dragging=false,touchTarget=null;
-  let _dragStage=null;  // 本次手势锁定的 stage 元素
 
   const quizScreen = document.getElementById('s-quiz');
   if(!quizScreen) return;
@@ -5923,8 +5885,7 @@ function _isTouchInHScrollable(el) {
   const hintL = document.getElementById('swipe-hint-left');
   const hintR = document.getElementById('swipe-hint-right');
 
-  // 始终取 DOM 中最后一个 q-stage（_slideQ 动画期间新旧共存，最后一个是当前题）
-  function stage(){ const all=quizBody.querySelectorAll('.q-stage'); return all[all.length-1]||null; }
+  function stage(){ return quizBody.querySelector('.q-stage'); }
   function canPrev(){
     if(S.cur<=0) return false;
     if(S.mode==='exam') return examCanGoBack(S.cur);
@@ -5955,7 +5916,7 @@ function _isTouchInHScrollable(el) {
   quizBody.addEventListener('touchstart', e=>{
     if(document.querySelector('.screen.active')?.id!=='s-quiz') return;
     const t=e.touches[0]; tx=t.clientX; ty=t.clientY; t0=Date.now();
-    locked=null; dragging=false; touchTarget=e.target; _dragStage=null;
+    locked=null; dragging=false; touchTarget=e.target;
   },{passive:true});
 
   quizBody.addEventListener('touchmove', e=>{
@@ -5968,9 +5929,7 @@ function _isTouchInHScrollable(el) {
     if(locked==='vertical') return;
     e.preventDefault();
     dragging=true;
-    // 锁定本次手势拖动的 stage（手势开始时取当前最新 stage，之后不再切换）
-    if(!_dragStage) _dragStage=stage();
-    const s=_dragStage; if(!s) return;
+    const s=stage(); if(!s) return;
     s.classList.add('is-dragging');
     let move=dx;
     if((dx>0&&!canPrev())||(dx<0&&!canNext())) move=dx*RESIST;
@@ -5979,10 +5938,9 @@ function _isTouchInHScrollable(el) {
   },{passive:false});
 
   quizBody.addEventListener('touchend', e=>{
-    if(!dragging){dragging=false;_dragStage=null;return;}
+    if(!dragging){dragging=false;return;}
     dragging=false; resetHints();
-    const s=_dragStage||stage(); _dragStage=null;
-    if(!s) return;
+    const s=stage(); if(!s) return;
     s.classList.remove('is-dragging');
     s.style.transform='';
     const dx=e.changedTouches[0].clientX-tx;
@@ -5997,7 +5955,6 @@ function _isTouchInHScrollable(el) {
         vibrate(10); S.cur++; renderQ('forward');
         if(S.mode==='exam') updateGridDot();
       } else {
-        // 弹回：在 renderQ 之前操作当前 stage，动画结束后让 _slideQ 接管
         s.style.transition='transform .22s cubic-bezier(.25,.46,.45,.94)';
         s.style.transform=`translateX(${dx>0?5:-5}px)`;
         setTimeout(()=>{s.style.transition='';s.style.transform='';},230);

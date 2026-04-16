@@ -449,39 +449,6 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen .quiz-header{border-bottom-color:transparent;background:transparent}
 .s-quiz-zen .quiz-progress-cur{font-size:16px;font-weight:800;color:var(--accent)}
 
-/* 极简模式正确率标注（显示在正确选项右侧） */
-.zen-opt-rate{
-  margin-left:auto;font-size:12px;font-weight:700;
-  color:var(--success);opacity:.85;white-space:nowrap;flex-shrink:0;
-}
-
-/* 极简模式解析面板：完全透明，无边框无背景 */
-.s-quiz-zen .explain-panel{
-  background:transparent;border:none;border-radius:0;
-  margin-top:12px;
-}
-.s-quiz-zen .explain-inner{
-  background:transparent;border:none;border-radius:0;padding:0;
-}
-/* 隐藏多余解析子元素 */
-.s-quiz-zen .explain-result,
-.s-quiz-zen .explain-shared-opts,
-.s-quiz-zen .explain-actions,
-.s-quiz-zen .explain-point,
-.s-quiz-zen .ai-entry-btn{display:none !important}
-/* 正确答案行：简洁红色提示，无背景无边框 */
-.s-quiz-zen .explain-correct-row{
-  font-size:13px;color:var(--danger);font-weight:600;
-  padding:0 0 6px;background:transparent;border:none;
-}
-.s-quiz-zen .explain-correct-row span{font-weight:700}
-/* 解析正文：灰色小字，轻量 */
-.s-quiz-zen .explain-body{
-  padding:0;background:transparent;border:none;
-}
-.s-quiz-zen .explain-text{
-  font-size:13px;line-height:1.75;color:var(--muted);
-}
 /* 选项：无边框、无分隔线，仅字母圈 + 轻间距 */
 .s-quiz-zen .opt{
   background:transparent;border:none;border-radius:8px;
