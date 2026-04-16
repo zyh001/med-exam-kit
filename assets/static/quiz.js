@@ -2206,7 +2206,16 @@ function _fillQ(wrap, q, isExam, isPractice) {
     }
     // 剥离选项文本里可能自带的字母前缀（"A." "A、" "A．" 等），避免字母重复显示
     const cleanOpt = opt.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
-    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>`;
+    // 极简模式且已揭示：在正确选项右侧显示正确率
+    let rateHtml = '';
+    if (_zenMode && isRevealed && inCorrect && q.rate != null && q.rate !== '') {
+      let rv = q.rate;
+      if (typeof rv === 'string') rv = parseFloat(rv.replace('%',''));
+      if (!isNaN(rv) && rv > 0) {
+        rateHtml = `<span class="zen-opt-rate">${rv.toFixed(1)}%</span>`;
+      }
+    }
+    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>${rateHtml}`;
     opts.appendChild(btn);
   });
   wrap.appendChild(opts);
@@ -2313,19 +2322,24 @@ function selectOpt(letter, btn) {
       savePracticeSession();
       const answeredIdx = S.cur;
       if (_zenMode) {
-        // 极简模式：直接渲染结果，无闪动
+        // 极简模式：渲染选项颜色 + 显示解析
         setTimeout(() => {
           if (S.cur !== answeredIdx) return;
-          renderQ('none');  // 更新选项颜色（字母圈绿/红）
+          renderQ('none');  // 更新选项颜色
+          // 滚动到解析
+          setTimeout(() => {
+            const explain = document.getElementById('explain-panel');
+            if (explain) explain.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          }, 80);
           if (isCorrectAns) {
-            // 答对：250ms 后自动切下一题（快速）
+            // 答对：800ms 后自动切下一题（留时间看解析）
             _autoAdvanceTimer = setTimeout(() => {
               _autoAdvanceTimer = null;
               if (S.cur !== answeredIdx) return;
               const total = S.questions.length;
               if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
               else finishPractice();
-            }, 250);
+            }, 800);
           }
           // 答错：停留，用户自行左右滑动切题
         }, 130);

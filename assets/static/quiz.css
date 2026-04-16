@@ -442,13 +442,37 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen #quiz-timer,
 .s-quiz-zen #quiz-footer,
 .s-quiz-zen .q-grid-panel,
-.s-quiz-zen .explain-panel,
 .s-quiz-zen .q-tag-row,
 .s-quiz-zen .q-type-tag{display:none !important}
 
 /* header：透明无边 */
 .s-quiz-zen .quiz-header{border-bottom-color:transparent;background:transparent}
 .s-quiz-zen .quiz-progress-cur{font-size:16px;font-weight:800;color:var(--accent)}
+
+/* 极简模式正确率标注（显示在正确选项右侧） */
+.zen-opt-rate{
+  margin-left:auto;font-size:12px;font-weight:700;
+  color:var(--success);opacity:.85;white-space:nowrap;flex-shrink:0;
+}
+  background:transparent;border:none;border-radius:0;
+  border-top:1px solid var(--border);margin-top:8px;padding-top:8px;
+}
+.s-quiz-zen .explain-inner{padding:0}
+/* 隐藏非必要解析子元素 */
+.s-quiz-zen .explain-result,
+.s-quiz-zen .explain-shared-opts,
+.s-quiz-zen .explain-actions,
+.s-quiz-zen .ai-entry-btn{display:none !important}
+/* 正确答案行极简化 */
+.s-quiz-zen .explain-correct-row{
+  font-size:13px;color:var(--danger);font-weight:600;
+  margin-bottom:6px;padding:0;background:transparent;border:none;
+}
+/* 解析文字极简化 */
+.s-quiz-zen .explain-text{
+  font-size:13px;line-height:1.7;color:var(--muted);
+  padding:0;
+}
 
 /* 选项：无边框、无分隔线，仅字母圈 + 轻间距 */
 .s-quiz-zen .opt{
