@@ -499,6 +499,12 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen .opts-list{gap:0}
 /* 极简模式：题目body里的章节标签不显示（header已显示） */
 .s-quiz-zen .unit-tag{display:none}
+/* 极简模式题号：去掉蓝色背景，改为纯文字序号 */
+.s-quiz-zen .q-num{
+  background:transparent;color:var(--muted);
+  border-radius:0;font-size:13px;font-weight:700;
+  width:auto;height:auto;margin-right:4px;
+}
 /* ── 极简模式解析面板 ── */
 /* 隐藏：答对/答错横幅、动作栏、考点、AI入口、shared_opts展示 */
 .s-quiz-zen .explain-result,

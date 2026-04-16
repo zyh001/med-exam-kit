@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 	"github.com/zyh001/med-exam-kit/internal/auth"
 	"github.com/zyh001/med-exam-kit/internal/bank"
+	"github.com/zyh001/med-exam-kit/internal/logger"
 	"github.com/zyh001/med-exam-kit/internal/models"
 	"github.com/zyh001/med-exam-kit/internal/progress"
 	"github.com/zyh001/med-exam-kit/internal/server"
@@ -81,6 +82,18 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 			fileCfg = loaded
 			fmt.Printf("📄 已加载配置文件：%s\n", cfgFile)
 		}
+	}
+
+	// 初始化日志（配置加载后立即执行，后续所有 log.Printf 都受控）
+	logFile := fileCfg.LogFile
+	logLevel := fileCfg.LogLevel
+	if logLevel == "" {
+		logLevel = "info"
+	}
+	if err := logger.Init(logFile, logLevel); err != nil {
+		fmt.Fprintf(os.Stderr, "⚠ 日志初始化失败: %v\n", err)
+	} else if logFile != "" {
+		fmt.Printf("📝 日志写入：%s（级别：%s）\n", logFile, logLevel)
 	}
 
 	// CLI 标志若未显式设置则使用配置文件的值

@@ -41,6 +41,9 @@ type AppConfig struct {
 	CleanupDays int `yaml:"cleanup_days"` // 不活跃用户数据保留天数，0=使用默认值7
 	// AI 输出控制
 	AIMaxTokens int `yaml:"ai_max_tokens"` // AI 单次回复最大 token 数，0=使用默认值2048
+	// 日志
+	LogFile  string `yaml:"log_file"`  // 日志文件路径，留空=只打印终端
+	LogLevel string `yaml:"log_level"` // debug / info / warn / error，默认 info
 }
 
 // defaultConfig returns a zero-value config with sensible defaults.
@@ -167,6 +170,10 @@ func loadConfig(path string) (AppConfig, error) {
 			if v, err := strconv.Atoi(val); err == nil && v > 0 {
 				cfg.AIMaxTokens = v
 			}
+		case "log_file":
+			cfg.LogFile = val
+		case "log_level":
+			cfg.LogLevel = val
 		case "banks":
 			// inline single value: banks: exam.mqb
 			bankList = append(bankList, val)
@@ -253,6 +260,12 @@ s3_bucket:             # 存储桶名称，例：med-images
 s3_access_key:         # Access Key，例：minioadmin
 s3_secret_key:         # Secret Key，例：minioadmin
 s3_public_base:        # 公开访问 base URL（留空则使用 s3_endpoint/s3_bucket）
+
+# ─── 日志（可选）────────────────────────────────────────────────
+# 默认不写文件，只在终端打印。配置 log_file 后同时写入终端和文件。
+# log_level: debug / info / warn / error（默认 info）
+log_file:              # 日志文件路径，例：/var/log/med-exam-kit.log
+log_level: info        # 日志级别
 `
 
 var configCmd = &cobra.Command{
