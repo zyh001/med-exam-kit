@@ -2070,7 +2070,7 @@ function renderQ(dir = 'none') {
   // ── 更新 Header（不随卡片动画，即时更新）──
   document.getElementById('q-cur').textContent = S.cur + 1;
   document.getElementById('q-total').textContent = total;
-  document.getElementById('q-unit-tag').textContent = (S.mode === 'exam') ? '' : (q.unit || '');
+  document.getElementById('q-unit-tag').textContent = (S.mode === 'exam' || _zenMode) ? '' : (q.unit || '');
   document.getElementById('progress-fill').style.width = ((S.cur + 1) / total * 100).toFixed(1) + '%';
   _updateFlagBtn();
 
