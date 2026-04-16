@@ -8,6 +8,7 @@ package server
 //   RFC 8291 – Message Encryption for Web Push
 
 import (
+	"github.com/zyh001/med-exam-kit/internal/logger"
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
@@ -22,7 +23,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"strings"
 	"sync"
@@ -319,7 +319,7 @@ func (s *Server) sendDailyReviewPushes() {
 	if s.vapidKeys == nil {
 		return
 	}
-	log.Println("[push] 开始发送每日复习推送")
+	logger.Debugf("[push] 开始发送每日复习推送")
 	sent, failed, removed := 0, 0, 0
 
 	for _, bank := range s.cfg.Banks {
@@ -342,12 +342,12 @@ func (s *Server) sendDailyReviewPushes() {
 				store.remove(sub.Endpoint)
 				removed++
 			} else {
-				log.Printf("[push] 推送失败: %v", err)
+				logger.Errorf("[push] 推送失败: %v", err)
 				failed++
 			}
 		}
 	}
-	log.Printf("[push] 推送完成: sent=%d failed=%d removed=%d", sent, failed, removed)
+	logger.Errorf("[push] 推送完成: sent=%d failed=%d removed=%d", sent, failed, removed)
 }
 
 // vapidPublicKey returns the server's VAPID public key as URL-safe base64.

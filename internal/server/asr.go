@@ -1,9 +1,9 @@
 package server
 
 import (
+	"github.com/zyh001/med-exam-kit/internal/logger"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"sync"
 	"time"
@@ -70,7 +70,7 @@ func (s *Server) handleASRWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Upgrade browser connection
 	clientConn, err := wsUpgrader.Upgrade(w, r, nil)
 	if err != nil {
-		log.Printf("[asr] client upgrade failed: %v", err)
+		logger.Errorf("[asr] client upgrade failed: %v", err)
 		return
 	}
 	defer clientConn.Close()
@@ -94,7 +94,7 @@ func (s *Server) handleASRWebSocket(w http.ResponseWriter, r *http.Request) {
 
 	dsConn, _, err := dialer.Dial(baseURL, headers)
 	if err != nil {
-		log.Printf("[asr] dashscope connect failed: %v", err)
+		logger.Errorf("[asr] dashscope connect failed: %v", err)
 		clientConn.WriteJSON(map[string]string{"type": "error", "text": "ASR 服务连接失败"})
 		return
 	}
@@ -122,7 +122,7 @@ func (s *Server) handleASRWebSocket(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 	if err := dsConn.WriteJSON(runTask); err != nil {
-		log.Printf("[asr] run-task send failed: %v", err)
+		logger.Errorf("[asr] run-task send failed: %v", err)
 		clientConn.WriteJSON(map[string]string{"type": "error", "text": "ASR 初始化失败"})
 		return
 	}
@@ -130,12 +130,12 @@ func (s *Server) handleASRWebSocket(w http.ResponseWriter, r *http.Request) {
 	// Wait for task-started event
 	var startResp dsMessage
 	if err := dsConn.ReadJSON(&startResp); err != nil {
-		log.Printf("[asr] task-started read failed: %v", err)
+		logger.Errorf("[asr] task-started read failed: %v", err)
 		clientConn.WriteJSON(map[string]string{"type": "error", "text": "ASR 启动失败"})
 		return
 	}
 	if startResp.Header.Event != "task-started" {
-		log.Printf("[asr] unexpected event: %s (code=%s msg=%s)",
+		logger.Debugf("[asr] unexpected event: %s (code=%s msg=%s)",
 			startResp.Header.Event, startResp.Header.ErrorCode, startResp.Header.ErrorMsg)
 		clientConn.WriteJSON(map[string]string{"type": "error", "text": fmt.Sprintf("ASR 启动异常: %s", startResp.Header.ErrorMsg)})
 		return

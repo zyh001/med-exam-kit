@@ -6,12 +6,12 @@
 package postgres
 
 import (
+	"github.com/zyh001/med-exam-kit/internal/logger"
 	"context"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	"strings"
-	"log"
 	"math"
 	"time"
 
@@ -96,14 +96,14 @@ func fixSM2PrimaryKey(ctx context.Context, pool *pgxpool.Pool) error {
 	if hasBankID {
 		return nil // already correct, nothing to do
 	}
-	log.Println("[pgstore] sm2 primary key missing bank_id — rebuilding...")
+	logger.Warnf("[pgstore] sm2 primary key missing bank_id — rebuilding...")
 	if _, err := pool.Exec(ctx, `ALTER TABLE sm2 DROP CONSTRAINT IF EXISTS sm2_pkey`); err != nil {
 		return fmt.Errorf("drop old PK: %w", err)
 	}
 	if _, err := pool.Exec(ctx, `ALTER TABLE sm2 ADD PRIMARY KEY (user_id, bank_id, fingerprint)`); err != nil {
 		return fmt.Errorf("add new PK: %w", err)
 	}
-	log.Println("[pgstore] sm2 primary key rebuilt: (user_id, bank_id, fingerprint) ✅")
+	logger.Infof("[pgstore] sm2 primary key rebuilt: (user_id, bank_id, fingerprint) ✅")
 	return nil
 }
 
@@ -136,7 +136,7 @@ func New(ctx context.Context, dsn string) (*Store, error) {
 		pool.Close()
 		return nil, fmt.Errorf("pgstore: sql.Open: %w", err)
 	}
-	log.Println("[pgstore] connected to PostgreSQL ✅")
+	logger.Infof("[pgstore] connected to PostgreSQL ✅")
 	return &Store{pool: pool, sqlDB: sqlDB}, nil
 }
 
@@ -277,7 +277,7 @@ func (s *Store) ImportBank(ctx context.Context, name, source string, questions [
 	if err := tx.Commit(ctx); err != nil {
 		return 0, err
 	}
-	log.Printf("[pgstore] imported bank %q: %d questions", name, len(questions))
+	logger.Infof("[pgstore] imported bank %q: %d questions", name, len(questions))
 	return bankID, nil
 }
 
@@ -298,11 +298,11 @@ func (s *Store) Init(ctx context.Context) error {
 	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sm2       WHERE bank_id=0`).Scan(&legacySM2)
 	s.pool.QueryRow(ctx, `SELECT COUNT(*) FROM sessions  WHERE bank_id=0`).Scan(&legacySessions)
 	if legacyAttempts+legacySM2+legacySessions > 0 {
-		log.Printf("[pgstore] ⚠ 仍有 bank_id=0 旧数据: attempts=%d sm2=%d sessions=%d"+
+		logger.Warnf("[pgstore] ⚠ 仍有 bank_id=0 旧数据: attempts=%d sm2=%d sessions=%d"+
 			"\n  可手动执行 SQL 迁移，或使用 med-exam-kit db repair 修复",
 			legacyAttempts, legacySM2, legacySessions)
 	} else {
-		log.Printf("[pgstore] ✅ 所有学习数据已正确关联 bank_id")
+		logger.Infof("[pgstore] ✅ 所有学习数据已正确关联 bank_id")
 	}
 	return nil
 }
@@ -340,7 +340,7 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 				userID, bankID, str(item["fingerprint"]), sid,
 				intV(item["result"]), str(item["mode"]), str(item["unit"]),
 				time.Now().UnixMilli()); attErr != nil {
-				log.Printf("[pgstore] attempts insert failed uid=%s fp=%s: %v", userID, str(item["fingerprint"]), attErr)
+				logger.Errorf("[pgstore] attempts insert failed uid=%s fp=%s: %v", userID, str(item["fingerprint"]), attErr)
 			}
 			// SM-2: map result to quality (must match SQLite logic in progress.go)
 			res := intV(item["result"])
@@ -353,7 +353,7 @@ func (s *Store) RecordSession(ctx context.Context, session map[string]any, userI
 					quality = int(math.Max(0, math.Min(5, qv)))
 				}
 				if sm2Err := s.updateSM2Tx(ctx, userID, bankID, str(item["fingerprint"]), quality, clientDate); sm2Err != nil {
-					log.Printf("[pgstore] SM-2 update failed uid=%s bank=%d fp=%s: %v", userID, bankID, str(item["fingerprint"]), sm2Err)
+					logger.Errorf("[pgstore] SM-2 update failed uid=%s bank=%d fp=%s: %v", userID, bankID, str(item["fingerprint"]), sm2Err)
 				}
 			}
 		}
@@ -409,7 +409,7 @@ func (s *Store) GetDueFingerprints(ctx context.Context, userID string, bankID in
 		ORDER BY 1`,
 		userID, int64(bankID), today)
 	if err != nil {
-		log.Printf("[pgstore] GetDueFingerprints query failed uid=%s bank=%d: %v", userID, bankID, err)
+		logger.Errorf("[pgstore] GetDueFingerprints query failed uid=%s bank=%d: %v", userID, bankID, err)
 		return nil
 	}
 	defer rows.Close()
@@ -500,7 +500,7 @@ func (s *Store) GetHistory(ctx context.Context, userID string, bankID int, limit
 		var ts, total, correct, wrong, skip, timeSec int64
 		if err := rows.Scan(&e.ID, &e.Mode, &total, &correct, &wrong,
 			&skip, &timeSec, &e.Date, &unitsJSON, &ts); err != nil {
-			log.Printf("[pgstore] GetHistory scan error: %v", err)
+			logger.Errorf("[pgstore] GetHistory scan error: %v", err)
 			continue
 		}
 		e.Total, e.Correct, e.Wrong, e.Skip, e.TimeSec =
@@ -512,7 +512,7 @@ func (s *Store) GetHistory(ctx context.Context, userID string, bankID int, limit
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("[pgstore] GetHistory rows error: %v", err)
+		logger.Errorf("[pgstore] GetHistory rows error: %v", err)
 	}
 	return out
 }
@@ -579,7 +579,7 @@ func (s *Store) GetUnitStats(ctx context.Context, userID string, bankID int) []s
 		var unit string
 		var total, correct, wrong int64
 		if err := rows.Scan(&unit, &total, &correct, &wrong); err != nil {
-			log.Printf("[pgstore] GetUnitStats scan error: %v", err)
+			logger.Errorf("[pgstore] GetUnitStats scan error: %v", err)
 			continue
 		}
 		u := store.UnitStat{
@@ -591,7 +591,7 @@ func (s *Store) GetUnitStats(ctx context.Context, userID string, bankID int) []s
 		out = append(out, u)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("[pgstore] GetUnitStats rows error: %v", err)
+		logger.Errorf("[pgstore] GetUnitStats rows error: %v", err)
 	}
 	return out
 }
@@ -635,7 +635,7 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, bankID 
 		var fp string
 		var total, correct, wrong int64
 		if err := rows.Scan(&fp, &total, &correct, &wrong); err != nil {
-			log.Printf("[pgstore] GetWrongFingerprints scan error: %v", err)
+			logger.Errorf("[pgstore] GetWrongFingerprints scan error: %v", err)
 			continue
 		}
 		e := store.WrongEntry{
@@ -650,7 +650,7 @@ func (s *Store) GetWrongFingerprints(ctx context.Context, userID string, bankID 
 		out = append(out, e)
 	}
 	if err := rows.Err(); err != nil {
-		log.Printf("[pgstore] GetWrongFingerprints rows error: %v", err)
+		logger.Errorf("[pgstore] GetWrongFingerprints rows error: %v", err)
 	}
 	return out
 }

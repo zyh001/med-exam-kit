@@ -1,6 +1,7 @@
 package server
 
 import (
+	"github.com/zyh001/med-exam-kit/internal/logger"
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
@@ -11,7 +12,6 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
-	"log"
 	"math"
 	"math/big"
 	"net"
@@ -219,13 +219,13 @@ func New(cfg Config) *Server {
 	if keys, err := generateVAPIDKeys(); err == nil {
 		s.vapidKeys = keys
 	} else {
-		log.Printf("[push] VAPID 密钥生成失败: %v", err)
+		logger.Errorf("[push] VAPID 密钥生成失败: %v", err)
 	}
 
 	// Initialize AI client if API key is configured
 	if cfg.AIAPIKey != "" || cfg.AIProvider == "ollama" {
 		s.aiClient = ai.NewClient(cfg.AIProvider, cfg.AIAPIKey, cfg.AIBaseURL, cfg.AIModel, 120, cfg.AIEnableThinking)
-		log.Printf("[ai] AI 答疑已启用: provider=%s model=%s", cfg.AIProvider, s.aiClient.Model)
+		logger.Infof("[ai] AI 答疑已启用: provider=%s model=%s", cfg.AIProvider, s.aiClient.Model)
 	}
 
 	s.registerRoutes()
@@ -249,7 +249,7 @@ func (s *Server) ListenAndServe() error {
 
 	errCh := make(chan error, 1)
 	go func() {
-		log.Printf("Server listening on %s", addr)
+		logger.Infof("Server listening on %s", addr)
 		if err := s.httpServer.ListenAndServe(); err != http.ErrServerClosed {
 			errCh <- err
 		}
@@ -271,14 +271,14 @@ func (s *Server) ListenAndServe() error {
 	case err := <-errCh:
 		return err
 	case sig := <-stop:
-		log.Printf("Received signal %v, shutting down...", sig)
+		logger.Infof("Received signal %v, shutting down...", sig)
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := s.httpServer.Shutdown(ctx); err != nil {
-			log.Printf("Shutdown error: %v", err)
+			logger.Errorf("Shutdown error: %v", err)
 		}
 		s.Close()
-		log.Println("Server stopped")
+		logger.Infof("Server stopped")
 	}
 	return nil
 }
@@ -305,7 +305,7 @@ func (s *Server) runUserCleanup() {
 		}
 		users, rows := progress.CleanupStaleUsers(b.DB, days)
 		if users > 0 {
-			log.Printf("[cleanup] bank=%d: removed %d stale users (%d rows) [threshold=%dd]", i, users, rows, days)
+			logger.Warnf("[cleanup] bank=%d: removed %d stale users (%d rows) [threshold=%dd]", i, users, rows, days)
 		}
 	}
 	// 清理 rateBuckets：删除窗口期内无任何请求的 IP 条目，防止长期运行内存无限增长
@@ -347,7 +347,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// ── 扫描器检测：命中可疑路径立即封禁 24h ──────────────────────
 	if s.isScannerPath(r.URL.Path, r.Method) {
 		s.banIP(ip, 24*time.Hour)
-		log.Printf("[ban] scanner detected ip=%s path=%s ua=%s", ip, r.URL.Path, r.UserAgent())
+		logger.Warnf("[ban] scanner detected ip=%s path=%s ua=%s", ip, r.URL.Path, r.UserAgent())
 		wrapped.WriteHeader(http.StatusNotFound)
 		return
 	}
@@ -1498,7 +1498,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		done, skipped := b.PgStore.RecordSessionsBatch(r.Context(), payload.Sessions, uid)
 		failed := computeFailed(payload.Sessions, done, skipped)
 		if len(failed) > 0 {
-			log.Printf("[sync] PG uid=%s bank=%d processed=%d skipped=%d failed=%d",
+			logger.Warnf("[sync] PG uid=%s bank=%d processed=%d skipped=%d failed=%d",
 				uid, b.BankID, len(done), len(skipped), len(failed))
 		}
 		jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped, "failed": failed})
@@ -1506,7 +1506,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	}
 	// SQLite 模式
 	if b.DB == nil {
-		log.Printf("[sync] WARN: b.DB is nil, RecordEnabled=%v", b.RecordEnabled)
+		logger.Warnf("[sync] WARN: b.DB is nil, RecordEnabled=%v", b.RecordEnabled)
 		jsonOK(w, map[string]any{"ok": false, "error": "DB not initialised"})
 		return
 	}
@@ -1516,10 +1516,10 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 		}
 		payload.Sessions[i]["bank_id"] = b.BankID
 	}
-	log.Printf("[sync] uid=%s bank=%d sessions=%d", uid, b.BankID, len(payload.Sessions))
+	logger.Debugf("[sync] uid=%s bank=%d sessions=%d", uid, b.BankID, len(payload.Sessions))
 	done, skipped := progress.RecordSessionsBatch(b.DB, payload.Sessions, uid)
 	failed := computeFailed(payload.Sessions, done, skipped)
-	log.Printf("[sync] done=%v skipped=%v failed=%d", done, skipped, len(failed))
+	logger.Debugf("[sync] uid=%s done=%d skipped=%d failed=%d", uid, len(done), len(skipped), len(failed))
 	jsonOK(w, map[string]any{"ok": true, "processed": done, "skipped": skipped, "failed": failed})
 }
 
@@ -1830,7 +1830,7 @@ func (s *Server) handleFavSync(w http.ResponseWriter, r *http.Request) {
 
 	items, err := fs.SyncFavorites(r.Context(), uid, b.BankID, adds, removes)
 	if err != nil {
-		log.Printf("[fav] SyncFavorites uid=%s bank=%d err=%v", uid, b.BankID, err)
+		logger.Errorf("[fav] SyncFavorites uid=%s bank=%d err=%v", uid, b.BankID, err)
 		jsonError(w, "sync failed", http.StatusInternalServerError)
 		return
 	}
@@ -2941,7 +2941,7 @@ func logRequest(r *http.Request, status int, duration time.Duration) {
 	if strings.HasPrefix(path, "/static/") {
 		path = "/static/..."
 	}
-	log.Printf("%s %s %s %d %v", ip, method, path, status, duration.Round(time.Millisecond))
+	logger.Debugf("%s %s %s %d %v", ip, method, path, status, duration.Round(time.Millisecond))
 }
 
 // ── Push API handlers ────────────────────────────────────────────────────
@@ -2973,7 +2973,7 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	store.add(&body.PushSubscription, body.UID)
-	log.Printf("[push] 新订阅: uid=%s ep=%s…", body.UID, body.Endpoint[:min(40, len(body.Endpoint))])
+	logger.Infof("[push] 新订阅: uid=%s ep=%s…", body.UID, body.Endpoint[:min(40, len(body.Endpoint))])
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(map[string]bool{"ok": true})
 }
@@ -3076,7 +3076,7 @@ func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 			store.remove(sub.Endpoint)
 			removed++
 		} else {
-			log.Printf("[push/test] 失败: %v", err)
+			logger.Errorf("[push/test] 失败: %v", err)
 			failed++
 		}
 	}
@@ -3369,6 +3369,6 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 
 	// 限制代理响应体 20 MB，防止恶意上游打满内存/带宽
 	if _, err := io.Copy(w, io.LimitReader(resp.Body, 20<<20)); err != nil {
-		log.Printf("[img-proxy] copy error for %s: %v", rawURL, err)
+		logger.Errorf("[img-proxy] copy error for %s: %v", rawURL, err)
 	}
 }
