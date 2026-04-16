@@ -2107,7 +2107,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
   if (q.mode) tags.innerHTML += `<span class="q-tag mode-tag">${esc(q.mode)}</span>`;
   // 考试模式不显示章节（防止泄露分组信息），极简模式也不显示（header已有）
   if (q.unit && !isExam && !_zenMode) tags.innerHTML += `<span class="q-tag unit-tag">${esc(q.unit)}</span>`;
-  if (q.rate != null && q.rate !== '' && q.rate !== undefined && !isExam) {
+  if (q.rate != null && q.rate !== '' && q.rate !== undefined && !isExam && !_zenMode) {
     let rateVal = q.rate;
     if (typeof rateVal === 'string') rateVal = parseFloat(rateVal.replace('%',''));
     if (!isNaN(rateVal) && rateVal > 0) {
@@ -2451,7 +2451,7 @@ function buildExplain(q, selected) {
     <span class="result-title ${isCorrect ? 'ok' : 'err'}">${isCorrect ? '回答正确！' : (isMulti ? '答案不完整或有误' : '回答错误')}</span>`;
   inner.appendChild(resultRow);
 
-  if (!isCorrect) {
+  if (!isCorrect || _zenMode) {
     const corrRow = document.createElement('div');
     corrRow.className = 'explain-correct-row';
     if (isMulti) {
