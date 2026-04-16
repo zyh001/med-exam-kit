@@ -5959,15 +5959,30 @@ async function deleteHistoryItem(id, idx) {
 // ════════════════════════════════════════════
 // Theme
 // ════════════════════════════════════════════
+// 状态栏主题色（随应用主题切换）
+const _THEME_COLORS = { dark: '#0d1117', light: '#f0f4f8' };
+function _applyThemeColor(theme) {
+  // 更新 media 版本（system-driven）之外，也直接更新无 media 的 meta
+  // 这样手动切换主题时 Android Chrome 状态栏立即跟随
+  let meta = document.querySelector('meta[name="theme-color"]:not([media])');
+  if (!meta) {
+    meta = document.createElement('meta');
+    meta.name = 'theme-color';
+    document.head.appendChild(meta);
+  }
+  meta.content = _THEME_COLORS[theme] || _THEME_COLORS.dark;
+}
 function toggleTheme() {
   const cur = document.documentElement.getAttribute('data-theme');
   const next = cur === 'dark' ? 'light' : 'dark';
   document.documentElement.setAttribute('data-theme', next);
   localStorage.setItem('quiz-theme', next);
+  _applyThemeColor(next);
 }
 function loadTheme() {
   const t = localStorage.getItem('quiz-theme') || 'dark';
   document.documentElement.setAttribute('data-theme', t);
+  _applyThemeColor(t);
 }
 
 // ════════════════════════════════════════════

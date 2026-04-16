@@ -5,12 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>医考练习</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <meta name="theme-color" content="#0d1117">
+  <!-- 状态栏颜色：随系统主题自动切换 -->
+  <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f0f4f8" media="(prefers-color-scheme: light)">
+  <!-- iOS 灵动岛/刘海：standalone 模式下状态栏半透明叠加，内容从安全区下方开始 -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/static/common.css">
   <link rel="stylesheet" href="/static/quiz.css">
   <!-- SESSION_TOKEN 由服务端注入 -->

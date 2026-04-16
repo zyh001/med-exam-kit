@@ -203,7 +203,7 @@ input,select{font-family:inherit;outline:none}
 
 .home-hero{
   background:linear-gradient(160deg,rgba(68,147,248,.18) 0%,transparent 60%);
-  padding:env(safe-area-inset-top,0) 0 0;
+  padding:env(safe-area-inset-top) 0 0;
 }
 .home-topbar{
   display:flex;align-items:center;justify-content:space-between;
@@ -325,7 +325,7 @@ input,select{font-family:inherit;outline:none}
 #s-config{background:var(--bg)}
 .config-header{
   display:flex;align-items:center;gap:12px;
-  padding:max(env(safe-area-inset-top),16px) 16px 14px;
+  padding:calc(env(safe-area-inset-top) + 12px) 16px 14px;
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
 }
 .back-btn{
@@ -427,7 +427,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 
 .quiz-header{
   display:flex;align-items:center;gap:10px;
-  padding:max(env(safe-area-inset-top),14px) 14px 12px;
+  padding:calc(env(safe-area-inset-top) + 10px) 14px 12px;
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
   position:relative;
 }
@@ -978,7 +978,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 
 .results-header{
   display:flex;align-items:center;gap:12px;
-  padding:max(env(safe-area-inset-top),16px) 20px 14px;
+  padding:calc(env(safe-area-inset-top) + 12px) 20px 14px;
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
 }
 .results-header h2{font-size:17px;font-weight:700}
@@ -1161,7 +1161,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 #s-review{background:var(--bg)}
 .review-header{
   display:flex;align-items:center;gap:12px;
-  padding:max(env(safe-area-inset-top),14px) 16px 12px;
+  padding:calc(env(safe-area-inset-top) + 10px) 16px 12px;
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
 }
 .review-tabs{
@@ -1616,7 +1616,7 @@ button,a,[role=button],label{touch-action:manipulation}
 /* ── 收藏页 ─────────────────────────────────────────────────── */
 .fav-header{
   display:flex;align-items:center;gap:10px;
-  padding:max(env(safe-area-inset-top),14px) 16px 12px;
+  padding:calc(env(safe-area-inset-top) + 10px) 16px 12px;
   background:var(--surface);border-bottom:1px solid var(--border);
 }
 .fav-header-center{flex:1;text-align:center}
