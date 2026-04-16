@@ -924,6 +924,7 @@ async function selectBankAndEnter(idx) {
 
     await loadBankAndRenderHome();
     showScreen('s-home');
+    _favLoadFromServer();  // 静默拉取服务端收藏，合并到本地（不阻塞主流程）
 
     // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
     // 锁定模式下跳过：防止分享接收者看到与他无关的历史存档
@@ -2106,7 +2107,7 @@ function _fillQ(wrap, q, isExam, isPractice) {
   if (q.mode) tags.innerHTML += `<span class="q-tag mode-tag">${esc(q.mode)}</span>`;
   // 考试模式不显示章节（防止泄露分组信息），极简模式也不显示（header已有）
   if (q.unit && !isExam && !_zenMode) tags.innerHTML += `<span class="q-tag unit-tag">${esc(q.unit)}</span>`;
-  if (q.rate != null && q.rate !== '' && q.rate !== undefined && !isExam) {
+  if (q.rate != null && q.rate !== '' && q.rate !== undefined && !isExam && !_zenMode) {
     let rateVal = q.rate;
     if (typeof rateVal === 'string') rateVal = parseFloat(rateVal.replace('%',''));
     if (!isNaN(rateVal) && rateVal > 0) {
@@ -2205,7 +2206,13 @@ function _fillQ(wrap, q, isExam, isPractice) {
     }
     // 剥离选项文本里可能自带的字母前缀（"A." "A、" "A．" 等），避免字母重复显示
     const cleanOpt = opt.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
-    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>`;
+    // 极简模式 + 已揭示 + 正确选项：在右侧显示正确率
+    let rateHtml = '';
+    if (_zenMode && isRevealed && correctSet.has(letter) && q.rate != null && q.rate !== '') {
+      let rv = typeof q.rate === 'string' ? parseFloat(q.rate.replace('%', '')) : q.rate;
+      if (!isNaN(rv) && rv > 0) rateHtml = `<span class="zen-opt-rate">${rv.toFixed(1)}%</span>`;
+    }
+    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>${rateHtml}`;
     opts.appendChild(btn);
   });
   wrap.appendChild(opts);
@@ -2312,12 +2319,12 @@ function selectOpt(letter, btn) {
       savePracticeSession();
       const answeredIdx = S.cur;
       if (_zenMode) {
-        // 极简模式：直接渲染结果，无闪动
+        // 极简模式：renderQ('none') 更新颜色并展示解析（isRevealed=true 时自动渲染）
         setTimeout(() => {
           if (S.cur !== answeredIdx) return;
-          renderQ('none');  // 更新选项颜色（字母圈绿/红）
+          renderQ('none');
           if (isCorrectAns) {
-            // 答对：250ms 后自动切下一题（快速）
+            // 答对：250ms 后自动切下一题
             _autoAdvanceTimer = setTimeout(() => {
               _autoAdvanceTimer = null;
               if (S.cur !== answeredIdx) return;
@@ -2325,8 +2332,13 @@ function selectOpt(letter, btn) {
               if (S.cur < total - 1) { S.cur++; renderQ('forward'); savePracticeSession(); }
               else finishPractice();
             }, 250);
+          } else {
+            // 答错：停留，滚到解析，等用户手动翻页
+            setTimeout(() => {
+              const explain = document.getElementById('explain-panel');
+              if (explain) explain.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+            }, 80);
           }
-          // 答错：停留，用户自行左右滑动切题
         }, 130);
       } else {
         // 普通练习模式
@@ -2439,7 +2451,7 @@ function buildExplain(q, selected) {
     <span class="result-title ${isCorrect ? 'ok' : 'err'}">${isCorrect ? '回答正确！' : (isMulti ? '答案不完整或有误' : '回答错误')}</span>`;
   inner.appendChild(resultRow);
 
-  if (!isCorrect) {
+  if (!isCorrect || _zenMode) {
     const corrRow = document.createElement('div');
     corrRow.className = 'explain-correct-row';
     if (isMulti) {
@@ -2699,9 +2711,15 @@ function toggleFavorite() {
     _deleteFavQuestion(fp);
   }
   _saveFavorites(favs);
+  const ts = adding ? Date.now() : 0;
   _recordFavTimestamp(fp, adding);  // 记录收藏时间戳
   refreshFavBadge();                // 刷新主页徽章
   _updateFlagBtn();
+  // 异步同步到服务端（静默，失败不影响本地体验）
+  { const [rawFp, rawSi] = fp.split(':');
+    const siNum = parseInt(rawSi || '0', 10);
+    if (adding) _favServerSync([{ fp: rawFp, si: siNum, ts }], []);
+    else        _favServerSync([], [{ fp: rawFp, si: siNum }]); }
   // 果冻动画
   const btn = document.getElementById('flag-btn');
   if (btn) {
@@ -4627,6 +4645,59 @@ function _recordFavTimestamp(fp, adding) {
   _saveFavTs(ts);
 }
 
+/**
+ * 向服务端同步收藏变更并把返回的服务端全量合并到本地。
+ * adds:    [{fp, si, ts}]  新增
+ * removes: [{fp, si}]      删除
+ * 失败静默 —— 离线时不影响本地操作，下次进入题库时 _favLoadFromServer 会补齐。
+ */
+async function _favServerSync(adds = [], removes = []) {
+  try {
+    const res = await apiFetch('/api/favorites/sync?' + bankQS(), {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ adds, removes }),
+    }).then(r => r.json());
+    if (!res.ok || !Array.isArray(res.items)) return;
+    _favMergeFromServer(res.items);
+  } catch(_) { /* 离线 / 服务端不支持，静默降级 */ }
+}
+
+/**
+ * 进入题库时从服务端拉取全量收藏（发空 adds/removes，仅请求下行数据）。
+ * 不 await，不阻塞主流程。
+ */
+function _favLoadFromServer() {
+  _favServerSync([], []).catch(() => {});
+}
+
+/**
+ * 把服务端返回的 items 合并进本地 localStorage。
+ * 策略：服务端有但本地没有的 → 加进来；本地有服务端没有的 → 保持（下次 push 会同步过去）。
+ * added_at 更大的胜出（last-write-wins）。
+ */
+function _favMergeFromServer(items) {
+  if (!items.length) return;
+  const favs  = _loadFavorites();
+  const favTs = _loadFavTs();
+  let changed = false;
+  for (const item of items) {
+    const key    = item.fp + ':' + item.si;
+    const srvTs  = item.added_at || 0;
+    const localTs = favTs[key] || 0;
+    if (!favs.has(key) || srvTs > localTs) {
+      favs.add(key);
+      favTs[key] = srvTs;
+      changed = true;
+    }
+  }
+  if (changed) {
+    _saveFavorites(favs);
+    _saveFavTs(favTs);
+    refreshFavBadge();
+  }
+}
+
 /** 更新主页收藏徽章 */
 function refreshFavBadge() {
   const cnt = _loadFavorites().size;
@@ -4667,7 +4738,6 @@ async function _renderWrongBookScreen() {
 
     if (cntAll) cntAll.textContent = allItems.length;
 
-    // 按 unit 分组
     const unitMap = {};
     allItems.forEach(it => {
       const unit = it.unit || '未分类';
@@ -4675,26 +4745,173 @@ async function _renderWrongBookScreen() {
       unitMap[unit]++;
     });
 
-    if (listEl) {
-      listEl.innerHTML = Object.entries(unitMap).map(([unit, cnt]) =>
-        `<div class="fav-unit-row" data-unit="${esc(unit)}">
-          <div class="fav-unit-left">
-            <div class="fav-unit-name">${esc(unit)}</div>
-            <div class="fav-unit-count">${cnt} 题</div>
-          </div>
-          <span class="fav-unit-chevron">›</span>
-        </div>`
-      ).join('');
-
-      listEl.onclick = function(e) {
-        const row = e.target.closest('.fav-unit-row');
-        if (!row || !row.dataset.unit) return;
-        startWrongBookReview(row.dataset.unit, allItems);
-      };
-    }
+    _wbAllItems = allItems;
+    _wbUnitEntries = Object.entries(unitMap);
+    _wbMultiMode = false;
+    _wbSelected = new Set();
+    _renderWbList();
   } catch(e) {
     if (listEl) listEl.innerHTML = '<div style="padding:16px;color:var(--danger);font-size:13px">⚠ 加载失败</div>';
   }
+}
+
+// ── 单元列表：长按多选 + 左滑删除（错题/收藏共用）────────────────
+function _bindUnitListInteraction(listEl, type) {
+  const LONG_MS = 450;
+  const SWIPE_THRESHOLD = 60;
+
+  listEl.querySelectorAll('.fav-unit-wrap').forEach(wrap => {
+    const row = wrap.querySelector('.fav-unit-row');
+    const delBtn = wrap.querySelector('.fav-unit-del');
+    const unit = wrap.dataset.unit;
+    if (!row || !unit) return;
+
+    // ── 长按进入多选 ────────────────────────────────────────────
+    let longTimer = null, longFired = false;
+    let touchStartX = 0, touchStartY = 0, touchMoved = false;
+
+    function startLong() {
+      longFired = false; touchMoved = false;
+      longTimer = setTimeout(() => {
+        longFired = true;
+        if (type === 'wb') { _wbMultiMode = true; _wbSelected.add(unit); _renderWbList(); }
+        else               { _favMultiMode = true; _favSelected.add(unit); _renderFavList(); }
+        vibrate && vibrate(18);
+      }, LONG_MS);
+    }
+    function cancelLong() { clearTimeout(longTimer); longTimer = null; }
+
+    row.addEventListener('mousedown', startLong);
+    row.addEventListener('touchstart', e => {
+      touchStartX = e.touches[0].clientX;
+      touchStartY = e.touches[0].clientY;
+      startLong();
+    }, { passive: true });
+    row.addEventListener('mouseup', cancelLong);
+    row.addEventListener('mouseleave', cancelLong);
+    row.addEventListener('touchend', cancelLong, { passive: true });
+    row.addEventListener('touchcancel', cancelLong, { passive: true });
+    row.addEventListener('touchmove', e => {
+      const dx = Math.abs(e.touches[0].clientX - touchStartX);
+      const dy = Math.abs(e.touches[0].clientY - touchStartY);
+      if (dx > 8 || dy > 8) { touchMoved = true; cancelLong(); }
+    }, { passive: true });
+
+    // ── 点击 ────────────────────────────────────────────────────
+    row.addEventListener('click', e => {
+      if (longFired) { longFired = false; return; }
+      if (touchMoved) return;
+      if (type === 'wb') {
+        if (_wbMultiMode) {
+          if (_wbSelected.has(unit)) _wbSelected.delete(unit); else _wbSelected.add(unit);
+          _renderWbList();
+        } else {
+          // close any swiped row first
+          _closeAllSwiped(listEl);
+          startWrongBookReview(unit, _wbAllItems);
+        }
+      } else {
+        if (_favMultiMode) {
+          if (_favSelected.has(unit)) _favSelected.delete(unit); else _favSelected.add(unit);
+          _renderFavList();
+        } else {
+          _closeAllSwiped(listEl);
+          startFavoritesQuiz('unit', unit);
+        }
+      }
+    });
+
+    // ── 左滑露出删除按钮 ─────────────────────────────────────────
+    if (delBtn) {
+      let tx = 0, ty = 0, swiping = false, swipeLocked = null;
+      wrap.addEventListener('touchstart', e => {
+        tx = e.touches[0].clientX; ty = e.touches[0].clientY;
+        swiping = false; swipeLocked = null;
+      }, { passive: true });
+      wrap.addEventListener('touchmove', e => {
+        if (row.classList.contains('fav-unit-row-disabled')) return;
+        const dx = e.touches[0].clientX - tx;
+        const dy = e.touches[0].clientY - ty;
+        if (!swipeLocked) swipeLocked = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+        if (swipeLocked !== 'h') return;
+        e.preventDefault();
+        swiping = true;
+        const move = Math.max(-80, Math.min(0, dx));
+        row.style.transform = `translateX(${move}px)`;
+        row.style.transition = 'none';
+      }, { passive: false });
+      wrap.addEventListener('touchend', () => {
+        if (!swiping) return;
+        row.style.transition = '';
+        const cur = parseInt(row.style.transform.replace('translateX(','')) || 0;
+        if (cur < -SWIPE_THRESHOLD) {
+          row.style.transform = 'translateX(-80px)';
+          _closeAllSwiped(listEl, row);  // close others
+        } else {
+          row.style.transform = '';
+        }
+      }, { passive: true });
+
+      // 删除按钮点击
+      delBtn.addEventListener('click', () => {
+        if (type === 'wb') _wbDeleteUnit(unit);
+        else               _favDeleteUnit(unit);
+      });
+    }
+  });
+}
+
+function _closeAllSwiped(listEl, except) {
+  listEl.querySelectorAll('.fav-unit-row.swiped-open, .fav-unit-row[style*="translateX"]').forEach(r => {
+    if (r !== except) r.style.transform = '';
+  });
+}
+
+// ── 错题练习多选状态 ──────────────────────────────────────────────
+var _wbAllItems = [], _wbUnitEntries = [], _wbMultiMode = false, _wbSelected = new Set();
+
+function _renderWbList() {
+  const listEl  = document.getElementById('wb-unit-list');
+  const multibar = document.getElementById('wb-multibar');
+  const selCount = document.getElementById('wb-sel-count');
+  if (!listEl) return;
+  if (multibar) multibar.style.display = _wbMultiMode ? '' : 'none';
+  if (selCount) selCount.textContent = _wbSelected.size;
+
+  listEl.innerHTML = _wbUnitEntries.map(([unit, cnt]) => `
+    <div class="fav-unit-wrap" data-unit="${esc(unit)}">
+      <div class="fav-unit-del" data-unit="${esc(unit)}">删除</div>
+      <div class="fav-unit-row${_wbMultiMode && _wbSelected.has(unit) ? ' selected' : ''}" data-unit="${esc(unit)}">
+        ${_wbMultiMode ? '<div class="fav-unit-check">✓</div>' : ''}
+        <div class="fav-unit-left">
+          <div class="fav-unit-name">${esc(unit)}</div>
+          <div class="fav-unit-count">${cnt} 题</div>
+        </div>
+        ${_wbMultiMode ? '' : '<span class="fav-unit-chevron">›</span>'}
+      </div>
+    </div>`).join('');
+
+  _bindUnitListInteraction(listEl, 'wb');
+}
+
+function _wbCancelMulti() {
+  _wbMultiMode = false; _wbSelected.clear(); _renderWbList();
+}
+function _wbStartMulti() {
+  if (!_wbSelected.size) return;
+  startWrongBookReview([..._wbSelected], _wbAllItems);
+  _wbCancelMulti();
+}
+function _wbDeleteUnit(unit) {
+  if (!confirm(`确认删除「${unit}」的所有错题记录？`)) return;
+  // 本地暂时移除（服务端无批量删除接口，刷新后会恢复；后续可扩展 API）
+  _wbUnitEntries = _wbUnitEntries.filter(([u]) => u !== unit);
+  _wbAllItems = _wbAllItems.filter(it => (it.unit || '未分类') !== unit);
+  _wbSelected.delete(unit);
+  const cntAll = document.getElementById('wb-cnt-all');
+  if (cntAll) cntAll.textContent = _wbAllItems.length;
+  _renderWbList();
+  toast('已从列表移除（刷新后恢复）');
 }
 
 function openFavorites() {
@@ -4745,25 +4962,78 @@ function _renderFavoritesScreen() {
   const uncached = favs.size - validFavs.length;
   if (uncached > 0) unitMap['（需重新收藏以恢复）'] = [];
 
-  listEl.innerHTML = Object.entries(unitMap).map(([unit, fps]) => {
+  _favUnitMap = unitMap;
+  _favMultiMode = false;
+  _favSelected = new Set();
+  _renderFavList();
+}
+
+// ── 收藏多选状态 ────────────────────────────────────────────────────
+var _favUnitMap = {}, _favMultiMode = false, _favSelected = new Set();
+
+function _renderFavList() {
+  const listEl   = document.getElementById('fav-unit-list');
+  const multibar = document.getElementById('fav-multibar');
+  const selCount = document.getElementById('fav-sel-count');
+  if (!listEl) return;
+  if (multibar) multibar.style.display = _favMultiMode ? '' : 'none';
+  if (selCount) selCount.textContent = _favSelected.size;
+
+  listEl.innerHTML = Object.entries(_favUnitMap).map(([unit, fps]) => {
     const disabled = fps.length === 0;
-    // 用 data-unit 属性存储章节名，避免 onclick 内引号冲突导致点击无效
-    return `<div class="fav-unit-row${disabled ? ' fav-unit-row-disabled' : ''}"
-      ${disabled ? '' : `data-unit="${esc(unit)}"`}>
-      <div class="fav-unit-left">
-        <div class="fav-unit-name">${esc(unit)}</div>
-        <div class="fav-unit-count">${fps.length} 题${disabled ? '　需重新收藏' : ''}</div>
-      </div>
-      ${disabled ? '' : '<span class="fav-unit-chevron">›</span>'}
-    </div>`;
+    if (disabled) return `
+      <div class="fav-unit-wrap">
+        <div class="fav-unit-row fav-unit-row-disabled">
+          <div class="fav-unit-left">
+            <div class="fav-unit-name">${esc(unit)}</div>
+            <div class="fav-unit-count">需重新收藏</div>
+          </div>
+        </div>
+      </div>`;
+    return `
+      <div class="fav-unit-wrap" data-unit="${esc(unit)}">
+        <div class="fav-unit-del" data-unit="${esc(unit)}">删除</div>
+        <div class="fav-unit-row${_favMultiMode && _favSelected.has(unit) ? ' selected' : ''}" data-unit="${esc(unit)}">
+          ${_favMultiMode ? '<div class="fav-unit-check">✓</div>' : ''}
+          <div class="fav-unit-left">
+            <div class="fav-unit-name">${esc(unit)}</div>
+            <div class="fav-unit-count">${fps.length} 题</div>
+          </div>
+          ${_favMultiMode ? '' : '<span class="fav-unit-chevron">›</span>'}
+        </div>
+      </div>`;
   }).join('');
 
-  // 事件委托：点击整行触发刷题
-  listEl.onclick = function(e) {
-    const row = e.target.closest('.fav-unit-row:not(.fav-unit-row-disabled)');
-    if (!row || !row.dataset.unit) return;
-    startFavoritesQuiz('unit', row.dataset.unit);
-  };
+  _bindUnitListInteraction(listEl, 'fav');
+}
+
+function _favCancelMulti() {
+  _favMultiMode = false; _favSelected.clear(); _renderFavList();
+}
+function _favStartMulti() {
+  if (!_favSelected.size) return;
+  startFavoritesQuiz('units', [..._favSelected]);
+  _favCancelMulti();
+}
+function _favDeleteUnit(unit) {
+  if (!confirm(`确认删除「${unit}」的全部收藏？`)) return;
+  const fps = _favUnitMap[unit] || [];
+  const favs = _loadFavorites();
+  const favData = _loadFavData();
+  const favTs = _loadFavTs();
+  fps.forEach(fp => { favs.delete(fp); delete favData[fp]; delete favTs[fp]; });
+  _saveFavorites(favs); localStorage.setItem(FAV_DATA_KEY, JSON.stringify(favData)); _saveFavTs(favTs);
+  // 同步到服务端
+  const removes = fps.map(fp => { const [f,s]=fp.split(':'); return {fp:f,si:parseInt(s||'0',10)}; });
+  if (removes.length) _favServerSync([], removes).catch(()=>{});
+  delete _favUnitMap[unit];
+  _favSelected.delete(unit);
+  refreshFavBadge();
+  _renderFavList();
+  // 更新顶部计数
+  const total = Object.values(_favUnitMap).reduce((s,a)=>s+a.length,0);
+  const el = document.getElementById('fav-cnt-all'); if(el) el.textContent = total;
+  toast('已删除该章节的收藏');
 }
 
 /** 开始做收藏题目（使用本地缓存数据，不依赖 S.questions） */
@@ -4783,6 +5053,10 @@ function startFavoritesQuiz(filter, unitName) {
     fps = fps.filter(fp => { const ts = favTs[fp]||0; return ts >= yestStart.getTime() && ts < todayStart.getTime(); });
   } else if (filter === 'unit' && unitName) {
     fps = fps.filter(fp => favData[fp] && favData[fp].unit === unitName);
+  } else if (filter === 'units' && Array.isArray(unitName)) {
+    // 多选章节
+    const unitSet = new Set(unitName);
+    fps = fps.filter(fp => favData[fp] && unitSet.has(favData[fp].unit));
   }
 
   if (fps.length === 0) { toast('该范围暂无可做的收藏题目'); return; }
@@ -4812,6 +5086,12 @@ function startFavoritesQuiz(filter, unitName) {
 /** 清空所有收藏 */
 function confirmClearFavorites() {
   if (!confirm(`确认清空全部 ${_loadFavorites().size} 道收藏题目？`)) return;
+  // 先收集待删除列表，再清除本地
+  const favs = _loadFavorites();
+  const removes = [...favs].map(key => {
+    const [fp, si] = key.split(':');
+    return { fp, si: parseInt(si || '0', 10) };
+  });
   try {
     localStorage.removeItem(FAV_KEY);
     localStorage.removeItem(FAV_TS_KEY);
@@ -4820,6 +5100,8 @@ function confirmClearFavorites() {
   refreshFavBadge();
   _renderFavoritesScreen();
   toast('已清空收藏');
+  // 同步删除到服务端
+  if (removes.length) _favServerSync([], removes).catch(() => {});
 }
 
 

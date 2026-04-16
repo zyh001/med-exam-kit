@@ -442,7 +442,6 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen #quiz-timer,
 .s-quiz-zen #quiz-footer,
 .s-quiz-zen .q-grid-panel,
-.s-quiz-zen .explain-panel,
 .s-quiz-zen .q-tag-row,
 .s-quiz-zen .q-type-tag{display:none !important}
 
@@ -500,8 +499,44 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen .opts-list{gap:0}
 /* 极简模式：题目body里的章节标签不显示（header已显示） */
 .s-quiz-zen .unit-tag{display:none}
+/* 极简模式题号：去掉蓝色背景，改为纯文字序号 */
+.s-quiz-zen .q-num{
+  background:transparent;color:var(--muted);
+  border-radius:0;font-size:13px;font-weight:700;
+  width:auto;height:auto;margin-right:4px;
+}
+/* ── 极简模式解析面板 ── */
+/* 隐藏：答对/答错横幅、动作栏、考点、AI入口、shared_opts展示 */
+.s-quiz-zen .explain-result,
+.s-quiz-zen .explain-actions,
+.s-quiz-zen .explain-point,
+.s-quiz-zen .ai-entry-btn,
+.s-quiz-zen .explain-shared-opts{display:none !important}
+/* 去掉 inner 卡片的边框和背景 */
+.s-quiz-zen .explain-inner{
+  background:transparent;border:none;border-radius:0;margin-bottom:0;
+}
+/* 答案行：简洁一行，无背景无边框 */
+.s-quiz-zen .explain-correct-row{
+  padding:10px 0 4px;border-bottom:none;background:transparent;
+  font-size:13px;font-weight:600;color:var(--muted);
+}
+.s-quiz-zen .explain-correct-row span{color:var(--success);font-weight:700}
+/* 解析正文：小字灰色，无内边距 padding-top */
+.s-quiz-zen .explain-body{
+  padding:4px 0 12px;font-size:13px;color:var(--muted);line-height:1.75;
+}
+/* 去掉外层 panel 的动画（答错时直接显示，不需要过渡） */
+.s-quiz-zen .explain-panel{
+  max-height:none;opacity:1;overflow:visible;transition:none;
+}
 
 /* 答对/答错无背景闪动，已删除 flash 动画类 */
+.zen-opt-rate{
+  margin-left:auto;font-size:12px;font-weight:700;
+  color:var(--success);opacity:.85;white-space:nowrap;flex-shrink:0;
+}
+
 .zen-mode-hint{
   position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
   background:rgba(0,0,0,.72);color:#fff;padding:10px 22px;
@@ -634,7 +669,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .q-shared-opts.is-collapsed .q-shared-opts-content{max-height:0!important;opacity:0}
 .q-shared-opts:not(.is-collapsed) .q-shared-opts-content{max-height:none;opacity:1}
 .q-shared-opts-content{overflow:hidden;transition:max-height .3s ease,opacity .25s}
-.q-shared-opts.is-collapsed{background:var(--card);border-style:dashed;opacity:.75}
+.q-shared-opts.is-collapsed{background:transparent;border-color:transparent;opacity:.6}
 .q-shared-opts.is-collapsed .q-shared-opts-label{color:var(--muted)}
 .q-shared-opt-row{
   display:flex;align-items:flex-start;gap:8px;
@@ -1219,7 +1254,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .q-stem.q-stem-collapsible:not(.is-collapsed) .q-stem-content{max-height:none;opacity:1}
 .stem-toggle-hint{font-size:10px;margin-left:6px;opacity:.65;font-weight:400}
 /* 折叠后 header 变淡 */
-.q-stem.q-stem-collapsible.is-collapsed{background:var(--card);border-style:dashed;opacity:.75}
+.q-stem.q-stem-collapsible.is-collapsed{background:transparent;border-color:transparent;opacity:.6}
 .q-stem.q-stem-collapsible.is-collapsed .q-stem-label{color:var(--muted)}
 /* 多选题标记 */
 .multi-badge{
@@ -1606,22 +1641,82 @@ button,a,[role=button],label{touch-action:manipulation}
 .fav-arrow{color:var(--accent);font-size:13px}
 .fav-stat-divider{width:1px;height:36px;background:var(--border)}
 
-.fav-unit-list{padding:0 16px 32px}
+.fav-unit-list{
+  padding:0 16px;
+  overflow-y:auto;
+  /* 最多占屏幕 60% 高度，超出时可滚动 */
+  max-height:calc(100dvh - 280px);
+  /* 底部留出多选栏高度（默认隐藏时也预留，避免抖动）*/
+  padding-bottom:80px;
+}
+
+/* ── 单元行容器：支持左滑 ── */
+.fav-unit-wrap{
+  position:relative;overflow:hidden;
+  /* 行高撑开 */
+  border-bottom:1px solid var(--border);
+}
+.fav-unit-wrap:last-child{border-bottom:none}
+
+/* 左滑露出的删除按钮 */
+.fav-unit-del{
+  position:absolute;top:0;right:0;bottom:0;
+  width:80px;background:var(--danger);
+  display:flex;align-items:center;justify-content:center;
+  color:#fff;font-size:13px;font-weight:700;cursor:pointer;
+  flex-shrink:0;user-select:none;
+}
+
 .fav-unit-row{
   display:flex;align-items:center;justify-content:space-between;
-  padding:14px 0;border-bottom:1px solid var(--border);
-  cursor:pointer;transition:background .12s;margin:0 -16px;padding-left:16px;padding-right:16px;
+  padding:14px 0;
+  cursor:pointer;
+  transition:background .12s, transform .22s cubic-bezier(.25,.46,.45,.94);
+  margin:0 -16px;padding-left:16px;padding-right:16px;
   -webkit-tap-highlight-color:transparent;
+  background:var(--bg);position:relative;z-index:1;
 }
-.fav-unit-row:last-child{border-bottom:none}
 .fav-unit-row:hover{background:var(--card)}
 .fav-unit-row:active{background:var(--border)}
+.fav-unit-row.swiped-open{transform:translateX(-80px)}
 .fav-unit-row-disabled{cursor:default;opacity:.55}
 .fav-unit-row-disabled:hover,.fav-unit-row-disabled:active{background:transparent}
 .fav-unit-left{flex:1;min-width:0}
 .fav-unit-name{font-size:15px;font-weight:600;color:var(--text);margin-bottom:2px}
 .fav-unit-count{font-size:12px;color:var(--muted)}
 .fav-unit-chevron{font-size:18px;color:var(--muted);font-weight:300;flex-shrink:0;margin-left:8px}
+
+/* 多选模式：复选框 */
+.fav-unit-check{
+  width:22px;height:22px;border-radius:50%;
+  border:2px solid var(--border);background:var(--card);
+  display:flex;align-items:center;justify-content:center;
+  flex-shrink:0;margin-right:12px;transition:all .15s;
+  font-size:13px;color:transparent;
+}
+.fav-unit-row.selected .fav-unit-check{
+  background:var(--accent);border-color:var(--accent);color:#fff;
+}
+
+/* 多选底栏 */
+.unit-multibar{
+  position:fixed;bottom:0;left:0;right:0;
+  display:flex;align-items:center;gap:10px;
+  padding:12px 16px max(env(safe-area-inset-bottom),12px);
+  background:var(--surface);border-top:1px solid var(--border);
+  box-shadow:0 -4px 20px rgba(0,0,0,.08);z-index:100;
+}
+.unit-multibar-cancel{
+  padding:10px 18px;border-radius:10px;font-size:14px;font-weight:600;
+  background:var(--card);border:1px solid var(--border);color:var(--text);
+  flex-shrink:0;
+}
+.unit-multibar-start{
+  flex:1;padding:10px 18px;border-radius:10px;font-size:14px;font-weight:700;
+  background:linear-gradient(135deg,var(--accent),#6177f9);
+  border:none;color:#fff;
+}
+.unit-multibar-start:disabled{background:var(--border);opacity:.5}
 
 .fav-empty{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
