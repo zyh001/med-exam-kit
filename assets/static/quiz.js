@@ -2206,7 +2206,13 @@ function _fillQ(wrap, q, isExam, isPractice) {
     }
     // 剥离选项文本里可能自带的字母前缀（"A." "A、" "A．" 等），避免字母重复显示
     const cleanOpt = opt.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u, '').trim();
-    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>`;
+    // 极简模式 + 已揭示 + 正确选项：在右侧显示正确率
+    let rateHtml = '';
+    if (_zenMode && isRevealed && correctSet.has(letter) && q.rate != null && q.rate !== '') {
+      let rv = typeof q.rate === 'string' ? parseFloat(q.rate.replace('%', '')) : q.rate;
+      if (!isNaN(rv) && rv > 0) rateHtml = `<span class="zen-opt-rate">${rv.toFixed(1)}%</span>`;
+    }
+    btn.innerHTML = `<span class="opt-label">${letter}</span><span class="opt-text">${esc(cleanOpt)}</span>${rateHtml}`;
     opts.appendChild(btn);
   });
   wrap.appendChild(opts);

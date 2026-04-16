@@ -501,6 +501,11 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen .unit-tag{display:none}
 
 /* 答对/答错无背景闪动，已删除 flash 动画类 */
+.zen-opt-rate{
+  margin-left:auto;font-size:12px;font-weight:700;
+  color:var(--success);opacity:.85;white-space:nowrap;flex-shrink:0;
+}
+
 .zen-mode-hint{
   position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);
   background:rgba(0,0,0,.72);color:#fff;padding:10px 22px;
