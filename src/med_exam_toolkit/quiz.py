@@ -70,6 +70,63 @@ _RATE_WINDOW = 60
 _rate_buckets: dict[str, deque] = defaultdict(deque)
 _rate_lock   = threading.Lock()
 
+# ── 扫描器封禁 ──
+_scan_bans: dict[str, float] = {}   # ip -> 解封时间戳（0=永久）
+_scan_lock = threading.Lock()
+
+_SCANNER_PREFIXES = (
+    "/wp-", "/wordpress", "/xmlrpc", "/wp-admin", "/wp-login",
+    "/phpmyadmin", "/pma", "/myadmin",
+    "/.env", "/.git", "/.svn", "/.htaccess",
+    "/admin", "/administrator",
+    "/cgi-bin", "/cgi/",
+    "/shell", "/cmd", "/exec",
+    "/boaform", "/boa/",
+    "/solr", "/actuator", "/jolokia",
+    "/telescope", "/vendor/",
+    "/config", "/setup",
+    "/invoke.js",
+    "/dana-na/", "/dana-cached/",
+    "/remote/fgt", "/remote/login",
+    "/Autodiscover", "/autodiscover",
+    "/owa/", "/ecp/",
+    "/.aws",
+    "/etc/passwd",
+    "/proc/",
+)
+_SCANNER_SUFFIXES = (
+    ".php", ".asp", ".aspx", ".jsp", ".cgi",
+    ".bak", ".sql", ".tar", ".gz", ".zip",
+    ".pem", ".key", ".crt", ".p12",
+    ".DS_Store",
+)
+
+def _is_scanner_path(path: str) -> bool:
+    p = path.lower()
+    for prefix in _SCANNER_PREFIXES:
+        if p.startswith(prefix.lower()):
+            return True
+    for suffix in _SCANNER_SUFFIXES:
+        if p.endswith(suffix):
+            return True
+    return False
+
+def _ban_ip(ip: str, duration: float = 86400.0) -> None:
+    with _scan_lock:
+        _scan_bans[ip] = time.monotonic() + duration if duration > 0 else 0.0
+
+def _is_banned(ip: str) -> bool:
+    with _scan_lock:
+        until = _scan_bans.get(ip)
+        if until is None:
+            return False
+        if until == 0.0:  # 永久
+            return True
+        if time.monotonic() < until:
+            return True
+        del _scan_bans[ip]
+        return False
+
 # ── 考试防作弊：sealed 模式答案暂存 ──
 _exam_sessions: dict[str, dict] = {}   # exam_id -> {"fingerprint:si": {answer, discuss}, ts}
 _exam_lock = threading.Lock()
@@ -175,9 +232,22 @@ def _create_app():
         from med_exam_toolkit.auth import is_authenticated, render_pin_page
         from flask import Response
 
+        ip = _get_real_ip()
+
+        # ── 扫描器检测：命中可疑路径立即封禁 24h ──
+        if _is_scanner_path(request.path):
+            _ban_ip(ip, 86400.0)
+            import logging
+            logging.getLogger("med_exam").warning("[ban] scanner ip=%s path=%s ua=%s",
+                ip, request.path, request.headers.get("User-Agent", ""))
+            return Response("Not Found", status=404)
+
+        # ── 封禁检查 ──
+        if _is_banned(ip):
+            return Response("Forbidden", status=403)
+
         if request.path == "/auth" and request.method == "POST":
             if _pin_enabled:
-                ip = _get_real_ip()
                 from med_exam_toolkit.auth import check_brute_force
                 allowed, retry_after = check_brute_force(ip)
                 if not allowed:
@@ -224,7 +294,7 @@ def _create_app():
         if _pin_enabled and not _pwa_public and not is_authenticated(_cookie_secret, _access_code):
             if request.path == "/" and request.method == "GET":
                 from med_exam_toolkit.auth import needs_captcha, new_captcha
-                tok, svg = (new_captcha() if needs_captcha(ip := _get_real_ip()) else ("", ""))
+                tok, svg = (new_captcha() if needs_captcha(ip) else ("", ""))
                 return Response(render_pin_page("医考练习", pin_len=_pin_len,
                                                captcha_token=tok, captcha_svg=svg),
                                 mimetype="text/html")
@@ -237,7 +307,6 @@ def _create_app():
             token = request.headers.get("X-Session-Token", "") or request.args.get("token", "")
             if not secrets.compare_digest(token, _session_token):
                 return jsonify({"error": "Unauthorized"}), 401
-            ip = _get_real_ip()
             if not _check_rate_limit(ip):
                 return jsonify({"error": "Too Many Requests"}), 429
 
