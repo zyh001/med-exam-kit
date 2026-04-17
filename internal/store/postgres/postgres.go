@@ -248,7 +248,9 @@ func (s *Store) ImportBank(ctx context.Context, name, source string, questions [
 	}
 
 	// Delete existing questions for this bank
-	tx.Exec(ctx, `DELETE FROM questions WHERE bank_id=$1`, bankID)
+	if _, err := tx.Exec(ctx, `DELETE FROM questions WHERE bank_id=$1`, bankID); err != nil {
+		return 0, fmt.Errorf("delete old questions: %w", err)
+	}
 
 	// Batch-insert questions + sub-questions
 	for _, q := range questions {
@@ -256,7 +258,13 @@ func (s *Store) ImportBank(ctx context.Context, name, source string, questions [
 		var qid int64
 		err = tx.QueryRow(ctx, `
 			INSERT INTO questions(bank_id,fingerprint,name,pkg,cls,unit,mode,stem,shared_opts,discuss,source_file)
-			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			ON CONFLICT(bank_id,fingerprint) DO UPDATE SET
+			  name=EXCLUDED.name, pkg=EXCLUDED.pkg, cls=EXCLUDED.cls,
+			  unit=EXCLUDED.unit, mode=EXCLUDED.mode, stem=EXCLUDED.stem,
+			  shared_opts=EXCLUDED.shared_opts, discuss=EXCLUDED.discuss,
+			  source_file=EXCLUDED.source_file
+			RETURNING id`,
 			bankID, q.Fingerprint, q.Name, q.Pkg, q.Cls, q.Unit, q.Mode,
 			q.Stem, soJSON, q.Discuss, q.SourceFile).Scan(&qid)
 		if err != nil {
