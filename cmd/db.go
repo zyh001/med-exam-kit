@@ -22,20 +22,42 @@ import (
 )
 
 func init() {
+	// PersistentPreRunE：在任何 db 子命令执行前，从配置文件自动加载 DSN 和密码
+	dbCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		// 按优先级查找配置文件：--config 标志 > 当前目录 med-exam-kit.yaml
+		cfgPath, _ := cmd.Flags().GetString("config")
+		if cfgPath == "" {
+			if _, err := os.Stat("med-exam-kit.yaml"); err == nil {
+				cfgPath = "med-exam-kit.yaml"
+			}
+		}
+		if cfgPath != "" {
+			if cfg, err := loadConfig(cfgPath); err == nil {
+				if dbDSN == "" && cfg.DB != "" {
+					dbDSN = cfg.DB
+				}
+				if dbPassword == "" && cfg.Password != "" {
+					dbPassword = cfg.Password
+				}
+			}
+		}
+		if dbDSN == "" {
+			return fmt.Errorf("未指定数据库 DSN：请在配置文件中设置 db: postgres://... 或使用 --dsn 标志")
+		}
+		return nil
+	}
+
 	dbCmd.AddCommand(dbImportCmd, dbStatusCmd, dbMigrateProgressCmd)
 
-	dbImportCmd.Flags().StringVar(&dbDSN, "dsn", "", "PostgreSQL DSN (postgres://user:pass@host/db)")
+	dbCmd.PersistentFlags().String("config", "", "配置文件路径（默认自动查找 med-exam-kit.yaml）")
+	dbCmd.PersistentFlags().StringVar(&dbDSN, "dsn", "", "PostgreSQL DSN（留空则读取配置文件 db 字段）")
+
 	dbImportCmd.Flags().StringVar(&dbPassword, "password", "", "题库密码（.mqb 加密时需要）")
 	dbImportCmd.Flags().Int64Var(&dbImportBankID, "bank-id", 0, "追加到指定题库 ID（需配合 --append）")
 	dbImportCmd.Flags().BoolVar(&dbImportAppend, "append", false, "追加模式：不删除现有题目，仅新增/更新")
-	dbImportCmd.MarkFlagRequired("dsn")
 
-	dbStatusCmd.Flags().StringVar(&dbDSN, "dsn", "", "PostgreSQL DSN")
-	dbStatusCmd.MarkFlagRequired("dsn")
-
-	dbMigrateProgressCmd.Flags().StringVar(&dbDSN, "dsn", "", "PostgreSQL DSN")
 	dbMigrateProgressCmd.Flags().StringVar(&dbProgressFile, "progress", "", ".progress.db SQLite 文件路径")
-	dbMigrateProgressCmd.MarkFlagRequired("dsn")
+	dbMigrateProgressCmd.MarkFlagRequired("progress")
 
 	rootCmd.AddCommand(dbCmd)
 }
