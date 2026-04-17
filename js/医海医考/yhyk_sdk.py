@@ -13,6 +13,7 @@ pip install pycryptodome requests
 """
 
 import hashlib, base64, json, time, random, string, requests
+from urllib.parse import urlsplit
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 
@@ -29,7 +30,6 @@ APP_VERSION  = '4.1.2'
 BASE_URL     = 'https://examapi.yhykwch.com'
 
 # UA 可自定义，但 substr(12,85) 的 MD5 必须一致
-# 如果你用不同设备，需要从 SharedPrefs 或 appSystemInfo 中获取实际 UA
 DEFAULT_UA   = ('Mozilla/5.0 (Linux; Android 12; Pixel 5 Build/SP1A.210812.016; wv) '
                 'AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 '
                 'Chrome/110.0.5481.154 Safari/537.36')
@@ -53,15 +53,22 @@ def gen_appverify(path: str, method: str, token: str = '',
                   query: dict = None) -> tuple:
     """生成 AppVerify 请求头
 
+    重要: sign 计算只使用路径部分 (不含 query string)
+          例如 /api/topic_type?topic_type_id=17672 → sign 里用 /api/topic_type
+          查询参数不参与签名. 实际请求仍然发到完整的带 query 的 URL.
+
     Returns: (appverify_header_value, random_string)
     """
+    # ★ 关键修正: sign 只用 path, 不含 query
+    sign_path = urlsplit(path).path
+
     rand = _rand(32)
     ts = round(time.time(), 3)                     # JS: Date.now()/1000, 必须3位小数
     ua_hash = md5(ua[12:12+85])                    # appSystemInfo.ua.substr(12, 85)
 
     tk = token if token else f'tourist:{rand}'
     sign_str = (f'random={rand}&time={ts}&ua={ua_hash}&method={method}'
-                f'&token={tk}&unique_code={UNIQUE_CODE}&url={path}')
+                f'&token={tk}&unique_code={UNIQUE_CODE}&url={sign_path}')
     sign = md5(sign_str)
 
     av = json.dumps({
@@ -123,6 +130,14 @@ class YhykClient:
       - 每次 login 生成新 Token，旧 Token 立即失效（单会话模型）
       - 修改密码后 Token 也会失效
       - Token 无自然过期时间，但重新登录会刷新
+
+    服务端错误码:
+      - 200  成功
+      - 201  AppVerify 验证失败 (sign 错/解密失败)
+      - 211  App 版本过低 或 未携带 AppVerify/AppVersion
+      - 401  Token 无效/未登录
+      - 1011 签名错误 (sign 内容不对, 最常见: sign 里含了 query string)
+      - 1012 请求过期 (时间戳超出有效范围)
     """
 
     def __init__(self, ua: str = DEFAULT_UA):
