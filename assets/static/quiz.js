@@ -2165,7 +2165,11 @@ function _fillQ(wrap, q, isExam, isPractice) {
   // Question text
   const qtxt = document.createElement('div');
   qtxt.className = 'q-text';
-  const qContent = q.text || (q.options?.length ? '（请查看下方选项）' : '题目内容为空');
+  let qContent = q.text || (q.options?.length ? '（请查看下方选项）' : '题目内容为空');
+  // 共用题干题目：剥离题目开头的 [第x问] / 【第x题】/ (1) 等序号前缀
+  if (q.stem && typeof qContent === 'string') {
+    qContent = qContent.replace(/^[\s\[【\(（]*第?\s*[一二三四五六七八九十百\d]+\s*[问题小子][\s\]】\)）\.\.\u3002\uff1a:：]*\s*/u, '').trimStart();
+  }
   // 应用诱导性关键词高亮
   const highlightedContent = highlightInductiveWords(renderHTML(qContent));
   qtxt.innerHTML = `<span class="q-num">${S.cur + 1}</span>${highlightedContent}`;
