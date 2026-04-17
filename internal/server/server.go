@@ -2880,6 +2880,47 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 	json.NewEncoder(w).Encode(map[string]string{"error": msg})
 }
 
+// s3SignedGet 发送 AWS Signature V4 签名的 GET 请求，兼容私有 bucket。
+func s3SignedGet(ctx context.Context, client *http.Client, s3URL, ak, sk, region string) (*http.Response, error) {
+	parsed, err := url.Parse(s3URL)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
+	dateStr := now.Format("20060102")
+	timeStr := now.Format("20060102T150405Z")
+	service := "s3"
+	payloadHash := "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" // SHA-256 of empty body
+
+	host := parsed.Host
+	path := parsed.EscapedPath()
+	if path == "" {
+		path = "/"
+	}
+	signedHeaders := "host;x-amz-content-sha256;x-amz-date"
+	canonicalHeaders := fmt.Sprintf("host:%s\nx-amz-content-sha256:%s\nx-amz-date:%s\n", host, payloadHash, timeStr)
+	canonicalReq := strings.Join([]string{"GET", path, "", canonicalHeaders, signedHeaders, payloadHash}, "\n")
+
+	scope := dateStr + "/" + region + "/" + service + "/aws4_request"
+	stringToSign := "AWS4-HMAC-SHA256\n" + timeStr + "\n" + scope + "\n" +
+		hex.EncodeToString(s3sha256([]byte(canonicalReq)))
+
+	sigKey := s3hmac(s3hmac(s3hmac(s3hmac([]byte("AWS4"+sk), []byte(dateStr)), []byte(region)), []byte(service)), []byte("aws4_request"))
+	signature := hex.EncodeToString(s3hmac(sigKey, []byte(stringToSign)))
+
+	authHeader := fmt.Sprintf("AWS4-HMAC-SHA256 Credential=%s/%s,SignedHeaders=%s,Signature=%s", ak, scope, signedHeaders, signature)
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, s3URL, nil)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("x-amz-date", timeStr)
+	req.Header.Set("x-amz-content-sha256", payloadHash)
+	req.Header.Set("Authorization", authHeader)
+	return client.Do(req)
+}
+
+
 type lcgRNG struct{ state uint64 }
 
 func newRNG(seed string) *lcgRNG {
@@ -3276,11 +3317,18 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 
 		for _, ext := range candidates {
 			s3URL := baseKey + ext
-			s3Req, err := http.NewRequestWithContext(ctx, http.MethodGet, s3URL, nil)
-			if err != nil {
-				break
+			var s3Resp *http.Response
+			var err error
+			// 有密钥时签名请求（支持私有 bucket），否则匿名请求
+			if s.cfg.S3AccessKey != "" && s.cfg.S3SecretKey != "" {
+				s3Resp, err = s3SignedGet(ctx, imgProxyClient, s3URL, s.cfg.S3AccessKey, s.cfg.S3SecretKey, "us-east-1")
+			} else {
+				var req *http.Request
+				req, err = http.NewRequestWithContext(ctx, http.MethodGet, s3URL, nil)
+				if err == nil {
+					s3Resp, err = imgProxyClient.Do(req)
+				}
 			}
-			s3Resp, err := imgProxyClient.Do(s3Req)
 			if err != nil {
 				break
 			}
