@@ -2650,20 +2650,21 @@ function exitZenMode() {
 // _zenFlash 已废弃：极简模式不再使用背景闪动效果
 
 // ── 收藏系统 ────────────────────────────────────────────────────
-const FAV_KEY      = 'med_exam_favorites';
-const FAV_DATA_KEY = 'med_exam_fav_data';  // {fp:si → questionObj}
+// 收藏 key 按题库隔离，避免跨题库污染
+function _favKey()     { return 'med_exam_favorites'  + _bankSuffix(); }
+function _favDataKey() { return 'med_exam_fav_data'   + _bankSuffix(); }
 
 function _loadFavorites() {
-  try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')); }
+  try { return new Set(JSON.parse(localStorage.getItem(_favKey()) || '[]')); }
   catch(_) { return new Set(); }
 }
 function _saveFavorites(set) {
-  try { localStorage.setItem(FAV_KEY, JSON.stringify([...set])); } catch(_) {}
+  try { localStorage.setItem(_favKey(), JSON.stringify([...set])); } catch(_) {}
 }
 
 /** 读取收藏题目完整数据 */
 function _loadFavData() {
-  try { return JSON.parse(localStorage.getItem(FAV_DATA_KEY) || '{}'); }
+  try { return JSON.parse(localStorage.getItem(_favDataKey()) || '{}'); }
   catch(_) { return {}; }
 }
 /** 保存一道题的完整数据（收藏时调用） */
@@ -2683,7 +2684,7 @@ function _saveFavQuestion(fp, q) {
       discuss: q.discuss || '',
       rate:    q.rate    || '',
     };
-    localStorage.setItem(FAV_DATA_KEY, JSON.stringify(data));
+    localStorage.setItem(_favDataKey(), JSON.stringify(data));
   } catch(_) {}
 }
 /** 删除一道题的缓存数据（取消收藏时调用） */
@@ -2691,7 +2692,7 @@ function _deleteFavQuestion(fp) {
   try {
     const data = _loadFavData();
     delete data[fp];
-    localStorage.setItem(FAV_DATA_KEY, JSON.stringify(data));
+    localStorage.setItem(_favDataKey(), JSON.stringify(data));
   } catch(_) {}
 }
 
@@ -4631,14 +4632,14 @@ function _showSharedLockEndScreen() {
 // ── 收藏功能 ────────────────────────────────────────────────────
 
 // 收藏元数据 key（存收藏时间戳，fp→timestamp）
-const FAV_TS_KEY = 'med_exam_fav_ts';
+function _favTsKey() { return 'med_exam_fav_ts' + _bankSuffix(); }
 
 function _loadFavTs() {
-  try { return JSON.parse(localStorage.getItem(FAV_TS_KEY) || '{}'); }
+  try { return JSON.parse(localStorage.getItem(_favTsKey()) || '{}'); }
   catch(_) { return {}; }
 }
 function _saveFavTs(map) {
-  try { localStorage.setItem(FAV_TS_KEY, JSON.stringify(map)); } catch(_) {}
+  try { localStorage.setItem(_favTsKey(), JSON.stringify(map)); } catch(_) {}
 }
 
 /** 在 toggleFavorite 保存时同时记录时间戳 */
@@ -5026,7 +5027,7 @@ function _favDeleteUnit(unit) {
   const favData = _loadFavData();
   const favTs = _loadFavTs();
   fps.forEach(fp => { favs.delete(fp); delete favData[fp]; delete favTs[fp]; });
-  _saveFavorites(favs); localStorage.setItem(FAV_DATA_KEY, JSON.stringify(favData)); _saveFavTs(favTs);
+  _saveFavorites(favs); localStorage.setItem(_favDataKey(), JSON.stringify(favData)); _saveFavTs(favTs);
   // 同步到服务端
   const removes = fps.map(fp => { const [f,s]=fp.split(':'); return {fp:f,si:parseInt(s||'0',10)}; });
   if (removes.length) _favServerSync([], removes).catch(()=>{});
@@ -5097,9 +5098,9 @@ function confirmClearFavorites() {
     return { fp, si: parseInt(si || '0', 10) };
   });
   try {
-    localStorage.removeItem(FAV_KEY);
-    localStorage.removeItem(FAV_TS_KEY);
-    localStorage.removeItem(FAV_DATA_KEY);
+    localStorage.removeItem(_favKey());
+    localStorage.removeItem(_favTsKey());
+    localStorage.removeItem(_favDataKey());
   } catch(_) {}
   refreshFavBadge();
   _renderFavoritesScreen();
