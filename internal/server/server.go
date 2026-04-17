@@ -3259,15 +3259,32 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 	if s.cfg.S3Endpoint != "" && s.cfg.S3Bucket != "" {
 		h := sha256.Sum256([]byte(rawURL))
 		keyHash := hex.EncodeToString(h[:8])
-		ext := imgExtFromURL(rawURL)
-		s3URL := strings.TrimRight(s.cfg.S3Endpoint, "/") + "/" + s.cfg.S3Bucket + "/images/" + keyHash + ext
+		baseKey := strings.TrimRight(s.cfg.S3Endpoint, "/") + "/" + s.cfg.S3Bucket + "/images/" + keyHash
 
 		ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
 		defer cancel()
-		s3Req, err := http.NewRequestWithContext(ctx, http.MethodGet, s3URL, nil)
-		if err == nil {
+
+		// img-migrate 上传时以 Content-Type 为准定后缀，URL 里未必有扩展名。
+		// 这里先按 URL 推断，再补充遍历其他常见后缀，确保能命中 S3。
+		urlExt := imgExtFromURL(rawURL)
+		candidates := []string{urlExt}
+		for _, ext := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".avif"} {
+			if ext != urlExt {
+				candidates = append(candidates, ext)
+			}
+		}
+
+		for _, ext := range candidates {
+			s3URL := baseKey + ext
+			s3Req, err := http.NewRequestWithContext(ctx, http.MethodGet, s3URL, nil)
+			if err != nil {
+				break
+			}
 			s3Resp, err := imgProxyClient.Do(s3Req)
-			if err == nil && s3Resp.StatusCode == http.StatusOK {
+			if err != nil {
+				break
+			}
+			if s3Resp.StatusCode == http.StatusOK {
 				defer s3Resp.Body.Close()
 				ct := s3Resp.Header.Get("Content-Type")
 				if ct == "" {
@@ -3283,9 +3300,7 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 				io.Copy(w, s3Resp.Body)
 				return
 			}
-			if s3Resp != nil {
-				s3Resp.Body.Close()
-			}
+			s3Resp.Body.Close()
 		}
 		// S3 中未找到该图片，降级到直接代理原始 URL
 	}
