@@ -294,6 +294,75 @@ func (s *Store) DeleteBank(ctx context.Context, bankID int64) error {
 	return err
 }
 
+// AppendBank 向已有题库（by bankID）追加/更新题目，不删除现有题目。
+// 返回追加后该题库的总题目数。
+func (s *Store) AppendBank(ctx context.Context, bankID int64, questions []*models.Question) (int, error) {
+	// 验证题库存在
+	var exists bool
+	if err := s.pool.QueryRow(ctx, `SELECT EXISTS(SELECT 1 FROM banks WHERE id=$1)`, bankID).Scan(&exists); err != nil || !exists {
+		return 0, fmt.Errorf("题库 #%d 不存在，请先用 db import 创建", bankID)
+	}
+
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback(ctx)
+
+	added, updated := 0, 0
+	for _, q := range questions {
+		soJSON, _ := json.Marshal(q.SharedOptions)
+		var qid int64
+		var existed bool
+		// 检查是否已有该 fingerprint
+		s.pool.QueryRow(ctx, `SELECT id FROM questions WHERE bank_id=$1 AND fingerprint=$2`, bankID, q.Fingerprint).Scan(&qid)
+		existed = qid > 0
+
+		err = tx.QueryRow(ctx, `
+			INSERT INTO questions(bank_id,fingerprint,name,pkg,cls,unit,mode,stem,shared_opts,discuss,source_file)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			ON CONFLICT(bank_id,fingerprint) DO UPDATE SET
+			  name=EXCLUDED.name, pkg=EXCLUDED.pkg, cls=EXCLUDED.cls,
+			  unit=EXCLUDED.unit, mode=EXCLUDED.mode, stem=EXCLUDED.stem,
+			  shared_opts=EXCLUDED.shared_opts, discuss=EXCLUDED.discuss,
+			  source_file=EXCLUDED.source_file
+			RETURNING id`,
+			bankID, q.Fingerprint, q.Name, q.Pkg, q.Cls, q.Unit, q.Mode,
+			q.Stem, soJSON, q.Discuss, q.SourceFile).Scan(&qid)
+		if err != nil {
+			return 0, fmt.Errorf("upsert question %s: %w", q.Fingerprint, err)
+		}
+		// 删除旧小题，重新插入（保证顺序和内容一致）
+		tx.Exec(ctx, `DELETE FROM sub_questions WHERE question_id=$1`, qid)
+		for i, sq := range q.SubQuestions {
+			optsJSON, _ := json.Marshal(sq.Options)
+			tx.Exec(ctx, `
+				INSERT INTO sub_questions(question_id,position,text,options,answer,discuss,point,
+				  rate,error_prone,ai_answer,ai_discuss,ai_confidence,ai_model,ai_status)
+				VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+				qid, i, sq.Text, optsJSON, sq.Answer, sq.Discuss, sq.Point,
+				sq.Rate, sq.ErrorProne, sq.AIAnswer, sq.AIDiscuss,
+				sq.AIConfidence, sq.AIModel, sq.AIStatus)
+		}
+		if existed {
+			updated++
+		} else {
+			added++
+		}
+	}
+
+	// 更新题库的 count
+	var total int
+	tx.QueryRow(ctx, `SELECT COUNT(*) FROM questions WHERE bank_id=$1`, bankID).Scan(&total)
+	tx.Exec(ctx, `UPDATE banks SET count=$1 WHERE id=$2`, total, bankID)
+
+	if err := tx.Commit(ctx); err != nil {
+		return 0, err
+	}
+	logger.Infof("[pgstore] append bank #%d: +%d new, %d updated, total=%d", bankID, added, updated, total)
+	return total, nil
+}
+
 // ── ProgressStore ──────────────────────────────────────────────────
 
 func (s *Store) Init(ctx context.Context) error {

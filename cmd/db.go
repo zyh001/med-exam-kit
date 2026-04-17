@@ -26,6 +26,8 @@ func init() {
 
 	dbImportCmd.Flags().StringVar(&dbDSN, "dsn", "", "PostgreSQL DSN (postgres://user:pass@host/db)")
 	dbImportCmd.Flags().StringVar(&dbPassword, "password", "", "题库密码（.mqb 加密时需要）")
+	dbImportCmd.Flags().Int64Var(&dbImportBankID, "bank-id", 0, "追加到指定题库 ID（需配合 --append）")
+	dbImportCmd.Flags().BoolVar(&dbImportAppend, "append", false, "追加模式：不删除现有题目，仅新增/更新")
 	dbImportCmd.MarkFlagRequired("dsn")
 
 	dbStatusCmd.Flags().StringVar(&dbDSN, "dsn", "", "PostgreSQL DSN")
@@ -64,10 +66,33 @@ var dbCmd = &cobra.Command{
 
 // ── db import ──────────────────────────────────────────────────────
 
+var (
+	dbImportBankID int64
+	dbImportAppend bool
+)
+
 var dbImportCmd = &cobra.Command{
 	Use:   "import [flags] <file.mqb> [file2.mqb ...]",
 	Short: "将 .mqb 题库文件导入到 PostgreSQL",
-	Args:  cobra.MinimumNArgs(1),
+	Long: `将一个或多个 .mqb 题库文件导入到 PostgreSQL 数据库。
+
+默认模式（不加任何标志）：
+  按文件名作为题库名，新建或整体替换同名题库。
+
+追加模式（--bank-id + --append）：
+  将题目追加到已有题库（通过 ID 指定），已有题目按 fingerprint 更新，
+  新题目直接插入，不删除现有题目。适合分批导入或补充单个题库。
+
+示例：
+  # 新建/替换题库
+  med-exam-kit db import --dsn <DSN> 外科学.mqb
+
+  # 查看现有题库 ID
+  med-exam-kit db status --dsn <DSN>
+
+  # 向题库 #1 追加题目
+  med-exam-kit db import --dsn <DSN> --bank-id 1 --append 补充题目.mqb`,
+	Args: cobra.MinimumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		ctx := context.Background()
 		pg, err := postgres.New(ctx, dbDSN)
@@ -76,27 +101,41 @@ var dbImportCmd = &cobra.Command{
 		}
 		defer pg.Close()
 
+		// 追加模式：--bank-id 必须与 --append 同时使用
+		if dbImportBankID > 0 && !dbImportAppend {
+			return fmt.Errorf("指定 --bank-id 时请同时加上 --append 标志（防止误操作覆盖题库）")
+		}
+		if dbImportAppend && dbImportBankID <= 0 {
+			return fmt.Errorf("--append 模式需要通过 --bank-id 指定目标题库 ID")
+		}
+
 		total := 0
 		for _, pattern := range args {
 			files, err := filepath.Glob(pattern)
 			if err != nil || len(files) == 0 {
-				files = []string{pattern} // try literal path
+				files = []string{pattern}
 			}
 			for _, path := range files {
-				if err := importBankFile(ctx, pg, path); err != nil {
-					fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", path, err)
+				var importErr error
+				if dbImportAppend {
+					importErr = appendBankFile(ctx, pg, path, dbImportBankID)
+				} else {
+					importErr = importBankFile(ctx, pg, path)
+				}
+				if importErr != nil {
+					fmt.Fprintf(os.Stderr, "  ✗ %s: %v\n", path, importErr)
 					continue
 				}
 				total++
 			}
 		}
-		fmt.Printf("\n✅ 已成功导入 %d 个题库\n", total)
+		fmt.Printf("\n✅ 已成功处理 %d 个文件\n", total)
 		return nil
 	},
 }
 
 func importBankFile(ctx context.Context, pg *postgres.Store, path string) error {
-	fmt.Printf("正在导入 %s ...\n", filepath.Base(path))
+	fmt.Printf("正在导入 %s ...\\n", filepath.Base(path))
 	qs, err := bank.LoadBank(path, dbPassword)
 	if err != nil {
 		return err
@@ -106,7 +145,21 @@ func importBankFile(ctx context.Context, pg *postgres.Store, path string) error 
 	if err != nil {
 		return err
 	}
-	fmt.Printf("  ✓ %s → 题库 #%d（%d 道题）\n", name, id, len(qs))
+	fmt.Printf("  ✓ %s → 题库 #%d（%d 道题）\\n", name, id, len(qs))
+	return nil
+}
+
+func appendBankFile(ctx context.Context, pg *postgres.Store, path string, bankID int64) error {
+	fmt.Printf("正在追加 %s → 题库 #%d ...\\n", filepath.Base(path), bankID)
+	qs, err := bank.LoadBank(path, dbPassword)
+	if err != nil {
+		return err
+	}
+	total, err := pg.AppendBank(ctx, bankID, qs)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("  ✓ 追加完成，题库 #%d 现共 %d 道题（本次文件包含 %d 道）\\n", bankID, total, len(qs))
 	return nil
 }
 
