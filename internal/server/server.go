@@ -3276,6 +3276,7 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 				w.Header().Set("Content-Type", ct)
 				w.Header().Set("Cache-Control", "public, max-age=86400")
 				w.Header().Set("Access-Control-Allow-Origin", "*")
+				w.Header().Set("X-Img-Source", "s3")
 				if cl := s3Resp.Header.Get("Content-Length"); cl != "" {
 					w.Header().Set("Content-Length", cl)
 				}
@@ -3370,6 +3371,7 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", ct)
 	w.Header().Set("Cache-Control", "public, max-age=86400") // 浏览器缓存 1 天
 	w.Header().Set("Access-Control-Allow-Origin", "*")
+	w.Header().Set("X-Img-Source", "origin")
 	if cl := resp.Header.Get("Content-Length"); cl != "" {
 		w.Header().Set("Content-Length", cl)
 	}
