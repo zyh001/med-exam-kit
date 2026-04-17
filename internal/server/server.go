@@ -228,6 +228,13 @@ func New(cfg Config) *Server {
 		logger.Infof("[ai] AI 答疑已启用: provider=%s model=%s", cfg.AIProvider, s.aiClient.Model)
 	}
 
+	// Log S3 configuration status
+	if cfg.S3Endpoint != "" && cfg.S3Bucket != "" && cfg.S3AccessKey != "" {
+		logger.Infof("[s3] 图片存储已启用: endpoint=%s bucket=%s", cfg.S3Endpoint, cfg.S3Bucket)
+	} else {
+		logger.Debugf("[s3] 未配置 S3，图片将直接代理外链")
+	}
+
 	s.registerRoutes()
 	s.startDailyPushScheduler()
 	return s
