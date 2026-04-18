@@ -566,6 +566,23 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   color:var(--muted);padding:4px 10px;border-radius:8px;
   background:var(--card);border:1px solid var(--border);
   flex-shrink:0;white-space:nowrap;  /* 防止计时器被压缩换行 */
+  position:relative;user-select:none;-webkit-user-select:none;
+}
+/* 考试模式：计时器可长按暂停 */
+.quiz-timer.exam-pausable{cursor:pointer}
+.quiz-timer.exam-pausable:active{opacity:.8}
+/* 长按蓄力环 */
+.timer-longpress-ring{
+  position:absolute;inset:-3px;border-radius:10px;pointer-events:none;
+  border:2px solid transparent;
+}
+@keyframes lp-charge{
+  from{border-color:transparent;clip-path:inset(0 100% 0 0)}
+  to  {border-color:var(--accent);clip-path:inset(0 0% 0 0)}
+}
+.timer-longpress-ring.charging{
+  border-color:var(--accent);
+  animation:lp-charge var(--lp-dur,600ms) linear forwards;
 }
 .quiz-timer.urgent{color:var(--danger);border-color:var(--danger);animation:pulse-timer 1s infinite}
 .flag-btn{
@@ -1245,7 +1262,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   background:var(--surface);border:1px solid var(--border);border-radius:24px;
   padding:9px 20px;font-size:13px;color:var(--text);
   box-shadow:var(--shadow);white-space:nowrap;
-  opacity:0;transition:all .25s;pointer-events:none;z-index:999;
+  opacity:0;transition:all .25s;pointer-events:none;z-index:10003;
 }
 #toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
 
