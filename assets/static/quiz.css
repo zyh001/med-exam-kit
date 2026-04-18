@@ -283,24 +283,17 @@ input,select{font-family:var(--font-sans);outline:none}
   background:var(--card);border:1px solid var(--border);border-radius:var(--r);
   padding:18px 14px;cursor:pointer;transition:all .2s;
   display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center;
+  box-shadow:var(--shadow-sm);
 }
 .mode-card:hover{border-color:var(--accent);transform:translateY(-2px);box-shadow:var(--shadow)}
 .mode-card:active{transform:translateY(0)}
-.mode-emoji{
-  font-size:28px;
-  line-height:1;
-  width:40px;
-  height:40px;
-  display:flex;
-  align-items:center;
-  justify-content:center;
-}
+/* .mode-emoji replaced by .mode-icon-wrap */
 .mode-title{font-size:14px;font-weight:600}
 .mode-desc{font-size:11px;color:var(--muted);line-height:1.4}
 .mode-card.practice{--mc: var(--accent)}
 .mode-card.exam{--mc: var(--warning)}
 .mode-card.memo{--mc: var(--success)}
-.mode-card:hover .mode-emoji{transform:scale(1.1);transition:transform .2s}
+.mode-card:hover .mode-icon-wrap{transform:scale(1.1);transition:transform .2s}
 
 /* Recent */
 .recent-list{padding:0 20px 32px;display:flex;flex-direction:column;gap:8px}
@@ -843,9 +836,11 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   background:var(--surface);border-top:1px solid var(--border);flex-shrink:0;
 }
 .nav-btn{
-  padding:11px 20px;border-radius:10px;font-size:14px;font-weight:600;
+  padding:11px 20px;border-radius:var(--r-md);font-size:14px;font-weight:600;
   background:var(--card);border:1px solid var(--border);color:var(--text);
   transition:all .15s;
+  display:inline-flex;align-items:center;justify-content:center;
+  gap:6px;white-space:nowrap;
 }
 .nav-btn:hover{border-color:var(--accent);color:var(--accent)}
 .nav-btn:disabled{opacity:.35;cursor:default}
@@ -1164,8 +1159,10 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 
 .results-actions{display:flex;flex-direction:column;gap:10px}
 .res-btn{
-  width:100%;padding:14px 20px;border-radius:12px;font-size:15px;font-weight:700;
-  transition:all .2s;text-align:center;
+  width:100%;padding:14px 20px;border-radius:var(--r-md);font-size:15px;font-weight:700;
+  transition:all .2s;
+  display:inline-flex;align-items:center;justify-content:center;
+  gap:7px;white-space:nowrap;
 }
 .res-btn.primary{
   background:linear-gradient(135deg,var(--accent),#6177f9);
@@ -1308,16 +1305,25 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 
 
 /* ── SVG 图标通用对齐 ── */
-.back-btn svg,.flag-btn svg,.icon-btn svg,
-.nav-btn svg,.home-quick-icon svg,.fav-arrow svg,
-.bci-arrow svg,.fav-unit-chevron svg,
-.res-btn svg,.result-icon svg,
-.mode-icon-wrap svg,.pause-icon svg,
-.resume-icon svg,.gtm-icon svg{
-  display:block;flex-shrink:0;
+/* 独立容器图标（flex 容器 = block 安全）*/
+.back-btn,.flag-btn,.icon-btn,
+.home-quick-icon,.fav-arrow,.bci-arrow,.fav-unit-chevron,
+.mode-icon-wrap,.result-icon{
+  display:inline-flex;align-items:center;justify-content:center;
 }
-/* 按钮内 svg + 文字间距 */
-.nav-btn svg,.res-btn svg{vertical-align:middle;margin-right:4px}
+/* 大型弹窗图标居中 */
+.pause-icon,.resume-icon,.gtm-icon{
+  display:flex;justify-content:center;align-items:center;
+}
+/* 所有按钮内 SVG：不独占行，由 flex gap 控制间距 */
+.back-btn svg,.flag-btn svg,.icon-btn svg,
+.nav-btn svg,.res-btn svg,.home-quick-icon svg,
+.fav-arrow svg,.bci-arrow svg,.fav-unit-chevron svg,
+.result-icon svg,.mode-icon-wrap svg,
+.pause-icon svg,.resume-icon svg,.gtm-icon svg,
+.start-btn svg,.confirm-btn svg{
+  flex-shrink:0;display:block;
+}
 
 /* ════════════════════════════════════════════
    Animations
@@ -1342,8 +1348,8 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 @media(max-width:600px){
   .mode-grid{grid-template-columns:1fr;gap:10px}
   .stats-grid{grid-template-columns:1fr 1fr}
-  .mode-card{flex-direction:row;text-align:left;padding:16px 18px}
-  .mode-emoji{font-size:32px}
+  .mode-card{flex-direction:row;text-align:left;padding:16px 18px;align-items:center}
+  .mode-icon-wrap{flex-shrink:0}
 }
 @media(min-width:768px){
   .question-wrap{padding:24px 24px 8px;max-width:700px}
