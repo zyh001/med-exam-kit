@@ -623,8 +623,7 @@
           <span class="quiz-progress-total" id="q-unit-tag"></span>
         </div>
       </div>
-      <div class="quiz-timer" id="quiz-timer" style="display:none">⏱ <span id="timer-display">00:00</span></div>
-      <button class="flag-btn" id="pause-btn" title="长按暂停（计时不停）" style="display:none">⏸</button>
+      <div class="quiz-timer" id="quiz-timer" style="display:none" title="长按暂停（计时不停）">⏱ <span id="timer-display">00:00</span><span class="timer-longpress-ring" id="timer-longpress-ring"></span></div>
       <button class="flag-btn" id="calc-toggle-btn" onclick="toggleCalc()" title="计算器" style="display:none">🧮</button>
       <button class="flag-btn" id="share-quiz-btn" onclick="shareCurrentQuiz()" title="分享试卷">🔗</button>
       <button class="flag-btn" id="flag-btn" onclick="toggleFlag()" title="标记">⚑</button>
@@ -1254,10 +1253,8 @@
       <div class="ai-messages" id="ai-report-messages"></div>
     </div>
   </div>
-
-
-
-
+    </div><!-- /calc-box -->
+  </div><!-- /calc-modal -->
 
   <!-- iOS Safari PWA 安装引导（底部弹层） -->
   <div id="ios-pwa-guide" style="display:none">
@@ -1275,10 +1272,10 @@
     </div>
   </div>
 
-  <script src="/static/quiz_sync.js"></script>
-  <script src="/static/quiz.js"></script>
+<script src="/static/quiz_sync.js"></script>
+<script src="/static/quiz.js"></script>
 
-  <!-- ═══ 考试暂停遮罩（挂在 body 顶层，绕开 #app overflow:hidden 的 iOS 事件截断） -->
+<!-- ═══ 考试暂停遮罩（挂在 body 顶层，绕开 #app overflow:hidden 的 iOS 事件截断） -->
   <div id="pause-overlay" class="pause-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pause-title">
     <div class="pause-card">
       <div class="pause-icon">⏸</div>

@@ -2002,11 +2002,9 @@ function startQuiz(remainingSeconds) {
     }
     timer.style.display = '';
     timer.classList.remove('urgent');
-    const pauseBtn = document.getElementById('pause-btn');
-    if (pauseBtn) {
-      pauseBtn.style.display = '';
-      _bindPauseLongPress(pauseBtn);
-    }
+    // 长按计时器暂停（已移除单独的暂停按钮）
+    timer.classList.add('exam-pausable');
+    _bindPauseLongPress(timer);
     gridToggle.style.display = '';
     fill.className = 'progress-fill exam-fill';
     startTimer(remainingSeconds);
@@ -2014,8 +2012,7 @@ function startQuiz(remainingSeconds) {
     _showCalcBtn(true);
   } else {
     timer.style.display = 'none';
-    const pauseBtn = document.getElementById('pause-btn');
-    if (pauseBtn) pauseBtn.style.display = 'none';
+    timer.classList.remove('exam-pausable');
     // 练习模式也显示题目列表按钮
     gridToggle.style.display = '';
     fill.className = 'progress-fill';
@@ -2858,8 +2855,9 @@ function quitQuiz() {
   if (typeof _pauseEscHandler === 'function') {
     document.removeEventListener('keydown', _pauseEscHandler);
   }
-  const pauseBtn = document.getElementById('pause-btn');
-  if (pauseBtn) pauseBtn.style.display = 'none';
+  // 清理计时器长按状态
+  const timerEl = document.getElementById('quiz-timer');
+  if (timerEl) timerEl.classList.remove('exam-pausable');
   showScreen('s-home', 'back');
 }
 
@@ -2964,39 +2962,42 @@ document.addEventListener('visibilitychange', () => {
 let _pauseLongTimer = null;
 let _pauseLongFired = false;
 
-function _bindPauseLongPress(btn) {
+function _bindPauseLongPress(timerEl) {
   // 防止重复绑定
-  if (btn._pauseBound) return;
-  btn._pauseBound = true;
+  if (timerEl._pauseBound) return;
+  timerEl._pauseBound = true;
 
-  const LONG_MS = 500;
+  const LONG_MS = 600;
+  const ring = document.getElementById('timer-longpress-ring');
 
   function startPress() {
     _pauseLongFired = false;
-    // 视觉反馈：按住时按钮缩小
-    btn.style.transform = 'scale(0.88)';
-    btn.style.transition = 'transform 0.1s';
+    // 视觉反馈：启动蓄力环动画
+    if (ring) {
+      ring.style.animationDuration = LONG_MS + 'ms';
+      ring.classList.add('charging');
+    }
     _pauseLongTimer = setTimeout(() => {
       _pauseLongFired = true;
-      btn.style.transform = '';
-      typeof vibrate === 'function' && vibrate(20);
+      if (ring) ring.classList.remove('charging');
+      // 触觉反馈（若浏览器支持）
+      try { navigator.vibrate && navigator.vibrate(30); } catch(e) {}
       pauseExam();
     }, LONG_MS);
   }
   function cancelPress() {
     clearTimeout(_pauseLongTimer);
     _pauseLongTimer = null;
-    btn.style.transform = '';
+    if (ring) ring.classList.remove('charging');
   }
 
-  btn.addEventListener('mousedown',   startPress);
-  btn.addEventListener('touchstart',  startPress, { passive: true });
-  btn.addEventListener('mouseup',     cancelPress);
-  btn.addEventListener('mouseleave',  cancelPress);
-  btn.addEventListener('touchend',    cancelPress, { passive: true });
-  btn.addEventListener('touchcancel', cancelPress, { passive: true });
-  // 阻止短按触发 click（已由 mousedown/touchstart 处理）
-  btn.addEventListener('click', e => { if (_pauseLongFired) _pauseLongFired = false; });
+  timerEl.addEventListener('mousedown',   startPress);
+  timerEl.addEventListener('touchstart',  startPress, { passive: true });
+  timerEl.addEventListener('mouseup',     cancelPress);
+  timerEl.addEventListener('mouseleave',  cancelPress);
+  timerEl.addEventListener('touchend',    cancelPress, { passive: true });
+  timerEl.addEventListener('touchcancel', cancelPress, { passive: true });
+  timerEl.addEventListener('click', () => { if (_pauseLongFired) _pauseLongFired = false; });
 }
 
 
@@ -3180,8 +3181,9 @@ async function submitExam() {
   document.body.classList.remove('exam-paused');
   S.examPaused = false;
   document.removeEventListener('keydown', _pauseEscHandler);
-  const pauseBtn = document.getElementById('pause-btn');
-  if (pauseBtn) pauseBtn.style.display = 'none';
+  // 清理计时器长按状态
+  const timerEl2 = document.getElementById('quiz-timer');
+  if (timerEl2) timerEl2.classList.remove('exam-pausable');
   clearExamSession();   // 正常交卷，清除存档
   S.examSubmitted = true; // 防止任何路径重新保存
   const origMode = S.mode; // 保存原始模式用于 calculateResults
@@ -3796,13 +3798,16 @@ function calculateResults(origMode, submitAt) {
 
 function renderResults() {
   const R = S.results;
+  // 防御：无结果数据时不渲染（避免 NaN / 崩溃）
+  if (!R) { console.warn('renderResults: S.results is null, skipping'); return; }
   // 来自实时做题时 qs 始终有值，重置按钮状态
   const reviewBtn = document.getElementById('res-review-detail-btn');
-  if (reviewBtn && R && R.qs) {
+  if (reviewBtn && R.qs) {
     reviewBtn.disabled = false;
     reviewBtn.title = '';
   }
-  const pct = Math.round(R.correct / R.total * 100);
+  // 防止 total=0 时出现 NaN%
+  const pct = R.total > 0 ? Math.round(R.correct / R.total * 100) : 0;
   const pass = pct >= 60;
 
   document.getElementById('score-pct').textContent = pct + '%';
