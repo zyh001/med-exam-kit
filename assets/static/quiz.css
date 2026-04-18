@@ -2862,3 +2862,72 @@ button,a,[role=button],label{touch-action:manipulation}
   animation:slideDown .2s ease;
 }
 @keyframes slideDown{from{transform:translateY(-100%)}to{transform:translateY(0)}}
+
+/* ════════════════════════════════════════════
+   考试暂停遮罩
+   - 全屏灰色遮罩 + 居中卡片；只暴露两个按钮
+   - 计时不会真的停；.pause-timer-val 由 JS 每秒同步
+   - pointer-events 独占，防止用户绕过遮罩继续操作下层题目
+════════════════════════════════════════════ */
+.pause-overlay{
+  position:fixed;inset:0;z-index:10000;
+  background:rgba(0,0,0,.66);
+  backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+  display:flex;align-items:center;justify-content:center;
+  padding:24px;box-sizing:border-box;
+  animation:fadeIn .18s ease;
+}
+.pause-card{
+  background:var(--surface);color:var(--text);
+  border:1px solid var(--border);border-radius:18px;
+  width:100%;max-width:360px;
+  padding:28px 22px 22px;
+  box-shadow:0 20px 60px rgba(0,0,0,.35);
+  text-align:center;
+}
+.pause-icon{
+  font-size:40px;line-height:1;margin-bottom:8px;
+  filter:drop-shadow(0 2px 4px rgba(0,0,0,.15));
+}
+.pause-title{font-size:20px;font-weight:800;margin-bottom:6px}
+.pause-sub{
+  font-size:13px;color:var(--muted);line-height:1.6;
+  margin-bottom:18px;
+}
+.pause-timer{
+  display:flex;flex-direction:column;align-items:center;gap:2px;
+  padding:14px 16px;margin-bottom:20px;
+  background:var(--bg);border:1px solid var(--border);border-radius:12px;
+}
+.pause-timer-label{
+  font-size:11px;color:var(--muted);
+  text-transform:uppercase;letter-spacing:.08em;
+}
+.pause-timer-val{
+  font-size:34px;font-weight:800;
+  font-variant-numeric:tabular-nums;
+  color:var(--accent);
+}
+.pause-timer-val.urgent{color:var(--danger)}
+.pause-actions{display:flex;flex-direction:column;gap:10px}
+.pause-btn{
+  padding:14px 20px;border-radius:12px;font-size:15px;font-weight:700;
+  border:none;cursor:pointer;transition:all .15s;
+}
+.pause-btn.primary{
+  background:linear-gradient(135deg,var(--accent),#6177f9);color:#fff;
+  box-shadow:0 4px 14px rgba(68,147,248,.32);
+}
+.pause-btn.primary:hover{opacity:.94;transform:translateY(-1px)}
+.pause-btn.primary:active{transform:none}
+.pause-btn.danger{
+  background:var(--surface);color:var(--danger);
+  border:1.5px solid var(--danger);
+}
+.pause-btn.danger:hover{background:var(--danger);color:#fff}
+
+/* 暂停状态下，彻底屏蔽下层交互（防止用户透过半透明层触碰到题目） */
+body.exam-paused .screen:not(#pause-overlay){
+  pointer-events:none;
+  user-select:none;-webkit-user-select:none;
+}

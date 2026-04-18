@@ -161,8 +161,10 @@ type examAnswer struct {
 	Discuss string `json:"discuss"`
 }
 type examSession struct {
-	answers map[string]examAnswer // fingerprint → answer+discuss
-	ts      int64
+	answers   map[string]examAnswer // fingerprint → answer+discuss
+	ts        int64                 // unix seconds — creation time, used for 24h retention
+	startedAt int64                 // unix milliseconds — authoritative exam start time (server clock)
+	timeLimit int                   // seconds; 0 = no limit
 }
 
 type shareConfig struct {
@@ -508,6 +510,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/debug", s.handleDebug)
 	m.HandleFunc("GET /api/sync/status", s.handleSyncStatus)
 	m.HandleFunc("GET /api/exam/reveal", s.handleExamReveal)
+	m.HandleFunc("GET /api/exam/time", s.handleExamTime)
 	m.HandleFunc("POST /api/exam/share", s.handleExamShare)
 	m.HandleFunc("GET /api/exam/join", s.handleExamJoin)
 	// Favorites sync (PG mode only; SQLite falls back gracefully)
@@ -788,17 +791,37 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 			rows[i].Discuss = ""
 			rows[i].Unit = "" // 考试模式隐藏章节信息，防止泄露提示
 		}
+		// 计时使用服务器时间作为权威来源：防止客户端篡改系统时间作弊，
+		// 也避免浏览器在后台被挂起导致 setInterval 漂移；客户端以服务端
+		// started_at + time_limit 为准逐秒计算 remaining。
+		timeLimitSec, _ := strconv.Atoi(q.Get("time_limit"))
+		if timeLimitSec < 0 {
+			timeLimitSec = 0
+		}
+		nowMS := time.Now().UnixMilli()
 		s.examMu.Lock()
 		// 清理超过 24h 的旧 session（简单 LRU）
-		now := time.Now().Unix()
+		nowS := time.Now().Unix()
 		for k, v := range s.examSessions {
-			if now-v.ts > 86400 {
+			if nowS-v.ts > 86400 {
 				delete(s.examSessions, k)
 			}
 		}
-		s.examSessions[eid] = &examSession{answers: answers, ts: now}
+		s.examSessions[eid] = &examSession{
+			answers:   answers,
+			ts:        nowS,
+			startedAt: nowMS,
+			timeLimit: timeLimitSec,
+		}
 		s.examMu.Unlock()
-		jsonOK(w, map[string]any{"total": len(rows), "items": rows, "exam_id": eid})
+		jsonOK(w, map[string]any{
+			"total":      len(rows),
+			"items":      rows,
+			"exam_id":    eid,
+			"started_at": nowMS,
+			"server_now": nowMS,
+			"time_limit": timeLimitSec,
+		})
 		return
 	}
 
@@ -1566,6 +1589,55 @@ func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	jsonOK(w, map[string]any{"answers": sess.answers})
+}
+
+// handleExamTime 返回考试剩余时间（以服务端时钟为准）
+//
+// 设计：考试模式的计时不再信任客户端的 Date.now()——用户可能修改系统
+// 时间作弊，浏览器也可能在后台标签页限制 setInterval 精度导致计时漂移。
+// 客户端在考试开始时，以及每次从后台切回前台时调用此接口，得到：
+//
+//	server_now: 服务端当前 unix 毫秒
+//	started_at: 服务端记录的考试起始 unix 毫秒
+//	time_limit: 考试总时长（秒，0 表示无限）
+//	remaining:  服务端计算好的剩余秒数（不会小于 0）
+//
+// 客户端据此更新本地 clock offset 与显示，逐秒用 wall-clock 计算剩余时间。
+// 与 reveal 不同，本端点不会吞掉 session，可以反复调用。
+func (s *Server) handleExamTime(w http.ResponseWriter, r *http.Request) {
+	eid := r.URL.Query().Get("id")
+	if eid == "" {
+		jsonError(w, "缺少 exam id", http.StatusBadRequest)
+		return
+	}
+	s.examMu.Lock()
+	sess, ok := s.examSessions[eid]
+	var startedAt int64
+	var timeLimit int
+	if ok {
+		startedAt = sess.startedAt
+		timeLimit = sess.timeLimit
+	}
+	s.examMu.Unlock()
+	if !ok {
+		jsonError(w, "考试会话已过期或不存在", http.StatusNotFound)
+		return
+	}
+	nowMS := time.Now().UnixMilli()
+	remaining := 0
+	if timeLimit > 0 {
+		elapsed := (nowMS - startedAt) / 1000
+		remaining = timeLimit - int(elapsed)
+		if remaining < 0 {
+			remaining = 0
+		}
+	}
+	jsonOK(w, map[string]any{
+		"server_now": nowMS,
+		"started_at": startedAt,
+		"time_limit": timeLimit,
+		"remaining":  remaining,
+	})
 }
 
 // handleExamShare 生成试卷分享令牌

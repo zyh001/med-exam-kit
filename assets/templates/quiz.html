@@ -624,6 +624,7 @@
         </div>
       </div>
       <div class="quiz-timer" id="quiz-timer" style="display:none">⏱ <span id="timer-display">00:00</span></div>
+      <button class="flag-btn" id="pause-btn" onclick="pauseExam()" title="暂停（计时不停）" style="display:none">⏸</button>
       <button class="flag-btn" id="calc-toggle-btn" onclick="toggleCalc()" title="计算器" style="display:none">🧮</button>
       <button class="flag-btn" id="share-quiz-btn" onclick="shareCurrentQuiz()" title="分享试卷">🔗</button>
       <button class="flag-btn" id="flag-btn" onclick="toggleFlag()" title="标记">⚑</button>
@@ -1251,6 +1252,23 @@
       </div>
       <!-- 消息列表区域，复用 .ai-messages 样式 -->
       <div class="ai-messages" id="ai-report-messages"></div>
+    </div>
+  </div>
+
+  <!-- ═══ 考试暂停遮罩（计时不停、仅允许继续或交卷） ════════════════ -->
+  <div id="pause-overlay" class="pause-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+    <div class="pause-card">
+      <div class="pause-icon">⏸</div>
+      <div id="pause-title" class="pause-title">考试已暂停</div>
+      <div class="pause-sub">计时仍在继续（由服务端记录）<br>可以暂时离开屏幕，准备好后点"继续"</div>
+      <div class="pause-timer">
+        <span class="pause-timer-label">剩余时间</span>
+        <span class="pause-timer-val" id="pause-timer-display">00:00</span>
+      </div>
+      <div class="pause-actions">
+        <button class="pause-btn primary" onclick="resumeExam()">继续答题</button>
+        <button class="pause-btn danger" onclick="submitFromPause()">提前交卷</button>
+      </div>
     </div>
   </div>
 
