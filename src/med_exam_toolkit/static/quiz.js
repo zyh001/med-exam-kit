@@ -60,7 +60,15 @@ const S = {
   banksInfo: [],          // 所有题库列表（从 /api/banks 获取）
   questionTimes: {},      // {idx: seconds} 每题实际作答耗时
   _qStartTime: null,      // 当前题目开始作答的时间戳
+  // ── 考试计时（服务端权威时钟）────────────────────────────────────
+  // 通过 /api/exam/time 定期同步，避免用户修改系统时间作弊；
+  // tick 用 wall-clock 计算 rem，避免后台标签页 setInterval 漂移。
+  _serverOffset: 0,       // serverNow - Date.now()；0 表示未同步，落回本地时钟
+  examPaused: false,      // 暂停遮罩是否已显示（计时不会真的停）
 };
+
+// 返回服务器视角下的当前时间（毫秒）。未同步时退回本地时间。
+function serverNow() { return Date.now() + (S._serverOffset || 0); }
 
 // 返回当前题库的 query string 参数 (bank=N)
 function bankQS() { return 'bank=' + S.bankID; }
@@ -712,10 +720,14 @@ function restoreSession() {
   S.examId = s.exam_id || null;
   // 同步 CFG.examTime，使后续"重新考"的默认时间也一致
   if (S.examLimit) CFG.examTime = Math.round(S.examLimit / 60);
-  // examStart 反推，让计时器正确
+  // examStart 先按本地记录反推，后面 resyncServerTime() 成功后会被覆盖为
+  // 服务端权威值，出现本地/服务端时间偏差时也能自愈。
   S.examStart        = Date.now() - (S.examLimit - remaining) * 1000;
+  S._serverOffset    = 0;
 
   startQuiz(remaining);
+  // 非阻塞地向服务端索要权威时间，成功后 tick 会按 wall-clock 校正显示
+  if (S.examId) resyncServerTime();
 }
 
 // ════════════════════════════════════════════
@@ -1912,7 +1924,12 @@ async function startSession() {
   }
 
   // 考试模式：防作弊，服务端不下发答案
-  if (S.mode === 'exam') params.set('sealed', '1');
+  if (S.mode === 'exam') {
+    params.set('sealed', '1');
+    // 把时长带给服务端，/api/exam/time 据此计算 remaining
+    const timeLimitSec = (CFG.examTime || 90) * 60;
+    params.set('time_limit', String(timeLimitSec));
+  }
 
   const data = await apiFetch('/api/questions?' + params + '&' + bankQS(), { signal: controller.signal }).then(r => r.json());
   clearTimeout(timeout);
@@ -1924,7 +1941,15 @@ async function startSession() {
   S.ans = {};
   S.marked = new Set();
   S.revealed = new Set();
-  S.examStart = Date.now();
+  // 使用服务端返回的 started_at 作为考试起始时刻（权威），
+  // 并记录 server_now 与本地时钟的偏差，后续 tick 全部按 wall-clock 计算。
+  if (S.mode === 'exam' && data.started_at && data.server_now) {
+    S.examStart     = data.started_at;
+    S._serverOffset = data.server_now - Date.now();
+  } else {
+    S.examStart     = Date.now();
+    S._serverOffset = 0;
+  }
   S.examSubmitted = false;
   S.examReviewMode = false;
   S.streak = 0;
@@ -1975,6 +2000,8 @@ function startQuiz(remainingSeconds) {
     }
     timer.style.display = '';
     timer.classList.remove('urgent');
+    const pauseBtn = document.getElementById('pause-btn');
+    if (pauseBtn) pauseBtn.style.display = '';
     gridToggle.style.display = '';
     fill.className = 'progress-fill exam-fill';
     startTimer(remainingSeconds);
@@ -1982,6 +2009,8 @@ function startQuiz(remainingSeconds) {
     _showCalcBtn(true);
   } else {
     timer.style.display = 'none';
+    const pauseBtn = document.getElementById('pause-btn');
+    if (pauseBtn) pauseBtn.style.display = 'none';
     // 练习模式也显示题目列表按钮
     gridToggle.style.display = '';
     fill.className = 'progress-fill';
@@ -2813,32 +2842,167 @@ function quitQuiz() {
 }
 
 // ── Exam timer ──────────────────────────────
+// ── Exam timer ──────────────────────────────
+// 新实现：每次 tick 根据服务端时钟 (serverNow - examStart) 计算 rem，
+// 而不是维护一个本地计数器。好处：
+//   1. 标签页切到后台后浏览器会 throttle setInterval，恢复时仍能跳到
+//      正确剩余时间（若锁屏更久，恢复可见时还会额外调 resyncServerTime）
+//   2. 用户修改系统时间不会让计时跳跃——serverNow 用的是开考那一刻
+//      记录下的偏差，只有一次；若担心中途改时间，visibilitychange 会
+//      再向服务端要权威时间
+//   3. 服务端自己会拒收过期考试（/api/exam/reveal 依赖 ts），计时骗
+//      不出权威结果
 function startTimer(seconds) {
-  let rem = seconds;
-  let _warned5min = rem <= 300; // 如果进来时已低于5分钟，不重复提醒
-  updateTimerDisp(rem);
-  S.timerInterval = setInterval(() => {
-    rem--;
+  // 传入的 seconds 来自服务端（remaining），启动时一次性作为参考，
+  // 后续全部用 wall-clock 计算；所以这里主要是校准 examLimit。
+  if (seconds > 0 && !S.examLimit) S.examLimit = seconds;
+
+  clearInterval(S.timerInterval);
+  let _warned5min = false, _warned1min = false;
+  let _lastResyncMS = serverNow();
+
+  function tick() {
+    if (!S.examStart || !S.examLimit) return;
+    const elapsed = Math.floor((serverNow() - S.examStart) / 1000);
+    const rem = Math.max(0, S.examLimit - elapsed);
     updateTimerDisp(rem);
-    // 5 分钟倒计时提醒（只触发一次）
     if (rem === 300 && !_warned5min) {
       _warned5min = true;
       toast('⏰ 还剩 5 分钟，注意时间！', false, 4000);
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-    }
-    // 1 分钟再提醒一次
-    if (rem === 60) {
+    } else if (rem < 300) _warned5min = true;
+    if (rem === 60 && !_warned1min) {
+      _warned1min = true;
       toast('⚠️ 还剩 1 分钟！', false, 3000);
       if (navigator.vibrate) navigator.vibrate([300, 100, 300, 100, 300]);
+    } else if (rem < 60) _warned1min = true;
+    if (rem <= 0) {
+      clearInterval(S.timerInterval);
+      S.timerInterval = null;
+      submitExam();
+      return;
     }
-    if (rem <= 0) { clearInterval(S.timerInterval); submitExam(); }
-  }, 1000);
+    // 每 30 秒偷偷跟服务端重新校准一次 offset，抵消系统时钟漂移
+    if (S.examId && serverNow() - _lastResyncMS > 30_000) {
+      _lastResyncMS = serverNow();
+      resyncServerTime();
+    }
+  }
+
+  tick(); // 立即画一次
+  S.timerInterval = setInterval(tick, 1000);
 }
+
 function updateTimerDisp(sec) {
   const m = String(Math.floor(sec / 60)).padStart(2,'0');
   const s = String(sec % 60).padStart(2,'0');
-  document.getElementById('timer-display').textContent = `${m}:${s}`;
-  if (sec < 300) document.getElementById('quiz-timer').classList.add('urgent');
+  const txt = `${m}:${s}`;
+  const el = document.getElementById('timer-display');
+  if (el) el.textContent = txt;
+  if (sec < 300) {
+    const t = document.getElementById('quiz-timer');
+    if (t) t.classList.add('urgent');
+  }
+  // 暂停遮罩打开时，把剩余时间也镜像到遮罩上的大号显示
+  if (S.examPaused) {
+    const pd = document.getElementById('pause-timer-display');
+    if (pd) {
+      pd.textContent = txt;
+      pd.classList.toggle('urgent', sec < 300);
+    }
+  }
+}
+
+// 从服务器重新拉权威时间，修正 _serverOffset，也可强制刷新 rem 显示。
+async function resyncServerTime() {
+  if (!S.examId) return;
+  try {
+    const r = await apiFetch('/api/exam/time?id=' + encodeURIComponent(S.examId));
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d && d.server_now && d.started_at) {
+      S._serverOffset = d.server_now - Date.now();
+      S.examStart     = d.started_at;
+      if (d.time_limit > 0) S.examLimit = d.time_limit;
+    }
+  } catch (_) { /* 离线或接口 404 时保持上次 offset，tick 用 wall-clock 继续 */ }
+}
+
+// 页面从后台回到前台时立刻重算一次——处理锁屏/挂起后 setInterval 漂移
+// 以及用户可能在后台改了系统时间的场景。
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible') return;
+  if (S.mode !== 'exam' || !S.timerInterval) return;
+  resyncServerTime();
+});
+
+// ── 考试暂停遮罩 ────────────────────────────────────────────────
+// 设计要点：
+//   1. 计时绝不停——startTimer 用 serverNow() - examStart 计算 rem，
+//      遮罩期间 tick 仍在跑，只是把显示也镜像到 pause-timer-display
+//   2. 遮罩层 pointer-events 独占（.exam-paused 类让下层 screen 不可点）
+//   3. 只有"继续答题"和"提前交卷"两个出口；ESC 等同"继续"
+function pauseExam() {
+  if (S.mode !== 'exam') return;
+  if (S.examSubmitted) return;
+  if (S.examPaused) return;
+  const overlay = document.getElementById('pause-overlay');
+  if (!overlay) return;
+  S.examPaused = true;
+  overlay.style.display = 'flex';
+  document.body.classList.add('exam-paused');
+  // 立刻把当前 rem 映射到遮罩层，避免用户看到 00:00 的初始值
+  _syncPauseTimer();
+  // ESC 快捷键 = 继续
+  document.addEventListener('keydown', _pauseEscHandler);
+}
+
+function resumeExam() {
+  const overlay = document.getElementById('pause-overlay');
+  if (overlay) overlay.style.display = 'none';
+  document.body.classList.remove('exam-paused');
+  S.examPaused = false;
+  document.removeEventListener('keydown', _pauseEscHandler);
+  // 回前台后立即重同步一次，防止挂起期间时钟漂移
+  if (S.examId && S.timerInterval) resyncServerTime();
+}
+
+function submitFromPause() {
+  // 走与普通交卷相同的二次确认路径：有未答题则弹 confirm，否则直接提交
+  const overlay = document.getElementById('pause-overlay');
+  const total = S.questions ? S.questions.length : 0;
+  const unanswered = total === 0 ? 0 : S.questions.filter((_, i) => {
+    const sel = S.ans[i];
+    return !sel || (sel instanceof Set && sel.size === 0);
+  }).length;
+  if (unanswered > 0) {
+    const ok = confirm(
+      `还有 ${unanswered} 道题未作答（共 ${total} 题）。\n\n确认提前交卷？未答题目记为空白。`
+    );
+    if (!ok) return;
+  }
+  // 关闭遮罩再提交，避免提交完 overlay 挡住结果页
+  if (overlay) overlay.style.display = 'none';
+  document.body.classList.remove('exam-paused');
+  S.examPaused = false;
+  document.removeEventListener('keydown', _pauseEscHandler);
+  submitExam();
+}
+
+function _pauseEscHandler(e) {
+  if (e.key === 'Escape' || e.key === 'Esc') {
+    e.preventDefault();
+    resumeExam();
+  }
+}
+
+function _syncPauseTimer() {
+  const mainDisp = document.getElementById('timer-display');
+  const pauseDisp = document.getElementById('pause-timer-display');
+  if (!pauseDisp || !mainDisp) return;
+  pauseDisp.textContent = mainDisp.textContent;
+  const mainUrgent = document.getElementById('quiz-timer')?.classList.contains('urgent');
+  pauseDisp.classList.toggle('urgent', !!mainUrgent);
 }
 
 // ── Exam grid ───────────────────────────────
@@ -2947,6 +3111,15 @@ document.addEventListener('click', e => {
 // ── Submit ──────────────────────────────────
 async function submitExam() {
   clearInterval(S.timerInterval);
+  S.timerInterval = null;
+  // 关闭暂停遮罩并隐藏暂停按钮，避免交卷后残留
+  const pauseOverlay = document.getElementById('pause-overlay');
+  if (pauseOverlay) pauseOverlay.style.display = 'none';
+  document.body.classList.remove('exam-paused');
+  S.examPaused = false;
+  document.removeEventListener('keydown', _pauseEscHandler);
+  const pauseBtn = document.getElementById('pause-btn');
+  if (pauseBtn) pauseBtn.style.display = 'none';
   clearExamSession();   // 正常交卷，清除存档
   S.examSubmitted = true; // 防止任何路径重新保存
   const origMode = S.mode; // 保存原始模式用于 calculateResults
@@ -6178,6 +6351,25 @@ function _isTouchInHScrollable(el) {
       } else if(dx<0&&canNext()){
         vibrate(10); S.cur++; renderQ('forward');
         if(S.mode==='exam') updateGridDot();
+      } else if(dx<0 && _zenMode && S.cur===S.questions.length-1){
+        // 极简模式下最后一题左滑：触发交卷（练习=完成/考试=提交确认）
+        vibrate(10);
+        if(S.mode==='practice'){
+          finishPractice();
+        } else if(S.mode==='exam'){
+          const total=S.questions.length;
+          const unanswered=S.questions.filter((_,i)=>{
+            const sel=S.ans[i];
+            return !sel || (sel instanceof Set && sel.size===0);
+          }).length;
+          if(S.examReviewMode){
+            submitExam();
+          } else if(unanswered>0){
+            showExamSubmitConfirm(unanswered,total);
+          } else {
+            _enterExamReview();
+          }
+        }
       } else {
         s.style.transition='transform .22s cubic-bezier(.25,.46,.45,.94)';
         s.style.transform=`translateX(${dx>0?5:-5}px)`;

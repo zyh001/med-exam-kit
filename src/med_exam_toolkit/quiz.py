@@ -696,6 +696,39 @@ def api_exam_reveal():
     return jsonify({"answers": sess["answers"]})
 
 
+@app.get("/api/exam/time")
+def api_exam_time():
+    """返回考试剩余时间（服务端时钟为权威）。
+
+    客户端在考试开始及每次从后台切回前台时调用，用返回的 server_now
+    和本地 Date.now() 的差做 clock offset，再用 (serverNow - startedAt)
+    逐秒算 rem。好处：
+      - 抵御客户端改系统时间作弊
+      - 锁屏/后台挂起造成的 setInterval 漂移在下一次 tick 自愈
+    与 reveal 不同，本端点不会消费 session，可反复调用。
+    """
+    eid = request.args.get("id", "")
+    if not eid:
+        return jsonify({"error": "缺少 exam id"}), 400
+    with _exam_lock:
+        sess = _exam_sessions.get(eid)
+    if sess is None:
+        return jsonify({"error": "考试会话已过期或不存在"}), 404
+    now_ms       = int(time.time() * 1000)
+    started_at   = int(sess.get("started_at", 0) or 0)
+    time_limit   = int(sess.get("time_limit", 0) or 0)
+    remaining    = 0
+    if time_limit > 0 and started_at > 0:
+        elapsed   = (now_ms - started_at) // 1000
+        remaining = max(0, time_limit - int(elapsed))
+    return jsonify({
+        "server_now": now_ms,
+        "started_at": started_at,
+        "time_limit": time_limit,
+        "remaining":  remaining,
+    })
+
+
 @app.post("/api/exam/share")
 def api_exam_share():
     """生成试卷分享令牌（7天有效，内存存储）。"""
@@ -796,21 +829,33 @@ def api_exam_join():
     # 返回给客户端统一使用 'exam'，让接收方直接进入考试模式
     is_exam_mode = cfg["mode"] in ("exam", "exam_done")
     eid = None
+    started_at_ms = 0
+    server_now_ms = 0
+    time_limit_sec = int(cfg.get("time_limit", 90 * 60) or 0)
     if is_exam_mode and rows:
         eid = secrets.token_hex(16)
         answers = {f'{r["fingerprint"]}:{r["si"]}': {"answer": r["answer"], "discuss": r["discuss"]} for r in rows}
         for r in rows:
             r["answer"] = ""
             r["discuss"] = ""
+        # 用服务端时间作为权威开考时刻，客户端据此计算 rem，避免用户
+        # 修改系统时间作弊 / 后台标签页 setInterval 漂移
+        server_now_ms = int(time.time() * 1000)
+        started_at_ms = server_now_ms
         with _exam_lock:
             old = [k for k, v in _exam_sessions.items() if now - v["ts"] > 86400]
             for k in old:
                 del _exam_sessions[k]
-            _exam_sessions[eid] = {"answers": answers, "ts": now}
+            _exam_sessions[eid] = {
+                "answers":    answers,
+                "ts":         now,
+                "started_at": started_at_ms,
+                "time_limit": time_limit_sec,
+            }
 
     out_mode   = "exam" if is_exam_mode else cfg["mode"]
     time_limit = cfg.get("time_limit", 90 * 60)
-    return jsonify({
+    resp = {
         "items":            rows,
         "total":            len(rows),
         "mode":             out_mode,
@@ -820,7 +865,11 @@ def api_exam_join():
         "scoring":          cfg.get("scoring", False),
         "score_per_mode":   cfg.get("score_per_mode", {}),
         "multi_score_mode": cfg.get("multi_score_mode", "strict"),
-    })
+    }
+    if eid:
+        resp["started_at"] = started_at_ms
+        resp["server_now"] = server_now_ms
+    return jsonify(resp)
 
 
 # ════════════════════════════════════════════
