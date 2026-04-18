@@ -597,7 +597,9 @@ function _deserializeAns(raw) {
 /** 保存当前考试状态到 localStorage */
 function saveExamSession() {
   if (S.mode !== 'exam' || !S.questions.length || S.examSubmitted) return;
-  const elapsedSec = Math.floor((Date.now() - S.examStart) / 1000);
+  // elapsed 必须用 serverNow() — S.examStart 是服务端视角毫秒，Date.now()
+  // 会被本地时钟偏移污染，导致恢复时 remaining 不准
+  const elapsedSec = Math.floor((serverNow() - S.examStart) / 1000);
   const remaining  = Math.max(0, S.examLimit - elapsedSec);
   const session = {
     v: 1,
@@ -2001,7 +2003,10 @@ function startQuiz(remainingSeconds) {
     timer.style.display = '';
     timer.classList.remove('urgent');
     const pauseBtn = document.getElementById('pause-btn');
-    if (pauseBtn) pauseBtn.style.display = '';
+    if (pauseBtn) {
+      pauseBtn.style.display = '';
+      _bindPauseLongPress(pauseBtn);
+    }
     gridToggle.style.display = '';
     fill.className = 'progress-fill exam-fill';
     startTimer(remainingSeconds);
@@ -2194,7 +2199,11 @@ function _fillQ(wrap, q, isExam, isPractice) {
   // Question text
   const qtxt = document.createElement('div');
   qtxt.className = 'q-text';
-  const qContent = q.text || (q.options?.length ? '（请查看下方选项）' : '题目内容为空');
+  let qContent = q.text || (q.options?.length ? '（请查看下方选项）' : '题目内容为空');
+  // 共用题干题目：剥离题目开头的 [第x问] / 【第x题】/ (1) 等序号前缀
+  if (q.stem && typeof qContent === 'string') {
+    qContent = qContent.replace(/^[\s\[【\(（]*第?\s*[一二三四五六七八九十百\d]+\s*[问题小子][\s\]】\)）\.\.\u3002\uff1a:：]*\s*/u, '').trimStart();
+  }
   // 应用诱导性关键词高亮
   const highlightedContent = highlightInductiveWords(renderHTML(qContent));
   qtxt.innerHTML = `<span class="q-num">${S.cur + 1}</span>${highlightedContent}`;
@@ -2675,20 +2684,21 @@ function exitZenMode() {
 // _zenFlash 已废弃：极简模式不再使用背景闪动效果
 
 // ── 收藏系统 ────────────────────────────────────────────────────
-const FAV_KEY      = 'med_exam_favorites';
-const FAV_DATA_KEY = 'med_exam_fav_data';  // {fp:si → questionObj}
+// 收藏 key 按题库隔离，避免跨题库污染
+function _favKey()     { return 'med_exam_favorites'  + _bankSuffix(); }
+function _favDataKey() { return 'med_exam_fav_data'   + _bankSuffix(); }
 
 function _loadFavorites() {
-  try { return new Set(JSON.parse(localStorage.getItem(FAV_KEY) || '[]')); }
+  try { return new Set(JSON.parse(localStorage.getItem(_favKey()) || '[]')); }
   catch(_) { return new Set(); }
 }
 function _saveFavorites(set) {
-  try { localStorage.setItem(FAV_KEY, JSON.stringify([...set])); } catch(_) {}
+  try { localStorage.setItem(_favKey(), JSON.stringify([...set])); } catch(_) {}
 }
 
 /** 读取收藏题目完整数据 */
 function _loadFavData() {
-  try { return JSON.parse(localStorage.getItem(FAV_DATA_KEY) || '{}'); }
+  try { return JSON.parse(localStorage.getItem(_favDataKey()) || '{}'); }
   catch(_) { return {}; }
 }
 /** 保存一道题的完整数据（收藏时调用） */
@@ -2708,7 +2718,7 @@ function _saveFavQuestion(fp, q) {
       discuss: q.discuss || '',
       rate:    q.rate    || '',
     };
-    localStorage.setItem(FAV_DATA_KEY, JSON.stringify(data));
+    localStorage.setItem(_favDataKey(), JSON.stringify(data));
   } catch(_) {}
 }
 /** 删除一道题的缓存数据（取消收藏时调用） */
@@ -2716,7 +2726,7 @@ function _deleteFavQuestion(fp) {
   try {
     const data = _loadFavData();
     delete data[fp];
-    localStorage.setItem(FAV_DATA_KEY, JSON.stringify(data));
+    localStorage.setItem(_favDataKey(), JSON.stringify(data));
   } catch(_) {}
 }
 
@@ -2828,7 +2838,9 @@ function quitQuiz() {
   if (_zenMode) exitZenMode();
   if (S.mode === 'exam') {
     if (!confirm('确认退出考试？本次记录不会保存')) {
-      const elapsed = Math.floor((Date.now() - S.examStart) / 1000);
+      // 用户取消退出：用服务端时间算已耗时，恢复 tick。serverNow()
+      // 在未同步时退回 Date.now()，所以本地时钟模式也能工作。
+      const elapsed = Math.floor((serverNow() - S.examStart) / 1000);
       startTimer(Math.max(0, S.examLimit - elapsed));
       return;
     }
@@ -2838,10 +2850,19 @@ function quitQuiz() {
     savePracticeSession();
     toast('练习进度已保存，下次可继续作答');
   }
+  // 离开考试页时统一清理暂停遮罩，避免返回主页后残留
+  const pauseOverlay = document.getElementById('pause-overlay');
+  if (pauseOverlay) pauseOverlay.style.display = 'none';
+  document.body.classList.remove('exam-paused');
+  S.examPaused = false;
+  if (typeof _pauseEscHandler === 'function') {
+    document.removeEventListener('keydown', _pauseEscHandler);
+  }
+  const pauseBtn = document.getElementById('pause-btn');
+  if (pauseBtn) pauseBtn.style.display = 'none';
   showScreen('s-home', 'back');
 }
 
-// ── Exam timer ──────────────────────────────
 // ── Exam timer ──────────────────────────────
 // 新实现：每次 tick 根据服务端时钟 (serverNow - examStart) 计算 rem，
 // 而不是维护一个本地计数器。好处：
@@ -2870,7 +2891,7 @@ function startTimer(seconds) {
       _warned5min = true;
       toast('⏰ 还剩 5 分钟，注意时间！', false, 4000);
       if (navigator.vibrate) navigator.vibrate([200, 100, 200]);
-    } else if (rem < 300) _warned5min = true;
+    } else if (rem < 300) _warned5min = true; // passed the mark
     if (rem === 60 && !_warned1min) {
       _warned1min = true;
       toast('⚠️ 还剩 1 分钟！', false, 3000);
@@ -2938,6 +2959,47 @@ document.addEventListener('visibilitychange', () => {
 
 // ── 考试暂停遮罩 ────────────────────────────────────────────────
 // 设计要点：
+// 暂停按钮长按（500ms）触发，防止误触
+
+let _pauseLongTimer = null;
+let _pauseLongFired = false;
+
+function _bindPauseLongPress(btn) {
+  // 防止重复绑定
+  if (btn._pauseBound) return;
+  btn._pauseBound = true;
+
+  const LONG_MS = 500;
+
+  function startPress() {
+    _pauseLongFired = false;
+    // 视觉反馈：按住时按钮缩小
+    btn.style.transform = 'scale(0.88)';
+    btn.style.transition = 'transform 0.1s';
+    _pauseLongTimer = setTimeout(() => {
+      _pauseLongFired = true;
+      btn.style.transform = '';
+      typeof vibrate === 'function' && vibrate(20);
+      pauseExam();
+    }, LONG_MS);
+  }
+  function cancelPress() {
+    clearTimeout(_pauseLongTimer);
+    _pauseLongTimer = null;
+    btn.style.transform = '';
+  }
+
+  btn.addEventListener('mousedown',   startPress);
+  btn.addEventListener('touchstart',  startPress, { passive: true });
+  btn.addEventListener('mouseup',     cancelPress);
+  btn.addEventListener('mouseleave',  cancelPress);
+  btn.addEventListener('touchend',    cancelPress, { passive: true });
+  btn.addEventListener('touchcancel', cancelPress, { passive: true });
+  // 阻止短按触发 click（已由 mousedown/touchstart 处理）
+  btn.addEventListener('click', e => { if (_pauseLongFired) _pauseLongFired = false; });
+}
+
+
 //   1. 计时绝不停——startTimer 用 serverNow() - examStart 计算 rem，
 //      遮罩期间 tick 仍在跑，只是把显示也镜像到 pause-timer-display
 //   2. 遮罩层 pointer-events 独占（.exam-paused 类让下层 screen 不可点）
@@ -3125,7 +3187,9 @@ async function submitExam() {
   const origMode = S.mode; // 保存原始模式用于 calculateResults
   S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
   // 在 await reveal 之前记录交卷时间，防止 reveal 异步耗时导致 timeSec 偏大
-  const submitAt = Date.now();
+  // 用 serverNow() 与 S.examStart 保持同一时钟（都是服务端视角的 ms），
+  // 否则会被本地/服务端时差污染出几秒到几十秒的误差
+  const submitAt = serverNow();
 
   // sealed 模式：从服务端获取答案后再评分
   if (S.examId) {
@@ -3621,7 +3685,7 @@ function calculateResults(origMode, submitAt) {
   S.results = {
     mode: effectiveMode,
     total: qs.length, correct, wrong, skip,
-    timeSec: Math.floor(((submitAt || Date.now()) - S.examStart) / 1000),
+    timeSec: Math.floor(((submitAt || serverNow()) - S.examStart) / 1000),
     timeLimit: S.examLimit || 0,
     byUnit,
     qs, ans,
@@ -4800,14 +4864,14 @@ function _showSharedLockEndScreen() {
 // ── 收藏功能 ────────────────────────────────────────────────────
 
 // 收藏元数据 key（存收藏时间戳，fp→timestamp）
-const FAV_TS_KEY = 'med_exam_fav_ts';
+function _favTsKey() { return 'med_exam_fav_ts' + _bankSuffix(); }
 
 function _loadFavTs() {
-  try { return JSON.parse(localStorage.getItem(FAV_TS_KEY) || '{}'); }
+  try { return JSON.parse(localStorage.getItem(_favTsKey()) || '{}'); }
   catch(_) { return {}; }
 }
 function _saveFavTs(map) {
-  try { localStorage.setItem(FAV_TS_KEY, JSON.stringify(map)); } catch(_) {}
+  try { localStorage.setItem(_favTsKey(), JSON.stringify(map)); } catch(_) {}
 }
 
 /** 在 toggleFavorite 保存时同时记录时间戳 */
@@ -5195,7 +5259,7 @@ function _favDeleteUnit(unit) {
   const favData = _loadFavData();
   const favTs = _loadFavTs();
   fps.forEach(fp => { favs.delete(fp); delete favData[fp]; delete favTs[fp]; });
-  _saveFavorites(favs); localStorage.setItem(FAV_DATA_KEY, JSON.stringify(favData)); _saveFavTs(favTs);
+  _saveFavorites(favs); localStorage.setItem(_favDataKey(), JSON.stringify(favData)); _saveFavTs(favTs);
   // 同步到服务端
   const removes = fps.map(fp => { const [f,s]=fp.split(':'); return {fp:f,si:parseInt(s||'0',10)}; });
   if (removes.length) _favServerSync([], removes).catch(()=>{});
@@ -5266,9 +5330,9 @@ function confirmClearFavorites() {
     return { fp, si: parseInt(si || '0', 10) };
   });
   try {
-    localStorage.removeItem(FAV_KEY);
-    localStorage.removeItem(FAV_TS_KEY);
-    localStorage.removeItem(FAV_DATA_KEY);
+    localStorage.removeItem(_favKey());
+    localStorage.removeItem(_favTsKey());
+    localStorage.removeItem(_favDataKey());
   } catch(_) {}
   refreshFavBadge();
   _renderFavoritesScreen();

@@ -5,12 +5,15 @@
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <title>医考练习</title>
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <meta name="theme-color" content="#0d1117">
+  <!-- 状态栏颜色：随系统主题自动切换 -->
+  <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#f0f4f8" media="(prefers-color-scheme: light)">
+  <!-- iOS 灵动岛/刘海：standalone 模式下状态栏半透明叠加，内容从安全区下方开始 -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/static/common.css">
   <link rel="stylesheet" href="/static/quiz.css">
   <!-- SESSION_TOKEN 由服务端注入 -->
@@ -418,6 +421,11 @@
       <div class="fav-empty-text">暂无错题记录</div>
       <div class="fav-empty-hint">做完题目后答错的题会出现在这里</div>
     </div>
+    <!-- 多选底栏 -->
+    <div id="wb-multibar" class="unit-multibar" style="display:none">
+      <button class="unit-multibar-cancel" onclick="_wbCancelMulti()">取消</button>
+      <button class="unit-multibar-start" onclick="_wbStartMulti()">练习已选（<span id="wb-sel-count">0</span>项）</button>
+    </div>
   </div>
 
   <!-- ═══ FAVORITES ══════════════════════════════════════════════════ -->
@@ -458,6 +466,11 @@
       <div class="fav-empty-icon">⭐</div>
       <div class="fav-empty-text">还没有收藏题目</div>
       <div class="fav-empty-hint">做题时长按 ⚑ 按钮即可收藏</div>
+    </div>
+    <!-- 多选底栏 -->
+    <div id="fav-multibar" class="unit-multibar" style="display:none">
+      <button class="unit-multibar-cancel" onclick="_favCancelMulti()">取消</button>
+      <button class="unit-multibar-start" onclick="_favStartMulti()">练习已选（<span id="fav-sel-count">0</span>项）</button>
     </div>
   </div>
 
@@ -611,7 +624,7 @@
         </div>
       </div>
       <div class="quiz-timer" id="quiz-timer" style="display:none">⏱ <span id="timer-display">00:00</span></div>
-      <button class="flag-btn" id="pause-btn" onclick="pauseExam()" title="暂停（计时不停）" style="display:none">⏸</button>
+      <button class="flag-btn" id="pause-btn" title="长按暂停（计时不停）" style="display:none">⏸</button>
       <button class="flag-btn" id="calc-toggle-btn" onclick="toggleCalc()" title="计算器" style="display:none">🧮</button>
       <button class="flag-btn" id="share-quiz-btn" onclick="shareCurrentQuiz()" title="分享试卷">🔗</button>
       <button class="flag-btn" id="flag-btn" onclick="toggleFlag()" title="标记">⚑</button>
@@ -1242,22 +1255,7 @@
     </div>
   </div>
 
-  <!-- ═══ 考试暂停遮罩（计时不停、仅允许继续或交卷） ════════════════ -->
-  <div id="pause-overlay" class="pause-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pause-title">
-    <div class="pause-card">
-      <div class="pause-icon">⏸</div>
-      <div id="pause-title" class="pause-title">考试已暂停</div>
-      <div class="pause-sub">计时仍在继续（由服务端记录）<br>可以暂时离开屏幕，准备好后点"继续"</div>
-      <div class="pause-timer">
-        <span class="pause-timer-label">剩余时间</span>
-        <span class="pause-timer-val" id="pause-timer-display">00:00</span>
-      </div>
-      <div class="pause-actions">
-        <button class="pause-btn primary" onclick="resumeExam()">继续答题</button>
-        <button class="pause-btn danger" onclick="submitFromPause()">提前交卷</button>
-      </div>
-    </div>
-  </div>
+
 
   <div id="toast"></div>
 
@@ -1279,5 +1277,22 @@
 
   <script src="/static/quiz_sync.js"></script>
   <script src="/static/quiz.js"></script>
+
+  <!-- ═══ 考试暂停遮罩（挂在 body 顶层，绕开 #app overflow:hidden 的 iOS 事件截断） -->
+  <div id="pause-overlay" class="pause-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pause-title">
+    <div class="pause-card">
+      <div class="pause-icon">⏸</div>
+      <div id="pause-title" class="pause-title">考试已暂停</div>
+      <div class="pause-sub">计时仍在继续（由服务端记录）<br>可以暂时离开屏幕，准备好后点"继续"</div>
+      <div class="pause-timer">
+        <span class="pause-timer-label">剩余时间</span>
+        <span class="pause-timer-val" id="pause-timer-display">00:00</span>
+      </div>
+      <div class="pause-actions">
+        <button class="pause-btn primary" onclick="resumeExam()">继续答题</button>
+        <button class="pause-btn danger" onclick="submitFromPause()">提前交卷</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
