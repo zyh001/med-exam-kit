@@ -597,7 +597,9 @@ function _deserializeAns(raw) {
 /** 保存当前考试状态到 localStorage */
 function saveExamSession() {
   if (S.mode !== 'exam' || !S.questions.length || S.examSubmitted) return;
-  const elapsedSec = Math.floor((Date.now() - S.examStart) / 1000);
+  // elapsed 必须用 serverNow() — S.examStart 是服务端视角毫秒，Date.now()
+  // 会被本地时钟偏移污染，导致恢复时 remaining 不准
+  const elapsedSec = Math.floor((serverNow() - S.examStart) / 1000);
   const remaining  = Math.max(0, S.examLimit - elapsedSec);
   const session = {
     v: 1,
@@ -2833,7 +2835,9 @@ function quitQuiz() {
   if (_zenMode) exitZenMode();
   if (S.mode === 'exam') {
     if (!confirm('确认退出考试？本次记录不会保存')) {
-      const elapsed = Math.floor((Date.now() - S.examStart) / 1000);
+      // 用户取消退出：用服务端时间算已耗时，恢复 tick。serverNow()
+      // 在未同步时退回 Date.now()，所以本地时钟模式也能工作。
+      const elapsed = Math.floor((serverNow() - S.examStart) / 1000);
       startTimer(Math.max(0, S.examLimit - elapsed));
       return;
     }
@@ -2843,6 +2847,16 @@ function quitQuiz() {
     savePracticeSession();
     toast('练习进度已保存，下次可继续作答');
   }
+  // 离开考试页时统一清理暂停遮罩，避免返回主页后残留
+  const pauseOverlay = document.getElementById('pause-overlay');
+  if (pauseOverlay) pauseOverlay.style.display = 'none';
+  document.body.classList.remove('exam-paused');
+  S.examPaused = false;
+  if (typeof _pauseEscHandler === 'function') {
+    document.removeEventListener('keydown', _pauseEscHandler);
+  }
+  const pauseBtn = document.getElementById('pause-btn');
+  if (pauseBtn) pauseBtn.style.display = 'none';
   showScreen('s-home', 'back');
 }
 
@@ -3129,7 +3143,9 @@ async function submitExam() {
   const origMode = S.mode; // 保存原始模式用于 calculateResults
   S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
   // 在 await reveal 之前记录交卷时间，防止 reveal 异步耗时导致 timeSec 偏大
-  const submitAt = Date.now();
+  // 用 serverNow() 与 S.examStart 保持同一时钟（都是服务端视角的 ms），
+  // 否则会被本地/服务端时差污染出几秒到几十秒的误差
+  const submitAt = serverNow();
 
   // sealed 模式：从服务端获取答案后再评分
   if (S.examId) {
@@ -3625,7 +3641,7 @@ function calculateResults(origMode, submitAt) {
   S.results = {
     mode: effectiveMode,
     total: qs.length, correct, wrong, skip,
-    timeSec: Math.floor(((submitAt || Date.now()) - S.examStart) / 1000),
+    timeSec: Math.floor(((submitAt || serverNow()) - S.examStart) / 1000),
     timeLimit: S.examLimit || 0,
     byUnit,
     qs, ans,
