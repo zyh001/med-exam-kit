@@ -2003,7 +2003,10 @@ function startQuiz(remainingSeconds) {
     timer.style.display = '';
     timer.classList.remove('urgent');
     const pauseBtn = document.getElementById('pause-btn');
-    if (pauseBtn) pauseBtn.style.display = '';
+    if (pauseBtn) {
+      pauseBtn.style.display = '';
+      _bindPauseLongPress(pauseBtn);
+    }
     gridToggle.style.display = '';
     fill.className = 'progress-fill exam-fill';
     startTimer(remainingSeconds);
@@ -2956,6 +2959,47 @@ document.addEventListener('visibilitychange', () => {
 
 // ── 考试暂停遮罩 ────────────────────────────────────────────────
 // 设计要点：
+// 暂停按钮长按（500ms）触发，防止误触
+
+let _pauseLongTimer = null;
+let _pauseLongFired = false;
+
+function _bindPauseLongPress(btn) {
+  // 防止重复绑定
+  if (btn._pauseBound) return;
+  btn._pauseBound = true;
+
+  const LONG_MS = 500;
+
+  function startPress() {
+    _pauseLongFired = false;
+    // 视觉反馈：按住时按钮缩小
+    btn.style.transform = 'scale(0.88)';
+    btn.style.transition = 'transform 0.1s';
+    _pauseLongTimer = setTimeout(() => {
+      _pauseLongFired = true;
+      btn.style.transform = '';
+      typeof vibrate === 'function' && vibrate(20);
+      pauseExam();
+    }, LONG_MS);
+  }
+  function cancelPress() {
+    clearTimeout(_pauseLongTimer);
+    _pauseLongTimer = null;
+    btn.style.transform = '';
+  }
+
+  btn.addEventListener('mousedown',   startPress);
+  btn.addEventListener('touchstart',  startPress, { passive: true });
+  btn.addEventListener('mouseup',     cancelPress);
+  btn.addEventListener('mouseleave',  cancelPress);
+  btn.addEventListener('touchend',    cancelPress, { passive: true });
+  btn.addEventListener('touchcancel', cancelPress, { passive: true });
+  // 阻止短按触发 click（已由 mousedown/touchstart 处理）
+  btn.addEventListener('click', e => { if (_pauseLongFired) _pauseLongFired = false; });
+}
+
+
 //   1. 计时绝不停——startTimer 用 serverNow() - examStart 计算 rem，
 //      遮罩期间 tick 仍在跑，只是把显示也镜像到 pause-timer-display
 //   2. 遮罩层 pointer-events 独占（.exam-paused 类让下层 screen 不可点）

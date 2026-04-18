@@ -2876,6 +2876,8 @@ button,a,[role=button],label{touch-action:manipulation}
   display:flex;align-items:center;justify-content:center;
   padding:24px;box-sizing:border-box;
   animation:fadeIn .18s ease;
+  /* 明确保障遮罩内按钮可点（避免父级 pointer-events 层叠影响）*/
+  pointer-events:auto;
 }
 .pause-card{
   background:var(--surface);color:var(--text);
@@ -2927,7 +2929,7 @@ button,a,[role=button],label{touch-action:manipulation}
 .pause-btn.danger:hover{background:var(--danger);color:#fff}
 
 /* 暂停状态下，彻底屏蔽下层交互（防止用户透过半透明层触碰到题目） */
-body.exam-paused .screen:not(#pause-overlay){
+body.exam-paused .screen{
   pointer-events:none;
   user-select:none;-webkit-user-select:none;
 }
