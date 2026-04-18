@@ -294,6 +294,88 @@ func (s *Store) DeleteBank(ctx context.Context, bankID int64) error {
 	return err
 }
 
+// DeleteBankStats contains the per-table row counts affected by
+// DeleteBankWithProgress. Useful for reporting to the caller.
+type DeleteBankStats struct {
+	Questions    int64 // cascaded from banks deletion
+	SubQuestions int64 // cascaded from questions deletion
+	Sessions     int64
+	Attempts     int64
+	SM2          int64
+	Favorites    int64
+	ShareTokens  int64 // only rows whose fps list referenced this bank — rare, we match by bank_idx if stored
+}
+
+// DeleteBankWithProgress removes the bank row (cascading questions/sub_questions
+// via ON DELETE CASCADE) and, when keepProgress is false, also purges all
+// learning progress rows tagged with the bank ID (sessions, attempts, sm2,
+// favorites). The whole operation runs in a single transaction so a partial
+// state is impossible.
+//
+// Returns the row counts per table. If the bank does not exist, returns an
+// error and makes no changes.
+func (s *Store) DeleteBankWithProgress(ctx context.Context, bankID int64, keepProgress bool) (*DeleteBankStats, error) {
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback(ctx)
+
+	// Verify bank exists so we can give a clear error instead of "0 rows".
+	var name string
+	if err := tx.QueryRow(ctx, `SELECT name FROM banks WHERE id=$1`, bankID).Scan(&name); err != nil {
+		return nil, fmt.Errorf("题库 #%d 不存在", bankID)
+	}
+
+	stats := &DeleteBankStats{}
+
+	// Count questions/sub_questions BEFORE delete so the caller can report
+	// what cascaded.
+	_ = tx.QueryRow(ctx,
+		`SELECT COUNT(*) FROM questions WHERE bank_id=$1`, bankID).Scan(&stats.Questions)
+	_ = tx.QueryRow(ctx, `
+		SELECT COUNT(*)
+		FROM   sub_questions sq
+		JOIN   questions q ON q.id = sq.question_id
+		WHERE  q.bank_id = $1`, bankID).Scan(&stats.SubQuestions)
+
+	if !keepProgress {
+		// Delete progress rows first — the ORDER does not matter because
+		// they have no FK to banks/questions. We do it inside the tx so
+		// a failure rolls everything back.
+		if tag, err := tx.Exec(ctx, `DELETE FROM sessions  WHERE bank_id=$1`, bankID); err != nil {
+			return nil, fmt.Errorf("删除 sessions 失败: %w", err)
+		} else {
+			stats.Sessions = tag.RowsAffected()
+		}
+		if tag, err := tx.Exec(ctx, `DELETE FROM attempts  WHERE bank_id=$1`, bankID); err != nil {
+			return nil, fmt.Errorf("删除 attempts 失败: %w", err)
+		} else {
+			stats.Attempts = tag.RowsAffected()
+		}
+		if tag, err := tx.Exec(ctx, `DELETE FROM sm2       WHERE bank_id=$1`, bankID); err != nil {
+			return nil, fmt.Errorf("删除 sm2 失败: %w", err)
+		} else {
+			stats.SM2 = tag.RowsAffected()
+		}
+		if tag, err := tx.Exec(ctx, `DELETE FROM favorites WHERE bank_id=$1`, bankID); err != nil {
+			return nil, fmt.Errorf("删除 favorites 失败: %w", err)
+		} else {
+			stats.Favorites = tag.RowsAffected()
+		}
+	}
+
+	// Finally the bank itself (cascades to questions, sub_questions).
+	if _, err := tx.Exec(ctx, `DELETE FROM banks WHERE id=$1`, bankID); err != nil {
+		return nil, fmt.Errorf("删除 banks 失败: %w", err)
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return nil, fmt.Errorf("提交事务失败: %w", err)
+	}
+	return stats, nil
+}
+
 // AppendBank 向已有题库（by bankID）追加/更新题目，不删除现有题目。
 // 返回追加后该题库的总题目数。
 func (s *Store) AppendBank(ctx context.Context, bankID int64, questions []*models.Question) (int, error) {

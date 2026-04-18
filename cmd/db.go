@@ -47,7 +47,7 @@ func init() {
 		return nil
 	}
 
-	dbCmd.AddCommand(dbImportCmd, dbStatusCmd, dbMigrateProgressCmd)
+	dbCmd.AddCommand(dbImportCmd, dbStatusCmd, dbMigrateProgressCmd, dbDeleteCmd)
 
 	dbCmd.PersistentFlags().String("config", "", "配置文件路径（默认自动查找 med-exam-kit.yaml）")
 	dbCmd.PersistentFlags().StringVar(&dbDSN, "dsn", "", "PostgreSQL DSN（留空则读取配置文件 db 字段）")
@@ -55,6 +55,11 @@ func init() {
 	dbImportCmd.Flags().StringVar(&dbPassword, "password", "", "题库密码（.mqb 加密时需要）")
 	dbImportCmd.Flags().Int64Var(&dbImportBankID, "bank-id", 0, "追加到指定题库 ID（需配合 --append）")
 	dbImportCmd.Flags().BoolVar(&dbImportAppend, "append", false, "追加模式：不删除现有题目，仅新增/更新")
+
+	dbDeleteCmd.Flags().Int64Var(&dbDeleteBankID, "bank-id", 0, "要删除的题库 ID（必填，见 db status）")
+	dbDeleteCmd.Flags().BoolVar(&dbDeleteYes, "yes", false, "跳过交互确认（脚本化删除）")
+	dbDeleteCmd.Flags().BoolVar(&dbDeleteKeepProgress, "keep-progress", false, "仅删除题库和题目，保留学习记录（sessions/attempts/sm2/favorites）")
+	dbDeleteCmd.MarkFlagRequired("bank-id")
 
 	dbMigrateProgressCmd.Flags().StringVar(&dbProgressFile, "progress", "", ".progress.db SQLite 文件路径")
 	dbMigrateProgressCmd.MarkFlagRequired("progress")
@@ -214,6 +219,111 @@ var dbStatusCmd = &cobra.Command{
 				b.ID, b.Name, b.Count, b.CreatedAt.Local().Format("2006-01-02 15:04"))
 		}
 		fmt.Printf("\n共 %d 个题库\n", len(banks))
+		return nil
+	},
+}
+
+// ── db delete ───────────────────────────────────────────────────────
+
+var (
+	dbDeleteBankID       int64
+	dbDeleteYes          bool
+	dbDeleteKeepProgress bool
+)
+
+var dbDeleteCmd = &cobra.Command{
+	Use:   "delete --bank-id <id>",
+	Short: "从 PostgreSQL 删除指定题库及其题目和学习记录",
+	Long: `按 bank_id 删除题库，以及该题库下的所有题目、小题。
+默认还会清理该题库关联的学习记录（sessions / attempts / sm2 / favorites）——
+这些数据对其它题库没有用，保留会在 db status 查询和统计时残留为"幽灵数据"。
+
+安全保护：
+  - 默认需要在终端输入题库名称进行二次确认，防止误删
+  - 使用 --yes 跳过确认（脚本自动化）
+  - 使用 --keep-progress 仅删除题库和题目，保留该用户的学习记录
+
+示例：
+  # 先查 ID
+  med-exam-kit db status
+
+  # 交互删除
+  med-exam-kit db delete --bank-id 3
+
+  # 非交互删除
+  med-exam-kit db delete --bank-id 3 --yes
+
+  # 只删题库，保留学习记录（便于重新导入后继承进度）
+  med-exam-kit db delete --bank-id 3 --keep-progress --yes`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if dbDeleteBankID <= 0 {
+			return fmt.Errorf("必须指定 --bank-id（必须 > 0）")
+		}
+
+		ctx := context.Background()
+		pg, err := postgres.New(ctx, dbDSN)
+		if err != nil {
+			return fmt.Errorf("连接数据库失败: %w", err)
+		}
+		defer pg.Close()
+
+		// 先找到题库信息（便于确认 + 错误提示）
+		banks, err := pg.ListBanks(ctx)
+		if err != nil {
+			return fmt.Errorf("读取题库列表失败: %w", err)
+		}
+		var target *struct {
+			ID    int64
+			Name  string
+			Count int
+		}
+		for _, b := range banks {
+			if b.ID == dbDeleteBankID {
+				target = &struct {
+					ID    int64
+					Name  string
+					Count int
+				}{b.ID, b.Name, b.Count}
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("题库 #%d 不存在（用 db status 查看可用 ID）", dbDeleteBankID)
+		}
+
+		fmt.Printf("\n即将删除题库：\n  ID    %d\n  名称  %s\n  题数  %d\n",
+			target.ID, target.Name, target.Count)
+		if dbDeleteKeepProgress {
+			fmt.Println("  模式  保留学习记录（仅删除题库和题目）")
+		} else {
+			fmt.Println("  模式  完整删除（含 sessions / attempts / sm2 / favorites）")
+		}
+
+		// 二次确认
+		if !dbDeleteYes {
+			fmt.Printf("\n请输入题库名称以确认删除 (%s): ", target.Name)
+			var confirm string
+			fmt.Scanln(&confirm)
+			if strings.TrimSpace(confirm) != target.Name {
+				fmt.Println("❌ 输入不匹配，已取消。")
+				return nil
+			}
+		}
+
+		stats, err := pg.DeleteBankWithProgress(ctx, dbDeleteBankID, dbDeleteKeepProgress)
+		if err != nil {
+			return fmt.Errorf("删除失败: %w", err)
+		}
+
+		fmt.Println("\n✅ 已删除")
+		fmt.Printf("  题目:      %d\n", stats.Questions)
+		fmt.Printf("  小题:      %d\n", stats.SubQuestions)
+		if !dbDeleteKeepProgress {
+			fmt.Printf("  会话:      %d\n", stats.Sessions)
+			fmt.Printf("  答题记录:  %d\n", stats.Attempts)
+			fmt.Printf("  SM-2 卡:   %d\n", stats.SM2)
+			fmt.Printf("  收藏:      %d\n", stats.Favorites)
+		}
 		return nil
 	},
 }
