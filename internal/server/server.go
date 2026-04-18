@@ -2481,7 +2481,7 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 			}
 			pool := append([]group(nil), unitMap[uk]...)
 			opts.rng.shuffle(pool)
-			for _, grp := range greedyFill(pool, need) {
+			for _, grp := range greedyFillRNG(pool, need, opts.rng) {
 				mk := grp[0].Mode
 				reorder[mk] = append(reorder[mk], grp)
 			}
@@ -2521,7 +2521,7 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 			totalNeedPM += need
 			pool := append([]group(nil), modeMap[mk]...)
 			opts.rng.shuffle(pool)
-			resultGroups = append(resultGroups, greedyFill(pool, need)...)
+			resultGroups = append(resultGroups, greedyFillRNG(pool, need, opts.rng)...)
 		}
 		actualPM := 0
 		for _, grp := range resultGroups {
@@ -2538,7 +2538,11 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 				if shortfallPM <= 0 {
 					break
 				}
-				for _, grp := range modeMap[mk] {
+				// Shuffle so we don't always fall back to the same questions
+				// in original document order when there's a shortfall.
+				fallback := append([]group(nil), modeMap[mk]...)
+				opts.rng.shuffle(fallback)
+				for _, grp := range fallback {
 					if shortfallPM <= 0 {
 						break
 					}
@@ -2595,7 +2599,7 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 			}
 			pool := append([]group(nil), modeMap[mk]...)
 			opts.rng.shuffle(pool)
-			resultGroups = append(resultGroups, greedyFill(pool, need)...)
+			resultGroups = append(resultGroups, greedyFillRNG(pool, need, opts.rng)...)
 		}
 		actual := 0
 		for _, grp := range resultGroups {
@@ -2612,7 +2616,12 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 				if shortfall <= 0 {
 					break
 				}
-				for _, grp := range modeMap[mk] {
+				// Shuffle the fallback pool so shortfall fill is not
+				// deterministic (otherwise the same tail questions keep
+				// appearing at the end of the generated paper).
+				fallback := append([]group(nil), modeMap[mk]...)
+				opts.rng.shuffle(fallback)
+				for _, grp := range fallback {
 					if shortfall <= 0 {
 						break
 					}
@@ -2634,6 +2643,12 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 }
 
 func greedyFill(pool []group, target int) []group {
+	return greedyFillRNG(pool, target, nil)
+}
+
+// greedyFillRNG is like greedyFill but randomises tie-breaks when an RNG is
+// supplied, so the tail of the selection is not deterministic.
+func greedyFillRNG(pool []group, target int, rng *lcgRNG) []group {
 	var picked []group
 	n := 0
 	var remaining []group
@@ -2649,37 +2664,72 @@ func greedyFill(pool []group, target int) []group {
 			remaining = append(remaining, grp)
 		}
 	}
+	// Second pass: pick a group whose size is the largest that still fits.
+	// Multiple groups may tie on size — collect them all and pick one at
+	// random, otherwise the same group is always chosen and the tail of the
+	// paper becomes deterministic.
 	for n < target && len(remaining) > 0 {
 		gap := target - n
-		bestIdx, bestC := -1, 0
+		bestC := 0
+		var bestIdxs []int
 		for i, grp := range remaining {
 			c := len(grp)
-			if c <= gap && c > bestC {
+			if c > gap {
+				continue
+			}
+			if c > bestC {
 				bestC = c
-				bestIdx = i
+				bestIdxs = bestIdxs[:0]
+				bestIdxs = append(bestIdxs, i)
+			} else if c == bestC {
+				bestIdxs = append(bestIdxs, i)
 			}
 		}
-		if bestIdx < 0 {
+		if len(bestIdxs) == 0 {
 			break
 		}
-		picked = append(picked, remaining[bestIdx])
+		chosen := bestIdxs[0]
+		if rng != nil && len(bestIdxs) > 1 {
+			chosen = bestIdxs[int(rng.next()%uint64(len(bestIdxs)))]
+		}
+		picked = append(picked, remaining[chosen])
 		n += bestC
-		remaining = append(remaining[:bestIdx], remaining[bestIdx+1:]...)
+		remaining = append(remaining[:chosen], remaining[chosen+1:]...)
 	}
+	// Third pass: truncate a group that is larger than the remaining gap.
+	// Pick the smallest oversized group (least waste), breaking ties
+	// randomly. When truncating, take a random window of the group instead of
+	// always taking the first N sub-questions.
 	if n < target && len(remaining) > 0 {
 		gap := target - n
-		bestIdx := -1
 		bestSize := 0
+		var bestIdxs []int
 		for i, grp := range remaining {
 			c := len(grp)
-			if c > gap && (bestIdx == -1 || c < bestSize) {
-				bestIdx = i
+			if c <= gap {
+				continue
+			}
+			if len(bestIdxs) == 0 || c < bestSize {
 				bestSize = c
+				bestIdxs = bestIdxs[:0]
+				bestIdxs = append(bestIdxs, i)
+			} else if c == bestSize {
+				bestIdxs = append(bestIdxs, i)
 			}
 		}
-		if bestIdx >= 0 {
+		if len(bestIdxs) > 0 {
+			chosen := bestIdxs[0]
+			if rng != nil && len(bestIdxs) > 1 {
+				chosen = bestIdxs[int(rng.next()%uint64(len(bestIdxs)))]
+			}
+			src := remaining[chosen]
+			startMax := len(src) - gap
+			start := 0
+			if rng != nil && startMax > 0 {
+				start = int(rng.next() % uint64(startMax+1))
+			}
 			truncated := make(group, gap)
-			copy(truncated, remaining[bestIdx][:gap])
+			copy(truncated, src[start:start+gap])
 			picked = append(picked, truncated)
 		}
 	}

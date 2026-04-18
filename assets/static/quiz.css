@@ -984,19 +984,21 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .results-header h2{font-size:17px;font-weight:700}
 
 /* 主滚动容器 */
-.results-scroll{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch}
+.results-scroll{flex:1;overflow-y:auto;overflow-x:hidden;-webkit-overflow-scrolling:touch;min-width:0}
 
 /* PC：两栏等高布局；Mobile：单列 */
 .results-layout{
   display:grid;
-  grid-template-columns:1fr;
+  grid-template-columns:minmax(0,1fr);
   gap:20px;
   padding:24px 20px max(env(safe-area-inset-bottom),24px);
-  max-width:1100px;margin:0 auto;
+  max-width:min(1100px,100%);margin:0 auto;
+  box-sizing:border-box;
+  min-width:0;
 }
 @media(min-width:780px){
   .results-layout{
-    grid-template-columns:340px 1fr;
+    grid-template-columns:340px minmax(0,1fr);
     align-items:start;
     padding:32px 32px max(env(safe-area-inset-bottom),32px);
   }
@@ -1055,10 +1057,11 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 }
 .score-block-header{
   display:flex;align-items:baseline;justify-content:space-between;
+  flex-wrap:wrap;gap:8px;
   padding:16px 20px 12px;border-bottom:1px solid var(--border);
 }
-.score-block-title{font-size:14px;font-weight:700;color:var(--text)}
-.score-block-total{font-size:22px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums}
+.score-block-title{font-size:14px;font-weight:700;color:var(--text);min-width:0;flex:1 1 auto}
+.score-block-total{font-size:22px;font-weight:800;color:var(--accent);font-variant-numeric:tabular-nums;flex-shrink:0}
 .score-block-total span{font-size:13px;font-weight:400;color:var(--muted);margin-left:2px}
 .score-mode-row{
   display:flex;align-items:center;gap:10px;
@@ -1098,7 +1101,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .scoring-multi-chip.active{background:var(--accent-bg);border-color:var(--accent);color:var(--accent)}
 
 /* 右栏 */
-.results-right{display:flex;flex-direction:column;gap:16px}
+.results-right{display:flex;flex-direction:column;gap:16px;min-width:0}
 
 .unit-breakdown{
   background:var(--surface);border:1px solid var(--border);border-radius:var(--r);

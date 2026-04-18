@@ -6183,6 +6183,25 @@ function _isTouchInHScrollable(el) {
       } else if(dx<0&&canNext()){
         vibrate(10); S.cur++; renderQ('forward');
         if(S.mode==='exam') updateGridDot();
+      } else if(dx<0 && _zenMode && S.cur===S.questions.length-1){
+        // 极简模式下最后一题左滑：触发交卷（练习=完成/考试=提交确认）
+        vibrate(10);
+        if(S.mode==='practice'){
+          finishPractice();
+        } else if(S.mode==='exam'){
+          const total=S.questions.length;
+          const unanswered=S.questions.filter((_,i)=>{
+            const sel=S.ans[i];
+            return !sel || (sel instanceof Set && sel.size===0);
+          }).length;
+          if(S.examReviewMode){
+            submitExam();
+          } else if(unanswered>0){
+            showExamSubmitConfirm(unanswered,total);
+          } else {
+            _enterExamReview();
+          }
+        }
       } else {
         s.style.transition='transform .22s cubic-bezier(.25,.46,.45,.94)';
         s.style.transform=`translateX(${dx>0?5:-5}px)`;
