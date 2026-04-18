@@ -1,67 +1,176 @@
 /* ================================================================
-   common.css  医考工具公共样式
-   quiz.html 与 editor.html 共同引用
+   common.css  医考练习 公共样式
+   Design System v2 — Clinical · Calm · Modern
+   Ref: 医考练习_Design_System / colors_and_type.css
    ================================================================ */
 
-/* ── 共同 CSS 变量（两页面值完全相同的变量） ─────────────────────── */
-:root,[data-theme="dark"]{
-  --bg: #0d1117;
-  --surface: #161b22;
-  --card: #21262d;
-  --border: #30363d;
-  --text: #e6edf3;
-  --muted: #7d8590;
-  --accent: #4493f8;
-  --accent-bg: rgba(68,147,248,.12);
-  --success: #3fb950;
-  --success-bg: rgba(63,185,80,.12);
-  --danger: #f85149;
-  --danger-bg: rgba(248,81,73,.12);
-  --warning: #d29922;
-  --warn-bg: rgba(210,153,34,.12);
-  --shadow: 0 8px 32px rgba(0,0,0,.5);
+/* ── Google Fonts ─────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@300;400;500;600;700;800&family=Noto+Serif+SC:wght@400;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap');
+
+/* ════════════════════════════════════════════
+   CSS 变量 — Dark（默认）
+════════════════════════════════════════════ */
+:root,
+[data-theme="dark"] {
+  /* ── Surfaces ── */
+  --bg:        #0B1017;
+  --surface:   #141A23;
+  --card:      #1B2230;
+  --border:    #2A3342;
+  --border-strong: #3A465B;
+
+  /* ── Text hierarchy ── */
+  --fg1:   #EEF2F8;
+  --fg2:   #C6CFDE;
+  --fg3:   #8C97AB;
+  --fg4:   #616C81;
+  --text:  var(--fg1);
+  --muted: var(--fg3);
+
+  /* ── Brand / Accent ── */
+  --accent:       #4C8BFF;
+  --accent-hover: #6AA0FF;
+  --accent-soft:  rgba(76,139,255,.14);
+  --accent-bg:    rgba(76,139,255,.12);
+  --accent-ring:  rgba(76,139,255,.28);
+
+  /* ── Semantic ── */
+  --success:    #3FD27F;
+  --success-bg: rgba(63,210,127,.14);
+  --danger:     #F26C6C;
+  --danger-bg:  rgba(242,108,108,.14);
+  --warning:    #F2BC3B;
+  --warn-bg:    rgba(242,188,59,.14);
+  --info:       #4C8BFF;
+  --info-bg:    rgba(76,139,255,.14);
+
+  /* ── Elevation ── */
+  --shadow-xs: 0 1px 2px rgba(0,0,0,.30);
+  --shadow-sm: 0 2px 6px rgba(0,0,0,.35);
+  --shadow-md: 0 6px 18px rgba(0,0,0,.45);
+  --shadow-lg: 0 16px 40px rgba(0,0,0,.55);
+  --shadow:    var(--shadow-md);
+  --shadow-focus: 0 0 0 3px var(--accent-ring);
+
+  /* ── Subject palette ── */
+  --subj-1: #4C8BFF;
+  --subj-2: #3FD27F;
+  --subj-3: #F2BC3B;
+  --subj-4: #9B6BE8;
+  --subj-5: #F2607A;
+  --subj-6: #3BBCE8;
 }
 
-[data-theme="light"]{
-  --bg: #f0f4f8;
-  --surface: #ffffff;
-  --card: #f6f8fa;
-  --border: #d0d7de;
-  --text: #1f2328;
-  --muted: #656d76;
-  --accent: #0969da;
-  --accent-bg: rgba(9,105,218,.1);
-  --success: #1a7f37;
-  --success-bg: rgba(26,127,55,.1);
-  --danger: #cf222e;
-  --danger-bg: rgba(207,34,46,.1);
-  --warning: #9a6700;
-  --warn-bg: rgba(154,103,0,.1);
-  --shadow: 0 4px 16px rgba(0,0,0,.12);
-  --shadow-sm: 0 2px 6px rgba(0,0,0,.08);
+/* ════════════════════════════════════════════
+   CSS 变量 — Light
+════════════════════════════════════════════ */
+[data-theme="light"] {
+  --bg:        #F5F7FA;
+  --surface:   #FFFFFF;
+  --card:      #F9FBFD;
+  --border:    #E4E9F0;
+  --border-strong: #CED6E0;
+
+  --fg1:   #0F1A2B;
+  --fg2:   #3A4A63;
+  --fg3:   #6B7A92;
+  --fg4:   #9AA6B8;
+  --text:  var(--fg1);
+  --muted: var(--fg3);
+
+  --accent:       #2E6DF6;
+  --accent-hover: #1F5DE0;
+  --accent-soft:  #EAF1FE;
+  --accent-bg:    rgba(46,109,246,.08);
+  --accent-ring:  rgba(46,109,246,.25);
+
+  --success:    #1FAE6B;
+  --success-bg: rgba(31,174,107,.10);
+  --danger:     #E24C4C;
+  --danger-bg:  rgba(226,76,76,.10);
+  --warning:    #E0A100;
+  --warn-bg:    rgba(224,161,0,.10);
+  --info:       #0C8CE9;
+  --info-bg:    rgba(12,140,233,.10);
+
+  --shadow-xs:    0 1px 2px rgba(15,26,43,.04);
+  --shadow-sm:    0 2px 6px rgba(15,26,43,.06);
+  --shadow-md:    0 6px 18px rgba(15,26,43,.08);
+  --shadow-lg:    0 16px 40px rgba(15,26,43,.10);
+  --shadow:       var(--shadow-md);
+  --shadow-focus: 0 0 0 3px var(--accent-ring);
+}
+
+/* ── Radius ladder + spacing + type tokens ── */
+:root {
+  --r-xs:   6px;
+  --r-sm:   8px;
+  --r-md:   12px;
+  --r-lg:   16px;
+  --r-xl:   20px;
+  --r-pill: 999px;
+  --r:      var(--r-lg);
+
+  --space-1:  4px;
+  --space-2:  8px;
+  --space-3:  12px;
+  --space-4:  16px;
+  --space-5:  20px;
+  --space-6:  24px;
+  --space-8:  32px;
+  --space-10: 40px;
+  --space-12: 48px;
+
+  --font-sans:  'Noto Sans SC','PingFang SC','Hiragino Sans GB','Microsoft YaHei',system-ui,-apple-system,sans-serif;
+  --font-serif: 'Noto Serif SC','Songti SC','STSong',serif;
+  --font-mono:  'JetBrains Mono','SF Mono',ui-monospace,Consolas,monospace;
+
+  --fs-display: 32px;
+  --fs-h1:      24px;
+  --fs-h2:      20px;
+  --fs-h3:      17px;
+  --fs-body:    15px;
+  --fs-sm:      13px;
+  --fs-caption: 12px;
+  --fs-micro:   11px;
+
+  --lh-tight: 1.25;
+  --lh-snug:  1.45;
+  --lh-body:  1.7;
+  --lh-loose: 1.85;
 }
 
 /* ── Reset ── */
-*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
-html{
-  height:100%;
-  /* iOS Safari：必须同时设 html 的 overflow，否则依然可以拖动 */
-  overflow:hidden;
-  overscroll-behavior:none;
-  background:var(--bg);
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  -webkit-tap-highlight-color: transparent;
 }
-body{
-  width:100%;height:100%;
-  overflow:hidden;
-  overscroll-behavior:none;
-  background:var(--bg);
-  color:var(--text);
-  font-family:'PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif;
-  font-size:15px;line-height:1.6;
-  transition:background .25s,color .25s;
-  user-select:none;
-  -webkit-user-select:none;
+html {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg);
+}
+body {
+  width: 100%; height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  transition: background .25s, color .25s;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── 滚动条 ─────────────────────────────────────────────────────── */
-
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-strong); }

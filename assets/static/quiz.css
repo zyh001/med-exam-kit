@@ -3,14 +3,16 @@
 /* ════════════════════════════════════════════
    CSS 变量 / 主题
 ════════════════════════════════════════════ */
+/* ════ Design System v2 — Quiz 专属变量覆盖 ════ */
 :root,[data-theme="dark"]{
-  --info:       #ffa9a3;
-  --info-bg:    rgba(252,171,166,.12);
-  --r:          14px;
+  /* inductive-word highlight uses danger in v2 */
+  --info:    var(--danger);
+  --info-bg: var(--danger-bg);
+  --r:       16px;   /* --r-lg */
 }
 [data-theme="light"]{
-  --info:       #fa837a;
-  --info-bg:    rgba(248,171,165,.1);
+  --info:    var(--danger);
+  --info-bg: var(--danger-bg);
 }
 
 
@@ -21,8 +23,8 @@
  * 纳入文档滚动区域的计算。
  */
 #app{position:fixed;inset:0;overflow:hidden;background:var(--bg)}
-button{cursor:pointer;font-family:inherit;border:none;outline:none}
-input,select{font-family:inherit;outline:none}
+button{cursor:pointer;font-family:var(--font-sans);border:none;outline:none}
+input,select{font-family:var(--font-sans);outline:none}
 
 /* ── Screens ── */
 .screen{
@@ -211,10 +213,11 @@ input,select{font-family:inherit;outline:none}
 }
 .home-brand{display:flex;align-items:center;gap:10px}
 .brand-icon{
-  width:38px;height:38px;border-radius:10px;
+  width:38px;height:38px;border-radius:var(--r-sm);
   background:var(--accent);display:flex;align-items:center;justify-content:center;
   font-size:18px;font-weight:900;color:#fff;letter-spacing:-.5px;
-  box-shadow:0 4px 12px rgba(68,147,248,.4);
+  box-shadow:0 4px 12px var(--accent-ring);
+  font-family:var(--font-sans);
 }
 .brand-name{font-size:20px;font-weight:700;letter-spacing:-.3px}
 .brand-sub{font-size:11px;color:var(--muted);margin-top:1px}
@@ -269,7 +272,7 @@ input,select{font-family:inherit;outline:none}
 .bank-stats-row{display:flex;gap:0}
 .bank-stat{flex:1;text-align:center;border-right:1px solid var(--border)}
 .bank-stat:last-child{border-right:none}
-.bank-stat-num{font-size:22px;font-weight:700;color:var(--accent)}
+.bank-stat-num{font-size:22px;font-weight:700;color:var(--accent);font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .bank-stat-label{font-size:11px;color:var(--muted);margin-top:2px}
 
 .section-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:0 20px 10px}
@@ -317,7 +320,7 @@ input,select{font-family:inherit;outline:none}
 .recent-info{display:flex;flex-direction:column;gap:2px}
 .recent-name{font-size:13px;font-weight:500}
 .recent-meta{font-size:11px;color:var(--muted)}
-.recent-score{font-size:18px;font-weight:700;color:var(--accent)}
+.recent-score{font-size:18px;font-weight:700;color:var(--accent);font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 
 /* ════════════════════════════════════════════
    CONFIG SCREEN
@@ -562,10 +565,10 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 
 .quiz-timer{
   display:flex;align-items:center;gap:5px;
-  font-size:14px;font-weight:700;font-variant-numeric:tabular-nums;
-  color:var(--muted);padding:4px 10px;border-radius:8px;
+  font-size:14px;font-weight:700;font-family:var(--font-mono);font-variant-numeric:tabular-nums;
+  color:var(--muted);padding:5px 10px;border-radius:var(--r-sm);
   background:var(--card);border:1px solid var(--border);
-  flex-shrink:0;white-space:nowrap;  /* 防止计时器被压缩换行 */
+  flex-shrink:0;white-space:nowrap;
   position:relative;user-select:none;-webkit-user-select:none;
 }
 /* 考试模式：计时器可长按暂停 */
@@ -765,9 +768,9 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 }
 .q-num{
   display:inline-flex;align-items:center;justify-content:center;
-  width:24px;height:24px;border-radius:6px;background:var(--accent);
-  color:#fff;font-size:12px;font-weight:700;margin-right:8px;flex-shrink:0;
-  vertical-align:middle;
+  width:24px;height:24px;border-radius:var(--r-xs);background:var(--accent);
+  color:#fff;font-size:11px;font-weight:700;margin-right:8px;flex-shrink:0;
+  vertical-align:middle;font-family:var(--font-mono);
 }
 
 /* Options */
@@ -782,10 +785,10 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .opt:active:not(:disabled){transform:scale(.97);transition:transform .08s}
 .opt:disabled{cursor:default}
 .opt-label{
-  width:28px;height:28px;border-radius:7px;flex-shrink:0;
+  width:28px;height:28px;border-radius:var(--r-xs);flex-shrink:0;
   background:var(--border);color:var(--muted);
   display:flex;align-items:center;justify-content:center;
-  font-size:12px;font-weight:700;transition:all .18s;
+  font-size:12px;font-weight:700;font-family:var(--font-mono);transition:all .18s;
 }
 .opt-text{font-size:15px;line-height:1.65;flex:1;text-align:left;color:var(--text)}
 
@@ -1046,9 +1049,9 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   position:absolute;inset:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center;
 }
-.score-pct{font-size:44px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+.score-pct{font-size:44px;font-weight:800;line-height:1;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .score-label{font-size:12px;color:var(--muted);margin-top:4px;letter-spacing:.05em}
-.score-verdict{font-size:22px;font-weight:700;margin-bottom:4px}
+.score-verdict{font-size:22px;font-weight:700;margin-bottom:4px;font-family:var(--font-serif)}
 .score-sub{font-size:13px;color:var(--muted);text-align:center}
 
 /* 得分卡底部：4 格统计 */
@@ -1061,7 +1064,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .stat-cell:nth-child(2n){border-right:none}
 .stat-cell:nth-child(n+3){border-bottom:none}
 .stat-cell-label{font-size:11px;color:var(--muted);margin-bottom:4px;display:flex;align-items:center;gap:5px}
-.stat-cell-val{font-size:22px;font-weight:800;font-variant-numeric:tabular-nums}
+.stat-cell-val{font-size:22px;font-weight:800;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .stat-cell-val.ok{color:var(--success)}
 .stat-cell-val.err{color:var(--danger)}
 .stat-cell-val.accent{color:var(--accent)}
@@ -2306,7 +2309,7 @@ button,a,[role=button],label{touch-action:manipulation}
   caret-shape:block;
   white-space:nowrap;overflow-x:auto;
   padding:0;margin:0;
-  font-family:inherit;
+  font-family:var(--font-sans);
 }
 .calc-result-input::selection{
   background:rgba(var(--accent-rgb,99,102,241),.25);
@@ -2378,7 +2381,7 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .cadv-text-input{
   width:100%;background:transparent;border:none;border-bottom:1px solid rgba(120,180,70,.3);
-  color:#b8d890;font-size:15px;font-family:inherit;padding:3px 0 4px;outline:none;
+  color:#b8d890;font-size:15px;font-family:var(--font-sans);padding:3px 0 4px;outline:none;
   caret-color:#90d060;
 }
 .cadv-text-input::placeholder{color:#5a7a42;font-style:italic;font-size:12px}
@@ -2927,7 +2930,7 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .pause-timer-val{
   font-size:34px;font-weight:800;
-  font-variant-numeric:tabular-nums;
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
   color:var(--accent);
 }
 .pause-timer-val.urgent{color:var(--danger)}
