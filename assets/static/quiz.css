@@ -275,7 +275,7 @@ input,select{font-family:var(--font-sans);outline:none}
 .bank-stat-num{font-size:22px;font-weight:700;color:var(--accent);font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .bank-stat-label{font-size:11px;color:var(--muted);margin-top:2px}
 
-.section-label{font-size:12px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:0 20px 10px;margin-top:4px}
+.section-label{font-size:11px;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.08em;padding:0 20px 10px;margin-top:4px}
 
 /* Mode cards */
 .mode-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;padding:0 20px 20px}
@@ -1030,12 +1030,12 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   background:linear-gradient(160deg,var(--accent-bg) 0%,transparent 70%);
   border-bottom:1px solid var(--border);
 }
-.score-ring-wrap{position:relative;width:180px;height:180px;margin-bottom:20px}
+.score-ring-wrap{position:relative;width:160px;height:160px;margin-bottom:16px}
 .score-ring{transform:rotate(-90deg)}
-.ring-bg{fill:none;stroke:var(--border);stroke-width:10}
+.ring-bg{fill:none;stroke:var(--border);stroke-width:9}
 .ring-fill{
-  fill:none;stroke-width:10;stroke-linecap:round;stroke:var(--accent);
-  stroke-dasharray:1005;stroke-dashoffset:1005;
+  fill:none;stroke-width:9;stroke-linecap:round;stroke:var(--accent);
+  stroke-dasharray:440;stroke-dashoffset:440;
   transition:stroke-dashoffset 1.4s cubic-bezier(.35,0,.2,1);
 }
 .ring-fill.pass{stroke:var(--success)}
@@ -1044,7 +1044,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   position:absolute;inset:0;display:flex;flex-direction:column;
   align-items:center;justify-content:center;
 }
-.score-pct{font-size:44px;font-weight:800;line-height:1;letter-spacing:-.02em;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.score-pct{font-size:38px;font-weight:800;line-height:1;letter-spacing:-.02em;font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .score-label{font-size:11px;color:var(--muted);margin-top:4px;letter-spacing:.08em;text-transform:uppercase;font-weight:600}
 .score-verdict{font-size:22px;font-weight:700;margin-bottom:4px;font-family:var(--font-serif)}
 .score-sub{font-size:13px;color:var(--muted);text-align:center}

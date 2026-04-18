@@ -2110,13 +2110,13 @@ function renderQ(dir = 'none') {
   const btnNext = document.getElementById('btn-next');
   if (isExam) {
     btnPrev.disabled = !examCanGoBack(S.cur);
-    btnNext.textContent = S.cur === total - 1 ? '交卷 ✓' : '下一题 →';
+    btnNext.textContent = S.cur === total - 1 ? '交卷' : '下一题';
     btnNext.className = 'nav-btn primary exam';
     btnNext.disabled  = false;
   } else {
     // 练习模式：完全自由导航，两端禁用即可
     btnPrev.disabled = S.cur === 0;
-    btnNext.textContent = S.cur === total - 1 ? '完成 ✓' : '下一题 →';
+    btnNext.textContent = S.cur === total - 1 ? '完成' : '下一题';
     btnNext.className = 'nav-btn primary';
     btnNext.disabled  = false;
     updateGridDot();  // 练习模式也更新网格颜色
@@ -2342,7 +2342,7 @@ function selectOpt(letter, btn) {
           } else {
             S.cur++; renderQ('forward'); updateGridDot();
           }
-        } else { document.getElementById('btn-next').textContent = '交卷 ✓'; document.getElementById('btn-next').disabled = false; }
+        } else { document.getElementById('btn-next').textContent = '交卷'; document.getElementById('btn-next').disabled = false; }
       }, 250);
 
     } else {
@@ -2435,7 +2435,7 @@ function submitMulti() {
         } else {
           S.cur++; renderQ('forward'); updateGridDot();
         }
-      } else { document.getElementById('btn-next').textContent = '交卷 ✓'; document.getElementById('btn-next').disabled = false; }
+      } else { document.getElementById('btn-next').textContent = '交卷'; document.getElementById('btn-next').disabled = false; }
     }, 120);
 
   } else {
@@ -3555,7 +3555,7 @@ function memoRate(quality) {
     S.memoQueue = unknown;
     S.memoCur   = 0;
     S.memoAgainSet.clear();
-    toast(`还有 ${unknown.length} 题，再来一遍 💪`);
+    toast(`还有 ${unknown.length} 题，继续加油`);
   }
   renderMemo('forward');
 }
@@ -3811,12 +3811,12 @@ function renderResults() {
   const pass = pct >= 60;
 
   document.getElementById('score-pct').textContent = pct + '%';
-  document.getElementById('score-verdict').textContent = pass ? '🎉 通过！' : '继续努力';
+  document.getElementById('score-verdict').textContent = pass ? '已达及格线' : '继续努力';
   document.getElementById('score-sub').textContent =
       `答对 ${R.correct} 题，共 ${R.total} 题`;
 
   // Ring（r=80）
-  const circumference = 2 * Math.PI * 80; // 502.65
+  const circumference = 2 * Math.PI * 70; // 439.8
   const ring = document.getElementById('ring-fill');
   ring.style.strokeDasharray = circumference;
   ring.style.strokeDashoffset = circumference;
@@ -3868,7 +3868,7 @@ function renderResults() {
     }).join('');
     sb.innerHTML = `
       <div class="score-block-header">
-        <span class="score-block-title">📊 得分详情
+        <span class="score-block-title">得分详情
           <span style="font-size:11px;font-weight:400;color:var(--muted);margin-left:6px">
             ${R.multiScoreMode === 'loose' ? '宽松计分' : '严格计分'}
           </span>
@@ -3891,7 +3891,7 @@ function renderResults() {
     sb.parentNode.insertBefore(slowBlock, sb.nextSibling);
   }
   if (R.slowest && R.slowest.length > 0) {
-    slowBlock.innerHTML = `<h3 class="slowest-title">🐢 耗时最长的题目</h3>` +
+    slowBlock.innerHTML = `<h3 class="slowest-title">耗时最长的题目</h3>` +
       R.slowest.map(({ i, q, sec }) => {
         const preview = (q.text || q.stem || '').replace(/<[^>]+>/g, '').trim().slice(0, 60);
         const min = Math.floor(sec / 60);
@@ -4141,7 +4141,7 @@ function _enterExamReview() {
   S.currentGroupIdx = 0;
   // 更新 btn-next 为"交卷"
   const btn = document.getElementById('btn-next');
-  if (btn) { btn.textContent = '交卷 ✓'; btn.disabled = false; }
+  if (btn) { btn.textContent = '交卷'; btn.disabled = false; }
   // 顶部提示
   toast('全部题目已作答，可自由回看，满意后点「交卷」', false, 4000);
   // 在 topbar 区域显示回看提示条
@@ -4150,7 +4150,7 @@ function _enterExamReview() {
     bar = document.createElement('div');
     bar.id = 'exam-review-bar';
     bar.className = 'exam-review-bar';
-    bar.innerHTML = '🔍 回看模式——可自由翻页，答案不可修改，底部「交卷 ✓」提交';
+    bar.innerHTML = '回看模式——可自由翻页，答案不可修改，底部「交卷」提交';
     const quizScreen = document.getElementById('s-quiz');
     if (quizScreen) quizScreen.prepend(bar);
   }
@@ -4491,7 +4491,7 @@ async function startReview() {
   try {
     const res  = await apiFetch('/api/review/due?' + bankQS() + '&date=' + _localDate()).then(r => r.json());
     const fps  = res.fingerprints || [];
-    if (!fps.length) { toast('🎉 今日没有待复习题目！'); return; }
+    if (!fps.length) { toast('今日没有待复习题目'); return; }
     const data = await apiFetch(
         '/api/questions?shuffle=1&fingerprints=' + fps.join(',') + '&' + bankQS()
     ).then(r => r.json());
@@ -4504,7 +4504,7 @@ async function startReview() {
     S.currentGroupIdx = 0; S.caseMaxReached = {};
     S.practiceSessionId = String(Date.now());
     S.streak = 0;
-    toast(`🔄 复习模式：共 ${data.items.length} 题`);
+    toast(`复习模式：共 ${data.items.length} 题`);
     startQuiz();
   } catch(e) { toast('加载复习题目失败'); }
 }
@@ -4520,7 +4520,7 @@ async function startWrongBookReview(filterUnit, cachedItems) {
       const res = await apiFetch('/api/wrongbook?' + bankQS()).then(r => r.json());
       allItems = res.items || [];
     }
-    if (!allItems.length) { toast('暂时没有错题记录 👍'); return; }
+    if (!allItems.length) { toast('暂时没有错题记录'); return; }
 
     // 如果没有指定 unit，且错题跨多个章节，弹出选择面板（把 allItems 缓存传入）
     if (filterUnit === undefined) {
@@ -4562,7 +4562,7 @@ async function startWrongBookReview(filterUnit, cachedItems) {
     let label = '';
     if (Array.isArray(filterUnit))                        label = `【${filterUnit.length}章】`;
     else if (filterUnit && filterUnit !== '__all__')       label = `【${filterUnit}】`;
-    toast(`📕 错题模式${label}：共 ${data.items.length} 题`);
+    toast(`错题模式${label}：共 ${data.items.length} 题`);
     startQuiz();
   } catch(e) { toast('加载错题失败'); }
 }
@@ -4695,7 +4695,7 @@ function practiceSessionWrong() {
   S.currentGroupIdx = 0; S.caseMaxReached = {};
   S.practiceSessionId = String(Date.now());
   S.streak = 0;
-  toast(`📕 本次错题：共 ${wrongQs.length} 题`);
+  toast(`本次错题：共 ${wrongQs.length} 题`);
   startQuiz();
 }
 
@@ -4794,7 +4794,7 @@ async function _checkShareToken() {
     S.currentGroupIdx = 0; S.caseMaxReached = {};
     S.practiceSessionId = null;
     S.streak = 0;
-    toast(`📋 已加载分享试卷：${d.items.length} 题`);
+    toast(`已加载分享试卷：${d.items.length} 题`);
     if (S.mode === 'exam' || S.mode === 'exam_done') {
       S.mode = 'exam';
       S.examLimit = d.time_limit || 90 * 60;
@@ -5128,7 +5128,7 @@ function _renderWbList() {
     <div class="fav-unit-wrap" data-unit="${esc(unit)}">
       <div class="fav-unit-del" data-unit="${esc(unit)}">删除</div>
       <div class="fav-unit-row${_wbMultiMode && _wbSelected.has(unit) ? ' selected' : ''}" data-unit="${esc(unit)}">
-        ${_wbMultiMode ? '<div class="fav-unit-check">✓</div>' : ''}
+        ${_wbMultiMode ? '<div class="fav-unit-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></div>' : ''}
         <div class="fav-unit-left">
           <div class="fav-unit-name">${esc(unit)}</div>
           <div class="fav-unit-count">${cnt} 题</div>
@@ -5240,7 +5240,7 @@ function _renderFavList() {
       <div class="fav-unit-wrap" data-unit="${esc(unit)}">
         <div class="fav-unit-del" data-unit="${esc(unit)}">删除</div>
         <div class="fav-unit-row${_favMultiMode && _favSelected.has(unit) ? ' selected' : ''}" data-unit="${esc(unit)}">
-          ${_favMultiMode ? '<div class="fav-unit-check">✓</div>' : ''}
+          ${_favMultiMode ? '<div class="fav-unit-check"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12l5 5 9-10"/></svg></div>' : ''}
           <div class="fav-unit-left">
             <div class="fav-unit-name">${esc(unit)}</div>
             <div class="fav-unit-count">${fps.length} 题</div>
@@ -5433,7 +5433,7 @@ function _renderRecordStatus(rs) {
       <button onclick="_confirmClearRecord()"
         style="align-self:flex-start;padding:7px 14px;border-radius:8px;font-size:13px;font-weight:600;
                background:var(--danger-bg);color:var(--danger);border:1.5px solid var(--danger);cursor:pointer">
-        🗑 清空我的学习记录
+        清空我的学习记录
       </button>
     </div>`;
 }
