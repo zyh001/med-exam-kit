@@ -3955,8 +3955,12 @@ async function showAIReport() {
   const R = S.results;
   if (!R) return;
 
-  // 先预加载 quiz_ai.js（含 makeStreamingRenderer / markedRender）
-  try { await _loadQuizAI(); } catch(e) {}
+  // 先加载 quiz_ai.js，再等 marked/smd/katex 等 AI 资源就绪
+  try {
+    await _loadQuizAI();
+    // loadAIAssets 由 quiz_ai.js 提供，负责加载 marked/smd/katex
+    if (typeof loadAIAssets === 'function') await loadAIAssets();
+  } catch(e) {}
 
   // 打开底部弹层
   const modal = document.getElementById('ai-report-modal');
@@ -4060,7 +4064,7 @@ async function showAIReport() {
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue;
         const data = line.slice(6);
-        if (data === '[DONE]') { if (renderer) renderer.end(); break; }
+        if (data === '[DONE]') { if (renderer) renderer.flush(); break; }
         try {
           const obj = JSON.parse(data);
           if (obj.error) throw new Error(obj.error);
@@ -4075,7 +4079,7 @@ async function showAIReport() {
         } catch(parseErr) { /* ignore parse errors */ }
       }
     }
-    if (renderer) renderer.end();
+    if (renderer) renderer.flush();
 
   } catch(e) {
     if (loadingEl.parentNode) loadingEl.remove();
