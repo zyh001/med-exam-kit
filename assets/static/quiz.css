@@ -1306,6 +1306,19 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .confirm-btn.exam{background:linear-gradient(135deg,var(--warning),#e8882a)}
 .confirm-btn:disabled{background:var(--border);box-shadow:none;opacity:.5;transform:none;cursor:default}
 
+
+/* ── SVG 图标通用对齐 ── */
+.back-btn svg,.flag-btn svg,.icon-btn svg,
+.nav-btn svg,.home-quick-icon svg,.fav-arrow svg,
+.bci-arrow svg,.fav-unit-chevron svg,
+.res-btn svg,.result-icon svg,
+.mode-icon-wrap svg,.pause-icon svg,
+.resume-icon svg,.gtm-icon svg{
+  display:block;flex-shrink:0;
+}
+/* 按钮内 svg + 文字间距 */
+.nav-btn svg,.res-btn svg{vertical-align:middle;margin-right:4px}
+
 /* ════════════════════════════════════════════
    Animations
 ════════════════════════════════════════════ */
@@ -1387,7 +1400,7 @@ button,a,[role=button],label{touch-action:manipulation}
   display:flex;flex-direction:column;align-items:center;gap:14px;
   box-shadow:0 16px 48px rgba(0,0,0,.5);
 }
-.resume-icon{font-size:36px;line-height:1}
+.resume-icon{line-height:1;display:flex;justify-content:center}
 .resume-title{font-size:17px;font-weight:700;color:var(--text)}
 .resume-desc{font-size:13px;color:var(--muted);line-height:1.75;text-align:center}
 .resume-desc strong{color:var(--accent)}
@@ -1430,7 +1443,7 @@ button,a,[role=button],label{touch-action:manipulation}
   display:flex;flex-direction:column;align-items:center;gap:14px;
   box-shadow:0 16px 48px rgba(0,0,0,.5);
 }
-.gtm-icon{font-size:36px;line-height:1}
+.gtm-icon{line-height:1;display:flex;justify-content:center}
 .gtm-title{font-size:17px;font-weight:700;color:var(--text)}
 .gtm-desc{
   font-size:13px;color:var(--muted);line-height:1.75;text-align:center;
@@ -1664,7 +1677,7 @@ button,a,[role=button],label{touch-action:manipulation}
 .fav-stat-item:active{background:var(--accent-bg)}
 .fav-stat-num{font-size:24px;font-weight:700;color:var(--text)}
 .fav-stat-label{font-size:12px;color:var(--muted);margin-top:2px}
-.fav-arrow{color:var(--accent);font-size:13px}
+.fav-arrow{color:var(--accent);display:flex;align-items:center}
 .fav-stat-divider{width:1px;height:36px;background:var(--border)}
 
 .fav-unit-list{
@@ -1748,7 +1761,7 @@ button,a,[role=button],label{touch-action:manipulation}
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   padding:60px 20px;gap:10px;
 }
-.fav-empty-icon{font-size:48px;opacity:.4}
+.fav-empty-icon{opacity:.35;display:flex;justify-content:center}
 .fav-empty-text{font-size:16px;font-weight:600;color:var(--muted)}
 .fav-empty-hint{font-size:13px;color:var(--muted);opacity:.7}
 
@@ -1761,7 +1774,7 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .home-quick-btn:hover{border-color:var(--accent);background:var(--accent-bg);color:var(--accent)}
 .home-quick-btn:active{transform:scale(.97)}
-.home-quick-icon{font-size:17px;line-height:1}
+.home-quick-icon{font-size:17px;line-height:1;display:flex;align-items:center}
 .due-badge{
   position:absolute;top:-7px;right:-7px;
   min-width:18px;height:18px;padding:0 5px;border-radius:9px;
