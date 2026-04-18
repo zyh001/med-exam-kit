@@ -1257,8 +1257,11 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .q-stem.q-stem-collapsible:not(.is-collapsed) .q-stem-content{max-height:none;opacity:1}
 .stem-toggle-hint{font-size:10px;margin-left:6px;opacity:.65;font-weight:400}
 /* 折叠后 header 变淡 */
-.q-stem.q-stem-collapsible.is-collapsed{background:transparent;border-color:transparent;opacity:.6}
+/* 보통 모드: 접혀도 border 유지, 배경만 투명 */
+.q-stem.q-stem-collapsible.is-collapsed{background:transparent;opacity:.6}
 .q-stem.q-stem-collapsible.is-collapsed .q-stem-label{color:var(--muted)}
+/* zen 모드: 접히면 border도 투명 */
+.s-quiz-zen .q-stem.q-stem-collapsible.is-collapsed{border-color:transparent}
 /* 多选题标记 */
 .multi-badge{
   display:inline-flex;align-items:center;gap:4px;
