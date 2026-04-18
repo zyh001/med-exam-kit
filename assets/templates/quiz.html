@@ -9,9 +9,12 @@
   <link rel="manifest" href="/manifest.json">
   <link rel="icon" type="image/png" sizes="192x192" href="/static/icon-192.png">
   <link rel="apple-touch-icon" href="/static/icon-192.png">
-  <!-- 状态栏颜色：随系统主题自动切换 -->
-  <meta name="theme-color" content="#0d1117" media="(prefers-color-scheme: dark)">
-  <meta name="theme-color" content="#f0f4f8" media="(prefers-color-scheme: light)">
+  <!-- 状态栏颜色：随系统主题自动切换（Design System v2 palette）-->
+  <meta name="theme-color" content="#0B1017" media="(prefers-color-scheme: dark)">
+  <meta name="theme-color" content="#F5F7FA" media="(prefers-color-scheme: light)">
+  <!-- Google Fonts preconnect -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <!-- iOS 灵动岛/刘海：standalone 模式下状态栏半透明叠加，内容从安全区下方开始 -->
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <link rel="stylesheet" href="/static/common.css">
@@ -235,7 +238,7 @@
   <!-- ═══ BANK SELECT ═════════════════════════════════════════════════════ -->
   <div id="s-bank-select" class="screen">
     <div class="bank-select-hero">
-      <div class="bank-select-icon">📚</div>
+      <div class="bank-select-icon" style="font-size:52px;font-weight:900;color:var(--accent);font-family:var(--font-sans)">医</div>
       <h2>选择题库</h2>
       <p class="bank-select-hint">请选择要练习的题库</p>
     </div>
@@ -257,7 +260,7 @@
           <span id="sync-dot" class="sync-dot" style="display:none" onclick="syncNow()"><span class="sync-dot-tip" id="sync-dot-tip"></span></span>
           <button id="pwa-install-btn" class="icon-btn" onclick="pwaTriggerInstall()" title="安装到桌面" style="display:none">📲</button>
           <button id="push-bell-btn" class="icon-btn" onclick="togglePushNotify()" title="每日复习提醒" style="display:none">🔔</button>
-          <button class="icon-btn" onclick="toggleTheme()" title="切换主题">🌓</button>
+          <button class="icon-btn" onclick="toggleTheme()" title="切换主题" id="theme-btn"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg></button>
         </div>
       </div>
       <div class="bank-card">
@@ -285,21 +288,21 @@
     <div class="section-label">选择模式</div>
     <div class="mode-grid" style="padding:0 20px 32px">
       <div class="mode-card practice" onclick="openConfig('practice')">
-        <div class="mode-emoji">✏️</div>
+        <div class="mode-icon-wrap" style="width:42px;height:42px;border-radius:12px;background:var(--accent);display:flex;align-items:center;justify-content:center;color:#fff"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14"/><path d="M22 3h-6a4 4 0 0 0-4 4v14"/></svg></div>
         <div>
           <div class="mode-title">练习模式</div>
           <div class="mode-desc">即时反馈<br>边做边学</div>
         </div>
       </div>
       <div class="mode-card exam" onclick="openConfig('exam')">
-        <div class="mode-emoji">⏱</div>
+        <div class="mode-icon-wrap" style="width:42px;height:42px;border-radius:12px;background:var(--warning);display:flex;align-items:center;justify-content:center;color:#fff"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/><path d="M9 3h6"/></svg></div>
         <div>
           <div class="mode-title">考试模式</div>
           <div class="mode-desc">计时限时<br>模拟正式考试</div>
         </div>
       </div>
       <div class="mode-card memo" onclick="openConfig('memo')">
-        <div class="mode-emoji">🧠</div>
+        <div class="mode-icon-wrap" style="width:42px;height:42px;border-radius:12px;background:var(--success);display:flex;align-items:center;justify-content:center;color:#fff"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16v12H4z"/><path d="M8 10h8M8 14h5"/></svg></div>
         <div>
           <div class="mode-title">背题模式</div>
           <div class="mode-desc">卡片翻转<br>强化记忆</div>
@@ -313,18 +316,18 @@
     <!-- 快捷操作：统计 / 今日复习 / 错题练习 -->
     <div class="home-quick-row">
       <button class="home-quick-btn" onclick="openStats()">
-        <span class="home-quick-icon">📊</span><span>学习统计</span>
+        <span class="home-quick-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M18 17V9"/><path d="M13 17V5"/><path d="M8 17v-3"/></svg></span><span>学习统计</span>
       </button>
       <button class="home-quick-btn" onclick="startReview()" id="review-btn">
-        <span class="home-quick-icon">🔄</span><span>今日复习</span>
+        <span class="home-quick-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg></span><span>今日复习</span>
         <span class="due-badge" id="due-badge" style="display:none">0</span>
       </button>
       <button class="home-quick-btn" onclick="openWrongBook()" id="wrongbook-btn">
-        <span class="home-quick-icon">📕</span><span>错题练习</span>
+        <span class="home-quick-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="m14.5 10-3 3m0-3 3 3"/></svg></span><span>错题练习</span>
         <span class="due-badge err" id="wrong-badge" style="display:none">0</span>
       </button>
       <button class="home-quick-btn" onclick="openFavorites()" id="favorites-btn">
-        <span class="home-quick-icon">⭐</span><span>我的收藏</span>
+        <span class="home-quick-icon"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></span><span>我的收藏</span>
         <span class="due-badge fav" id="fav-badge" style="display:none">0</span>
       </button>
     </div>
@@ -333,7 +336,7 @@
   <!-- ═══ STATS ═══════════════════════════════════════════════════════ -->
   <div id="s-stats" class="screen slide-right">
     <div class="stats-header">
-      <button class="back-btn" onclick="showScreen('s-home')">←</button>
+      <button class="back-btn" onclick="showScreen('s-home')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/></svg></button>
       <h2>学习统计</h2>
     </div>
     <div class="stats-body">
@@ -395,7 +398,7 @@
   <!-- ═══ WRONGBOOK ══════════════════════════════════════════════════ -->
   <div id="s-wrongbook" class="screen slide-right">
     <div class="fav-header">
-      <button class="back-btn" onclick="showScreen('s-home')">←</button>
+      <button class="back-btn" onclick="showScreen('s-home')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/></svg></button>
       <div class="fav-header-center">
         <h2>错题练习</h2>
         <span class="fav-header-sub" id="wb-bank-name"></span>
@@ -407,7 +410,7 @@
     <div class="fav-stat-card">
       <div class="fav-stat-item" id="wb-stat-all" onclick="startWrongBookReview('__all__')">
         <div class="fav-stat-num" id="wb-cnt-all">0</div>
-        <div class="fav-stat-label">全部 <span class="fav-arrow">›</span></div>
+        <div class="fav-stat-label">全部 <span class="fav-arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
       </div>
     </div>
 
@@ -417,7 +420,7 @@
 
     <!-- 空状态 -->
     <div id="wb-empty" class="fav-empty" style="display:none">
-      <div class="fav-empty-icon">📗</div>
+      <div class="fav-empty-icon" style="color:var(--success);opacity:.35"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="m14.5 10-3 3m0-3 3 3"/></svg></div>
       <div class="fav-empty-text">暂无错题记录</div>
       <div class="fav-empty-hint">做完题目后答错的题会出现在这里</div>
     </div>
@@ -431,29 +434,29 @@
   <!-- ═══ FAVORITES ══════════════════════════════════════════════════ -->
   <div id="s-favorites" class="screen slide-right">
     <div class="fav-header">
-      <button class="back-btn" onclick="showScreen('s-home')">←</button>
+      <button class="back-btn" onclick="showScreen('s-home')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/></svg></button>
       <div class="fav-header-center">
         <h2>我的收藏</h2>
         <span class="fav-header-sub" id="fav-bank-name"></span>
       </div>
-      <button class="icon-btn fav-clear-btn" id="fav-clear-btn" onclick="confirmClearFavorites()" title="清空收藏" style="display:none">🗑</button>
+      <button class="icon-btn fav-clear-btn" id="fav-clear-btn" onclick="confirmClearFavorites()" title="清空收藏" style="display:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6M14 11v6"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/></svg></button>
     </div>
 
     <!-- 统计卡片 -->
     <div class="fav-stat-card">
       <div class="fav-stat-item" onclick="startFavoritesQuiz('today')">
         <div class="fav-stat-num" id="fav-cnt-today">0</div>
-        <div class="fav-stat-label">今日 <span class="fav-arrow">›</span></div>
+        <div class="fav-stat-label">今日 <span class="fav-arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
       </div>
       <div class="fav-stat-divider"></div>
       <div class="fav-stat-item" onclick="startFavoritesQuiz('yesterday')">
         <div class="fav-stat-num" id="fav-cnt-yesterday">0</div>
-        <div class="fav-stat-label">昨日 <span class="fav-arrow">›</span></div>
+        <div class="fav-stat-label">昨日 <span class="fav-arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
       </div>
       <div class="fav-stat-divider"></div>
       <div class="fav-stat-item" onclick="startFavoritesQuiz('all')">
         <div class="fav-stat-num" id="fav-cnt-all">0</div>
-        <div class="fav-stat-label">全部 <span class="fav-arrow">›</span></div>
+        <div class="fav-stat-label">全部 <span class="fav-arrow"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span></div>
       </div>
     </div>
 
@@ -463,7 +466,7 @@
 
     <!-- 空状态 -->
     <div id="fav-empty" class="fav-empty" style="display:none">
-      <div class="fav-empty-icon">⭐</div>
+      <div class="fav-empty-icon" style="color:var(--accent);opacity:.35"><svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/></svg></div>
       <div class="fav-empty-text">还没有收藏题目</div>
       <div class="fav-empty-hint">做题时长按 ⚑ 按钮即可收藏</div>
     </div>
@@ -477,7 +480,7 @@
   <!-- ═══ CONFIG ══════════════════════════════════════════════════════ -->
   <div id="s-config" class="screen slide-right">
     <div class="config-header">
-      <button class="back-btn" onclick="showScreen('s-home')">←</button>
+      <button class="back-btn" onclick="showScreen('s-home')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/></svg></button>
       <div class="config-title">
         <h2 id="cfg-title">设置</h2>
       </div>
@@ -498,7 +501,7 @@
           </div>
         </div>
         <input class="unit-search-input" id="unit-search"
-               placeholder="🔍 搜索章节名称…" oninput="filterUnitChips(this.value)">
+               placeholder="搜索章节名称…" oninput="filterUnitChips(this.value)">
         <div class="unit-quick-bar">
           <button class="unit-quick-btn" onclick="selectAllUnits()">全选</button>
           <button class="unit-quick-btn" onclick="invertUnits()">反选</button>
@@ -616,17 +619,17 @@
   <!-- ═══ QUIZ ════════════════════════════════════════════════════════ -->
   <div id="s-quiz" class="screen slide-right">
     <div class="quiz-header">
-      <button class="back-btn" id="quiz-back-btn" onclick="quitQuiz()">✕</button>
+      <button class="back-btn" id="quiz-back-btn" onclick="quitQuiz()" aria-label="退出"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>
       <div class="quiz-progress-wrap" id="quiz-progress-wrap">
         <div class="quiz-progress-text">
           <span class="quiz-progress-cur"><span id="q-cur">1</span> / <span id="q-total">0</span></span>
           <span class="quiz-progress-total" id="q-unit-tag"></span>
         </div>
       </div>
-      <div class="quiz-timer" id="quiz-timer" style="display:none" title="长按暂停（计时不停）">⏱ <span id="timer-display">00:00</span><span class="timer-longpress-ring" id="timer-longpress-ring"></span></div>
-      <button class="flag-btn" id="calc-toggle-btn" onclick="toggleCalc()" title="计算器" style="display:none">🧮</button>
-      <button class="flag-btn" id="share-quiz-btn" onclick="shareCurrentQuiz()" title="分享试卷">🔗</button>
-      <button class="flag-btn" id="flag-btn" onclick="toggleFlag()" title="标记">⚑</button>
+      <div class="quiz-timer" id="quiz-timer" style="display:none" title="长按暂停（计时不停）"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2 2"/></svg> <span id="timer-display">00:00</span><span class="timer-longpress-ring" id="timer-longpress-ring"></span></div>
+      <button class="flag-btn" id="calc-toggle-btn" onclick="toggleCalc()" title="计算器" style="display:none"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2"/><line x1="8" y1="6" x2="16" y2="6"/><line x1="8" y1="10" x2="10" y2="10"/><line x1="14" y1="10" x2="16" y2="10"/><line x1="8" y1="14" x2="10" y2="14"/><line x1="14" y1="14" x2="16" y2="14"/><line x1="8" y1="18" x2="16" y2="18"/></svg></button>
+      <button class="flag-btn" id="share-quiz-btn" onclick="shareCurrentQuiz()" title="分享试卷"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></button>
+      <button class="flag-btn" id="flag-btn" onclick="toggleFlag()" title="标记/收藏"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2v20l7-4 7 4V2H5z"/></svg></button>
       <div class="progress-bar header-progress"><div class="progress-fill" id="progress-fill"></div></div>
     </div>
     <!-- Exam grid -->
@@ -643,7 +646,7 @@
       </div>
     </div>
     <div class="quiz-footer" id="quiz-footer">
-      <button class="nav-btn" id="btn-prev" onclick="prevQ()">← 上题</button>
+      <button class="nav-btn" id="btn-prev" onclick="prevQ()"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/></svg> 上题</button>
       <button class="nav-btn primary" id="btn-next" onclick="nextOrSubmit()">下一题 →</button>
       <button class="q-grid-toggle" id="grid-toggle" onclick="toggleGrid()" style="display:none">题目列表</button>
     </div>
@@ -652,7 +655,7 @@
   <!-- ═══ MEMO ════════════════════════════════════════════════════════ -->
   <div id="s-memo" class="screen slide-right">
     <div class="quiz-header">
-      <button class="back-btn" onclick="quitQuiz()">✕</button>
+      <button class="back-btn" onclick="quitQuiz()" aria-label="退出"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>
       <div class="quiz-progress-wrap">
         <div class="quiz-progress-text">
           <span class="quiz-progress-cur">第 <span id="memo-cur">1</span> 题</span>
@@ -706,7 +709,7 @@
   <!-- ═══ RESULTS ══════════════════════════════════════════════════════ -->
   <div id="s-results" class="screen slide-right">
     <div class="results-header">
-      <button class="back-btn" onclick="showScreen('s-home')">✕</button>
+      <button class="back-btn" onclick="showScreen('s-home')" aria-label="关闭"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg></button>
       <h2>本次结果</h2>
     </div>
     <div class="results-scroll">
@@ -729,19 +732,19 @@
           </div>
           <div class="stats-grid">
             <div class="stat-cell">
-              <div class="stat-cell-label">✅ 答对</div>
+              <div class="stat-cell-label"><span style="color:var(--success)">●</span> 答对</div>
               <div class="stat-cell-val ok" id="res-correct">—</div>
             </div>
             <div class="stat-cell">
-              <div class="stat-cell-label">❌ 答错</div>
+              <div class="stat-cell-label"><span style="color:var(--danger)">●</span> 答错</div>
               <div class="stat-cell-val err" id="res-wrong">—</div>
             </div>
             <div class="stat-cell">
-              <div class="stat-cell-label">⏭ 未答</div>
+              <div class="stat-cell-label"><span style="color:var(--muted)">●</span> 未答</div>
               <div class="stat-cell-val warn" id="res-skip">—</div>
             </div>
             <div class="stat-cell">
-              <div class="stat-cell-label">⏱ 用时</div>
+              <div class="stat-cell-label"><span style="color:var(--accent)">●</span> 用时</div>
               <div class="stat-cell-val accent" id="res-time">—</div>
             </div>
           </div>
@@ -751,13 +754,13 @@
           <div class="unit-breakdown fade-up" id="unit-breakdown" style="display:none"></div>
           <div class="score-block fade-up" id="score-block" style="display:none"></div>
           <div class="results-actions fade-up">
-            <button class="res-btn primary"   onclick="showReview()" id="res-review-detail-btn">📖 查看解析</button>
-            <button class="res-btn ghost"     onclick="retryQuiz()">🔁 再练一次</button>
-            <button class="res-btn wrongbook" onclick="practiceSessionWrong()" id="res-wrongbook-btn" style="display:none">📕 练习错题</button>
-            <button class="res-btn review"    onclick="startReview()" id="res-review-btn" style="display:none">🔄 今日复习</button>
-            <button class="res-btn ghost"     onclick="shareExam()" id="res-share-btn" style="display:none">🔗 分享试卷</button>
-            <button class="res-btn ai-report" onclick="showAIReport()" id="res-ai-report-btn" style="display:none">🤖 AI 分析报告</button>
-            <button class="res-btn ghost"     onclick="showScreen('s-home')">🏠 回到主页</button>
+            <button class="res-btn primary"   onclick="showReview()" id="res-review-detail-btn"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg> 查看解析</button>
+            <button class="res-btn ghost"     onclick="retryQuiz()"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg> 再练一次</button>
+            <button class="res-btn wrongbook" onclick="practiceSessionWrong()" id="res-wrongbook-btn" style="display:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/><path d="m14.5 10-3 3m0-3 3 3"/></svg> 练习错题</button>
+            <button class="res-btn review"    onclick="startReview()" id="res-review-btn" style="display:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg> 今日复习</button>
+            <button class="res-btn ghost"     onclick="shareExam()" id="res-share-btn" style="display:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg> 分享试卷</button>
+            <button class="res-btn ai-report" onclick="showAIReport()" id="res-ai-report-btn" style="display:none"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4m2-2h-4m-9 14v2m1-1H8"/></svg> AI 分析报告</button>
+            <button class="res-btn ghost"     onclick="showScreen('s-home')"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg> 回到主页</button>
           </div>
         </div>
       </div>
@@ -767,7 +770,7 @@
   <!-- ═══ REVIEW ══════════════════════════════════════════════════════ -->
   <div id="s-review" class="screen slide-right">
     <div class="review-header">
-      <button class="back-btn" onclick="showScreen('s-results')">←</button>
+      <button class="back-btn" onclick="showScreen('s-results')"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 12H5"/><path d="M12 5l-7 7 7 7"/></svg></button>
       <h2>题目解析</h2>
     </div>
     <div class="review-tabs">
@@ -782,7 +785,7 @@
   <!-- ═══ 考试进度恢复弹窗 ══════════════════════════════════════════════ -->
   <div class="modal-backdrop" id="resume-modal" style="display:none">
     <div class="resume-box">
-      <div class="resume-icon">📋</div>
+      <div class="resume-icon"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="2" width="6" height="4" rx="1"/><path d="M8 4H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V6a2 2 0 0 0-2-2h-2"/><path d="M12 11h4M12 16h4M8 11h.01M8 16h.01"/></svg></div>
       <div class="resume-title">发现未完成的考试</div>
       <div class="resume-desc">检测到上次考试未提交，是否继续作答？</div>
       <div class="resume-meta" id="resume-meta">
@@ -814,7 +817,7 @@
   <div class="modal-backdrop" id="group-transition-modal" style="display:none"
        onclick="if(event.target===this)dismissGroupModal()">
     <div class="gtm-box">
-      <div class="gtm-icon">⚠️</div>
+      <div class="gtm-icon"><svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></div>
       <div class="gtm-title">即将切换题型</div>
       <div class="gtm-desc">
         下一题型为<strong id="gtm-mode"></strong>。<br>
@@ -1249,7 +1252,7 @@
   <div id="ai-report-modal" style="display:none" onclick="if(event.target===this)closeAIReport()" class="ai-report-backdrop">
     <div class="ai-report-sheet">
       <div class="ai-report-sheet-hd">
-        <span class="ai-report-sheet-title">🤖 AI 考试分析报告</span>
+        <span class="ai-report-sheet-title"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z"/><path d="M20 3v4m2-2h-4m-9 14v2m1-1H8"/></svg> AI 考试分析报告</span>
         <button class="ai-report-close" onclick="closeAIReport()">✕</button>
       </div>
       <!-- 消息列表区域，复用 .ai-messages 样式 -->
@@ -1279,7 +1282,7 @@
 <!-- ═══ 考试暂停遮罩（挂在 body 顶层，绕开 #app overflow:hidden 的 iOS 事件截断） -->
   <div id="pause-overlay" class="pause-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="pause-title">
     <div class="pause-card">
-      <div class="pause-icon">⏸</div>
+      <div class="pause-icon"><svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"><rect x="6" y="4" width="4" height="16" rx="1"/><rect x="14" y="4" width="4" height="16" rx="1"/></svg></div>
       <div id="pause-title" class="pause-title">考试已暂停</div>
       <div class="pause-sub">计时仍在继续（由服务端记录）<br>可以暂时离开屏幕，准备好后点"继续"</div>
       <div class="pause-timer">

@@ -841,7 +841,7 @@ function renderBankSelectPage() {
           <span class="bci-tag">${b.total_sq.toLocaleString()} 题</span>
         </div>
       </div>
-      <div class="bci-arrow">›</div>
+      <div class="bci-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></div>
     `;
     card.onclick = () => selectBankAndEnter(idx);
     container.appendChild(card);
@@ -2482,7 +2482,7 @@ function buildExplain(q, selected) {
   const resultRow = document.createElement('div');
   resultRow.className = `explain-result ${isCorrect ? 'ok' : 'err'}`;
   resultRow.innerHTML = `
-    <span class="result-icon">${isCorrect ? '✅' : '❌'}</span>
+    <span class="result-icon">${isCorrect ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>' : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6m0-6 6 6"/></svg>'}</span>
     <span class="result-title ${isCorrect ? 'ok' : 'err'}">${isCorrect ? '回答正确！' : (isMulti ? '答案不完整或有误' : '回答错误')}</span>`;
   inner.appendChild(resultRow);
 
@@ -2776,7 +2776,7 @@ function _updateFlagBtn() {
   const isFav = fp ? _loadFavorites().has(fp) : false;
   btn.classList.toggle('active', isMarked && !isFav);
   btn.classList.toggle('fav', isFav);
-  btn.textContent = isFav ? '★' : '⚑';
+  btn.innerHTML = isFav ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2v20l7-4 7 4V2H5z"/></svg>';
   btn.title = isFav ? '已收藏（长按取消）' : '标记（长按收藏）';
 }
 
@@ -3907,7 +3907,7 @@ function renderResults() {
           }
           return sel === q.answer;
         })();
-        const badge = isCorrect === null ? '⬜' : isCorrect ? '✅' : '❌';
+        const badge = isCorrect === null ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>' : isCorrect ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
         return `<div class="slowest-row" onclick="_jumpToReviewQ(${i})">
           <span class="slowest-badge">${badge}</span>
           <span class="slowest-num">第${i+1}题</span>
@@ -4143,7 +4143,7 @@ function _enterExamReview() {
   const btn = document.getElementById('btn-next');
   if (btn) { btn.textContent = '交卷 ✓'; btn.disabled = false; }
   // 顶部提示
-  toast('✅ 全部题目已作答，可自由回看，满意后点「交卷」', false, 4000);
+  toast('全部题目已作答，可自由回看，满意后点「交卷」', false, 4000);
   // 在 topbar 区域显示回看提示条
   let bar = document.getElementById('exam-review-bar');
   if (!bar) {
@@ -4259,7 +4259,7 @@ function _buildReviewScoreBadge(q, sel, idx) {
   }
 
   const cls   = earned >= perSq ? 'full' : earned > 0 ? 'partial' : 'zero';
-  const icon  = earned >= perSq ? '✅' : earned > 0 ? '⚡' : '❌';
+  const icon  = earned >= perSq ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : earned > 0 ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
   const label = isEmpty ? '未作答  0' : `${icon} ${earned}`;
   return `<div class="review-score-badge ${cls}">${label} / ${perSq} 分</div>`;
 }
@@ -4758,7 +4758,7 @@ async function _doShareExam(qs, opts) {
       navigator.share({ title: '医考练习 - 试卷分享', text: `共 ${qs.length} 题`, url }).catch(()=>{});
     } else if (navigator.clipboard) {
       await navigator.clipboard.writeText(url);
-      toast('✅ 分享链接已复制到剪贴板');
+      toast('链接已复制到剪贴板');
     } else {
       prompt('分享链接：', url);
     }
@@ -5133,7 +5133,7 @@ function _renderWbList() {
           <div class="fav-unit-name">${esc(unit)}</div>
           <div class="fav-unit-count">${cnt} 题</div>
         </div>
-        ${_wbMultiMode ? '' : '<span class="fav-unit-chevron">›</span>'}
+        ${_wbMultiMode ? '' : '<span class="fav-unit-chevron"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span>'}
       </div>
     </div>`).join('');
 
@@ -5245,7 +5245,7 @@ function _renderFavList() {
             <div class="fav-unit-name">${esc(unit)}</div>
             <div class="fav-unit-count">${fps.length} 题</div>
           </div>
-          ${_favMultiMode ? '' : '<span class="fav-unit-chevron">›</span>'}
+          ${_favMultiMode ? '' : '<span class="fav-unit-chevron"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span>'}
         </div>
       </div>`;
   }).join('');
