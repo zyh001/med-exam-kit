@@ -1296,6 +1296,28 @@
     </div>
   </div>
 
+
+  <!-- ═══ 字体大小调节弹窗 ════════════════════════════════════════════ -->
+  <div id="fontsize-modal" class="modal-backdrop" style="display:none"
+       onclick="if(event.target===this)_closeFsModal()">
+    <div class="fontsize-box" id="fontsize-box">
+      <div class="fontsize-title">文字大小</div>
+      <div class="fontsize-chips" id="fontsize-chips">
+        <!-- rendered by JS -->
+      </div>
+      <div class="fontsize-preview" id="fontsize-preview">
+        <div class="fontsize-preview-label">预览效果</div>
+        <div class="fontsize-preview-stem">
+          患者，男，65 岁。突发胸痛 2 小时，伴大汗。<span style="color:var(--danger);background:var(--danger-bg);padding:0 2px;border-radius:3px;font-weight:700">最</span>应首先进行的检查是？
+        </div>
+        <div class="fontsize-preview-opt">
+          <span class="fontsize-preview-opt-lbl">B</span>
+          心肌酶谱（CK-MB、肌钙蛋白）
+        </div>
+      </div>
+    </div>
+  </div>
+
   <div id="toast"></div>
 </body>
 </html>
