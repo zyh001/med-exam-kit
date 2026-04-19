@@ -791,7 +791,11 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   width:24px;height:24px;border-radius:var(--r-xs);background:var(--accent);
   color:#fff;font-size:11px;font-weight:700;margin-right:8px;flex-shrink:0;
   vertical-align:middle;font-family:var(--font-mono);
+  cursor:pointer;user-select:none;-webkit-user-select:none;
+  transition:opacity .15s,transform .12s;
 }
+.q-num:hover{opacity:.8}
+.q-num:active{transform:scale(.88)}
 
 /* Options */
 .options-list{display:flex;flex-direction:column;gap:8px;margin-bottom:16px}

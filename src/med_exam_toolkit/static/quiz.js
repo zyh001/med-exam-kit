@@ -2231,9 +2231,24 @@ function _fillQ(wrap, q, isExam, isPractice) {
       else btn.classList.add('dim');
       btn.disabled = true;
     } else if (isExam) {
-      const sel = isMulti ? (curSel instanceof Set && curSel.has(letter)) : curSel === letter;
-      if (sel) btn.classList.add(isMulti ? 'multi-selected' : 'selected');
-      btn.onclick = () => selectOpt(letter, btn);
+      // 案例分析题：如果用户已越过此题（恢复会话或正常前进后），锁定选项禁止回改
+      const _qGIdx   = getGroupIdxForQ(S.cur);
+      const _qGroup  = S.modeGroups[_qGIdx];
+      const _isPast  = _qGroup && !_qGroup.allowBack &&
+                       S.caseMaxReached[_qGIdx] != null &&
+                       S.cur < S.caseMaxReached[_qGIdx];
+      if (_isPast) {
+        // 已锁：仅显示已选状态，禁止交互
+        const sel = isMulti ? (curSel instanceof Set && curSel.has(letter)) : curSel === letter;
+        if (sel) btn.classList.add(isMulti ? 'multi-selected' : 'selected');
+        btn.disabled = true;
+        btn.classList.add('dim');
+        if (sel) { btn.classList.remove('dim'); } // 已选的不变灰，保持可见
+      } else {
+        const sel = isMulti ? (curSel instanceof Set && curSel.has(letter)) : curSel === letter;
+        if (sel) btn.classList.add(isMulti ? 'multi-selected' : 'selected');
+        btn.onclick = () => selectOpt(letter, btn);
+      }
     } else {
       const sel = isMulti ? (curSel instanceof Set && curSel.has(letter)) : curSel === letter;
       if (sel) btn.classList.add(isMulti ? 'multi-selected' : 'selected');
@@ -2254,12 +2269,19 @@ function _fillQ(wrap, q, isExam, isPractice) {
 
   // 多选确认按钮
   if (isMulti && !isRevealed) {
-    const cfm = document.createElement('button');
-    cfm.className = 'confirm-btn' + (isExam ? ' exam' : '');
-    cfm.textContent = isExam ? '确认选择' : '提交答案';
-    cfm.disabled = !(curSel instanceof Set && curSel.size > 0);
-    cfm.onclick = () => submitMulti();
-    wrap.appendChild(cfm);
+    const _cfmGIdx  = getGroupIdxForQ(S.cur);
+    const _cfmGroup = S.modeGroups[_cfmGIdx];
+    const _cfmPast  = isExam && _cfmGroup && !_cfmGroup.allowBack &&
+                      S.caseMaxReached[_cfmGIdx] != null &&
+                      S.cur < S.caseMaxReached[_cfmGIdx];
+    if (!_cfmPast) {
+      const cfm = document.createElement('button');
+      cfm.className = 'confirm-btn' + (isExam ? ' exam' : '');
+      cfm.textContent = isExam ? '确认选择' : '提交答案';
+      cfm.disabled = !(curSel instanceof Set && curSel.size > 0);
+      cfm.onclick = () => submitMulti();
+      wrap.appendChild(cfm);
+    }
   }
 
   // Explanation
@@ -7634,54 +7656,30 @@ init();
     _setCur(v);
   };
 
-  // ── 长按监听：附加到 .quiz-body（做题区域）────────────────────────
-  var _lpTimer  = null;
-  var _lpActive = false;
+  // ── 点击 .q-num（题号圆球）触发字体调节弹窗 ────────────────────
+  // 使用事件委托挂在稳定父容器 .quiz-body 上，q-stage 重建后仍有效
+  function _attachQNumClick() {
+    const quizBody = document.getElementById('s-quiz');
+    if (!quizBody || quizBody._fsClickAttached) return;
+    quizBody._fsClickAttached = true;
 
-  function _attachLongPress() {
-    const body = document.getElementById('q-stage');
-    if (!body || body._fsLpAttached) return;
-    body._fsLpAttached = true;
-
-    function _start(e) {
-      // 仅当点击在题目内容区，而非选项按钮上
-      if (e.target.closest('.opt') || e.target.closest('button') ||
-          e.target.closest('.flag-btn') || e.target.closest('.nav-btn')) return;
-      _lpActive = true;
-      _lpTimer = setTimeout(function () {
-        if (_lpActive) {
-          _openFsModal();
-          navigator.vibrate && navigator.vibrate(12);
-        }
-      }, 600);
-    }
-    function _cancel() {
-      _lpActive = false;
-      clearTimeout(_lpTimer);
-    }
-
-    body.addEventListener('touchstart',  _start,  { passive: true });
-    body.addEventListener('touchend',    _cancel, { passive: true });
-    body.addEventListener('touchmove',   _cancel, { passive: true });
-    body.addEventListener('mousedown',   _start);
-    body.addEventListener('mouseup',     _cancel);
-    body.addEventListener('mouseleave',  _cancel);
-    // 防止长按触发系统文字选择菜单
-    body.addEventListener('contextmenu', function (e) {
-      if (_lpActive) e.preventDefault();
+    quizBody.addEventListener('click', function (e) {
+      const num = e.target.closest('.q-num');
+      if (!num) return;
+      e.stopPropagation();
+      _openFsModal();
+      navigator.vibrate && navigator.vibrate(12);
     });
   }
 
   // ── 初始化 ────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', function () {
     _applyOnLoad();
-    // q-stage 在 DOMContentLoaded 时已存在，直接附加
-    _attachLongPress();
+    _attachQNumClick();
   });
 
-  // 如果 DOMContentLoaded 已过（脚本在末尾加载），直接执行
   if (document.readyState !== 'loading') {
     _applyOnLoad();
-    _attachLongPress();
+    _attachQNumClick();
   }
 })();
