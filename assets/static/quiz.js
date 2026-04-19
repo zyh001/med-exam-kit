@@ -2112,7 +2112,14 @@ function renderQ(dir = 'none') {
     btnPrev.disabled = !examCanGoBack(S.cur);
     btnNext.textContent = S.cur === total - 1 ? '交卷 ✓' : '下一题 →';
     btnNext.className = 'nav-btn primary exam';
-    btnNext.disabled  = false;
+    // A3/A4/案例分析题：未作答时禁用「下一题」，强制必答
+    const _btnGIdx   = getGroupIdxForQ(S.cur);
+    const _btnGroup  = S.modeGroups[_btnGIdx];
+    const _btnNoBack = _btnGroup && !_btnGroup.allowBack;
+    const _btnSel    = S.ans[S.cur];
+    const _btnAnswered = _btnSel instanceof Set ? _btnSel.size > 0
+                       : (_btnSel !== undefined && _btnSel !== null && _btnSel !== '');
+    btnNext.disabled = _btnNoBack && !_btnAnswered;
   } else {
     // 练习模式：完全自由导航，两端禁用即可
     btnPrev.disabled = S.cur === 0;
@@ -2340,7 +2347,13 @@ function selectOpt(letter, btn) {
       const _curGroup = S.modeGroups[_curGIdx];
       if (_curGroup && !_curGroup.allowBack) {
         updateGridDot();
-        return; // 不自动前进
+        // 单选后立即解锁「下一题」按钮
+        const _nb = document.getElementById('btn-next');
+        if (_nb) _nb.disabled = false;
+        return;
+        // 多选确认后解锁「下一题」
+        const _mnb = document.getElementById('btn-next');
+        if (_mnb) _mnb.disabled = false; // 不自动前进
       }
 
       // 其他题型：自动前进（短暂延迟让用户看到选中态）
