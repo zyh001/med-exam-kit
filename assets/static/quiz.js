@@ -7546,3 +7546,142 @@ init();
     }
   }, { passive: true });
 })();
+
+// ════════════════════════════════════════════
+// 题目字体大小调节（长按题目区域触发）
+// ════════════════════════════════════════════
+(function () {
+  const LS_KEY  = 'quiz_fontsize';
+  const LEVELS  = [
+    { val: 1, label: '较小', desc: '偏小' },
+    { val: 2, label: '小',   desc: '稍小' },
+    { val: 3, label: '中',   desc: '默认' },
+    { val: 4, label: '大',   desc: '舒适' },
+    { val: 5, label: '较大', desc: '超大' },
+  ];
+  const SCREENS = ['s-quiz', 's-memo'];
+
+  // ── 读 / 写 当前档位 ──────────────────────────────────────────────
+  function _getCur() {
+    return parseInt(localStorage.getItem(LS_KEY) || '3', 10);
+  }
+  function _setCur(v) {
+    v = Math.max(1, Math.min(5, v));
+    localStorage.setItem(LS_KEY, v);
+    SCREENS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.setAttribute('data-fontsize', v);
+    });
+    _renderChips(v);
+    _updatePreview(v);
+  }
+
+  // ── 初始化：页面加载时应用已保存的档位 ────────────────────────────
+  function _applyOnLoad() {
+    const v = _getCur();
+    SCREENS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.setAttribute('data-fontsize', v);
+    });
+  }
+
+  // ── 渲染弹窗 chip 列表 ─────────────────────────────────────────────
+  function _renderChips(cur) {
+    const wrap = document.getElementById('fontsize-chips');
+    if (!wrap) return;
+    wrap.innerHTML = LEVELS.map(l => {
+      const active = l.val === cur ? ' active' : '';
+      // 5 个竖条，高度随档位递增，当前档位加色
+      const bars = LEVELS.map(b => {
+        const h = 4 + b.val * 3;           // 7 10 13 16 19 px
+        const style = `height:${h}px`;
+        return `<span style="${style}"></span>`;
+      }).join('');
+      return `<button class="fontsize-chip${active}" onclick="_setFontSize(${l.val})" title="${l.desc}">
+        <div class="fontsize-chip-dots">${bars}</div>
+        <span>${l.label}</span>
+      </button>`;
+    }).join('');
+  }
+
+  // ── 更新预览区字体档位 ─────────────────────────────────────────────
+  function _updatePreview(v) {
+    const box = document.getElementById('fontsize-box');
+    if (box) box.setAttribute('data-fontsize', v);
+  }
+
+  // ── 打开弹窗 ──────────────────────────────────────────────────────
+  function _openFsModal() {
+    const modal = document.getElementById('fontsize-modal');
+    if (!modal) return;
+    const cur = _getCur();
+    _renderChips(cur);
+    _updatePreview(cur);
+    modal.style.display = 'flex';
+    // 让预览区也应用当前档位的变量（挂在 fontsize-box 上通过 CSS var 覆盖）
+    const box = document.getElementById('fontsize-box');
+    if (box) box.setAttribute('data-fontsize', cur);
+  }
+
+  // ── 关闭弹窗 ──────────────────────────────────────────────────────
+  window._closeFsModal = function () {
+    const modal = document.getElementById('fontsize-modal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  // ── 外部调用：设置档位 ────────────────────────────────────────────
+  window._setFontSize = function (v) {
+    _setCur(v);
+  };
+
+  // ── 长按监听：附加到 .quiz-body（做题区域）────────────────────────
+  var _lpTimer  = null;
+  var _lpActive = false;
+
+  function _attachLongPress() {
+    const body = document.getElementById('q-stage');
+    if (!body || body._fsLpAttached) return;
+    body._fsLpAttached = true;
+
+    function _start(e) {
+      // 仅当点击在题目内容区，而非选项按钮上
+      if (e.target.closest('.opt') || e.target.closest('button') ||
+          e.target.closest('.flag-btn') || e.target.closest('.nav-btn')) return;
+      _lpActive = true;
+      _lpTimer = setTimeout(function () {
+        if (_lpActive) {
+          _openFsModal();
+          navigator.vibrate && navigator.vibrate(12);
+        }
+      }, 600);
+    }
+    function _cancel() {
+      _lpActive = false;
+      clearTimeout(_lpTimer);
+    }
+
+    body.addEventListener('touchstart',  _start,  { passive: true });
+    body.addEventListener('touchend',    _cancel, { passive: true });
+    body.addEventListener('touchmove',   _cancel, { passive: true });
+    body.addEventListener('mousedown',   _start);
+    body.addEventListener('mouseup',     _cancel);
+    body.addEventListener('mouseleave',  _cancel);
+    // 防止长按触发系统文字选择菜单
+    body.addEventListener('contextmenu', function (e) {
+      if (_lpActive) e.preventDefault();
+    });
+  }
+
+  // ── 初始化 ────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function () {
+    _applyOnLoad();
+    // q-stage 在 DOMContentLoaded 时已存在，直接附加
+    _attachLongPress();
+  });
+
+  // 如果 DOMContentLoaded 已过（脚本在末尾加载），直接执行
+  if (document.readyState !== 'loading') {
+    _applyOnLoad();
+    _attachLongPress();
+  }
+})();
