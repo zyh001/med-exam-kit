@@ -1,13 +1,22 @@
-name: Build Executables
+name: Build · Python (main)
 
+# 触发规则：
+#   v1.0.0-py  → 只触发本 workflow
+#   v1.0.0     → 与 Go workflow 同步触发（双分支统一发版）
 on:
   push:
     tags:
       - 'v*-py'
+      - 'v[0-9]*.[0-9]*.[0-9]*'   # 纯版本号 tag，如 v1.2.3
   workflow_dispatch:
-permissions:
-    contents: write
+    inputs:
+      ref:
+        description: 'Branch / tag / SHA to build'
+        default: 'main'
+        required: false
 
+permissions:
+  contents: write
 
 env:
   PYTHON_VERSION: '3.12'
@@ -20,28 +29,29 @@ jobs:
       matrix:
         include:
           - os: windows-latest
-            artifact_suffix: windows.exe
+            artifact_suffix: windows-amd64.exe
           - os: macos-latest
-            artifact_suffix: macos
+            artifact_suffix: darwin-arm64
           - os: ubuntu-latest
-            artifact_suffix: linux
+            artifact_suffix: linux-amd64
 
     steps:
-      - name: Checkout code
+      - name: Checkout main branch
         uses: actions/checkout@v4
+        with:
+          ref: main   # 始终从 main 分支构建，与 tag 落点无关
 
       - name: Set up Python ${{ env.PYTHON_VERSION }}
         uses: actions/setup-python@v5
         with:
           python-version: ${{ env.PYTHON_VERSION }}
 
-      - name: Cache pip packages
+      - name: Cache pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('pyproject.toml') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          restore-keys: ${{ runner.os }}-pip-
 
       - name: Install dependencies
         run: |
@@ -49,7 +59,7 @@ jobs:
           pip install pyinstaller
 
       - name: Determine version
-        id: version
+        id: ver
         shell: bash
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
@@ -58,7 +68,7 @@ jobs:
             echo "version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build with PyInstaller (Unix)
+      - name: Build (Unix)
         if: runner.os != 'Windows'
         run: |
           pyinstaller --onefile --noconfirm \
@@ -81,7 +91,7 @@ jobs:
             --hidden-import lxml \
             src/med_exam_toolkit/cli.py
 
-      - name: Build with PyInstaller (Windows)
+      - name: Build (Windows)
         if: runner.os == 'Windows'
         run: |
           pyinstaller --onefile --noconfirm `
@@ -104,38 +114,37 @@ jobs:
             --hidden-import lxml `
             src/med_exam_toolkit/cli.py
 
-      - name: Rename and stage artifact (Unix)
+      - name: Stage artifact (Unix)
         if: runner.os != 'Windows'
         run: |
-          OUT="dist/med-exam-kit-${{ steps.version.outputs.version }}-${{ matrix.artifact_suffix }}"
+          OUT="dist/med-exam-kit-py-${{ steps.ver.outputs.version }}-${{ matrix.artifact_suffix }}"
           mv dist/med-exam-kit "$OUT"
           chmod +x "$OUT"
 
-      - name: Rename and stage artifact (Windows)
+      - name: Stage artifact (Windows)
         if: runner.os == 'Windows'
         shell: bash
         run: |
           mv dist/med-exam-kit.exe \
-            "dist/med-exam-kit-${{ steps.version.outputs.version }}-${{ matrix.artifact_suffix }}"
+            "dist/med-exam-kit-py-${{ steps.ver.outputs.version }}-${{ matrix.artifact_suffix }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: med-exam-kit-${{ matrix.os }}
-          path: dist/med-exam-kit-*
+          name: py-${{ matrix.os }}
+          path: dist/med-exam-kit-py-*
 
   release:
     needs: build
     runs-on: ubuntu-latest
     if: startsWith(github.ref, 'refs/tags/')
-
     steps:
-      - name: Download all artifacts
+      - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
 
-      - name: Create Release
+      - name: Create / Update Release
         uses: softprops/action-gh-release@v2
         with:
           files: artifacts/**/*
