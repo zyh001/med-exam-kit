@@ -1,0 +1,125 @@
+name: Build · Go (golang-version)
+
+# 触发规则：
+#   v1.0.0-go  → 只触发本 workflow
+#   v1.0.0     → 与 Python workflow 同步触发（双分支统一发版）
+on:
+  push:
+    tags:
+      - 'v*-go'
+      - 'v[0-9]*.[0-9]*.[0-9]*'   # 纯版本号 tag，如 v1.2.3
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'Branch / tag / SHA to build'
+        default: 'golang-version'
+        required: false
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout golang-version branch
+        uses: actions/checkout@v4
+        with:
+          ref: golang-version   # 始终从 golang-version 构建
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Fetch dependencies
+        run: |
+          go get github.com/jackc/pgx/v5@latest
+          go mod tidy
+        env:
+          GOFLAGS: '-mod=mod'
+
+      - name: Run tests
+        run: go test ./internal/...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { goos: linux,   goarch: amd64,  artifact: med-exam-linux-amd64       }
+          - { goos: linux,   goarch: arm64,  artifact: med-exam-linux-arm64       }
+          - { goos: linux,   goarch: arm,    goarm: 7, artifact: med-exam-linux-armv7 }
+          - { goos: linux,   goarch: "386",  artifact: med-exam-linux-386         }
+          - { goos: linux,   goarch: loong64, artifact: med-exam-linux-loong64    }
+          - { goos: darwin,  goarch: amd64,  artifact: med-exam-darwin-amd64      }
+          - { goos: darwin,  goarch: arm64,  artifact: med-exam-darwin-arm64      }
+          - { goos: windows, goarch: amd64,  artifact: med-exam-windows-amd64.exe }
+          - { goos: windows, goarch: arm64,  artifact: med-exam-windows-arm64.exe }
+          - { goos: windows, goarch: "386",  artifact: med-exam-windows-386.exe   }
+
+    steps:
+      - name: Checkout golang-version branch
+        uses: actions/checkout@v4
+        with:
+          ref: golang-version
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+
+      - name: Fetch dependencies
+        run: |
+          go get modernc.org/sqlite@latest
+          go get github.com/jackc/pgx/v5@latest
+          go mod tidy
+        env:
+          GOFLAGS: '-mod=mod'
+
+      - name: Determine version
+        id: ver
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            echo "version=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build
+        env:
+          CGO_ENABLED: '0'
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          GOARM: ${{ matrix.goarm || '' }}
+        run: |
+          go build -ldflags="-s -w \
+            -X main.Version=${{ steps.ver.outputs.version }}" \
+            -o ${{ matrix.artifact }} .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: go-${{ matrix.artifact }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create / Update Release
+        uses: softprops/action-gh-release@v2
+        with:
+          draft: false
+          generate_release_notes: true
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
