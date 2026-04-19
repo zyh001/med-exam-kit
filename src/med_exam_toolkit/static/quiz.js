@@ -841,7 +841,7 @@ function renderBankSelectPage() {
           <span class="bci-tag">${b.total_sq.toLocaleString()} 题</span>
         </div>
       </div>
-      <div class="bci-arrow">›</div>
+      <div class="bci-arrow"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></div>
     `;
     card.onclick = () => selectBankAndEnter(idx);
     container.appendChild(card);
@@ -2482,7 +2482,7 @@ function buildExplain(q, selected) {
   const resultRow = document.createElement('div');
   resultRow.className = `explain-result ${isCorrect ? 'ok' : 'err'}`;
   resultRow.innerHTML = `
-    <span class="result-icon">${isCorrect ? '✅' : '❌'}</span>
+    <span class="result-icon">${isCorrect ? '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>' : '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="m15 9-6 6m0-6 6 6"/></svg>'}</span>
     <span class="result-title ${isCorrect ? 'ok' : 'err'}">${isCorrect ? '回答正确！' : (isMulti ? '答案不完整或有误' : '回答错误')}</span>`;
   inner.appendChild(resultRow);
 
@@ -2776,7 +2776,7 @@ function _updateFlagBtn() {
   const isFav = fp ? _loadFavorites().has(fp) : false;
   btn.classList.toggle('active', isMarked && !isFav);
   btn.classList.toggle('fav', isFav);
-  btn.textContent = isFav ? '★' : '⚑';
+  btn.innerHTML = isFav ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M5 2v20l7-4 7 4V2H5z"/></svg>';
   btn.title = isFav ? '已收藏（长按取消）' : '标记（长按收藏）';
 }
 
@@ -3907,7 +3907,7 @@ function renderResults() {
           }
           return sel === q.answer;
         })();
-        const badge = isCorrect === null ? '⬜' : isCorrect ? '✅' : '❌';
+        const badge = isCorrect === null ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>' : isCorrect ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
         return `<div class="slowest-row" onclick="_jumpToReviewQ(${i})">
           <span class="slowest-badge">${badge}</span>
           <span class="slowest-num">第${i+1}题</span>
@@ -4143,7 +4143,7 @@ function _enterExamReview() {
   const btn = document.getElementById('btn-next');
   if (btn) { btn.textContent = '交卷 ✓'; btn.disabled = false; }
   // 顶部提示
-  toast('✅ 全部题目已作答，可自由回看，满意后点「交卷」', false, 4000);
+  toast('全部题目已作答，可自由回看，满意后点「交卷」', false, 4000);
   // 在 topbar 区域显示回看提示条
   let bar = document.getElementById('exam-review-bar');
   if (!bar) {
@@ -4259,7 +4259,7 @@ function _buildReviewScoreBadge(q, sel, idx) {
   }
 
   const cls   = earned >= perSq ? 'full' : earned > 0 ? 'partial' : 'zero';
-  const icon  = earned >= perSq ? '✅' : earned > 0 ? '⚡' : '❌';
+  const icon  = earned >= perSq ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>' : earned > 0 ? '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M5 12h14"/></svg>' : '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M18 6L6 18"/><path d="M6 6l12 12"/></svg>';
   const label = isEmpty ? '未作答  0' : `${icon} ${earned}`;
   return `<div class="review-score-badge ${cls}">${label} / ${perSq} 分</div>`;
 }
@@ -4758,7 +4758,7 @@ async function _doShareExam(qs, opts) {
       navigator.share({ title: '医考练习 - 试卷分享', text: `共 ${qs.length} 题`, url }).catch(()=>{});
     } else if (navigator.clipboard) {
       await navigator.clipboard.writeText(url);
-      toast('✅ 分享链接已复制到剪贴板');
+      toast('链接已复制到剪贴板');
     } else {
       prompt('分享链接：', url);
     }
@@ -5133,7 +5133,7 @@ function _renderWbList() {
           <div class="fav-unit-name">${esc(unit)}</div>
           <div class="fav-unit-count">${cnt} 题</div>
         </div>
-        ${_wbMultiMode ? '' : '<span class="fav-unit-chevron">›</span>'}
+        ${_wbMultiMode ? '' : '<span class="fav-unit-chevron"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span>'}
       </div>
     </div>`).join('');
 
@@ -5245,7 +5245,7 @@ function _renderFavList() {
             <div class="fav-unit-name">${esc(unit)}</div>
             <div class="fav-unit-count">${fps.length} 题</div>
           </div>
-          ${_favMultiMode ? '' : '<span class="fav-unit-chevron">›</span>'}
+          ${_favMultiMode ? '' : '<span class="fav-unit-chevron"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg></span>'}
         </div>
       </div>`;
   }).join('');
@@ -7545,4 +7545,143 @@ init();
       reviewBody.style.opacity    = '';
     }
   }, { passive: true });
+})();
+
+// ════════════════════════════════════════════
+// 题目字体大小调节（长按题目区域触发）
+// ════════════════════════════════════════════
+(function () {
+  const LS_KEY  = 'quiz_fontsize';
+  const LEVELS  = [
+    { val: 1, label: '较小', desc: '偏小' },
+    { val: 2, label: '小',   desc: '稍小' },
+    { val: 3, label: '中',   desc: '默认' },
+    { val: 4, label: '大',   desc: '舒适' },
+    { val: 5, label: '较大', desc: '超大' },
+  ];
+  const SCREENS = ['s-quiz', 's-memo'];
+
+  // ── 读 / 写 当前档位 ──────────────────────────────────────────────
+  function _getCur() {
+    return parseInt(localStorage.getItem(LS_KEY) || '3', 10);
+  }
+  function _setCur(v) {
+    v = Math.max(1, Math.min(5, v));
+    localStorage.setItem(LS_KEY, v);
+    SCREENS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.setAttribute('data-fontsize', v);
+    });
+    _renderChips(v);
+    _updatePreview(v);
+  }
+
+  // ── 初始化：页面加载时应用已保存的档位 ────────────────────────────
+  function _applyOnLoad() {
+    const v = _getCur();
+    SCREENS.forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.setAttribute('data-fontsize', v);
+    });
+  }
+
+  // ── 渲染弹窗 chip 列表 ─────────────────────────────────────────────
+  function _renderChips(cur) {
+    const wrap = document.getElementById('fontsize-chips');
+    if (!wrap) return;
+    wrap.innerHTML = LEVELS.map(l => {
+      const active = l.val === cur ? ' active' : '';
+      // 5 个竖条，高度随档位递增，当前档位加色
+      const bars = LEVELS.map(b => {
+        const h = 4 + b.val * 3;           // 7 10 13 16 19 px
+        const style = `height:${h}px`;
+        return `<span style="${style}"></span>`;
+      }).join('');
+      return `<button class="fontsize-chip${active}" onclick="_setFontSize(${l.val})" title="${l.desc}">
+        <div class="fontsize-chip-dots">${bars}</div>
+        <span>${l.label}</span>
+      </button>`;
+    }).join('');
+  }
+
+  // ── 更新预览区字体档位 ─────────────────────────────────────────────
+  function _updatePreview(v) {
+    const box = document.getElementById('fontsize-box');
+    if (box) box.setAttribute('data-fontsize', v);
+  }
+
+  // ── 打开弹窗 ──────────────────────────────────────────────────────
+  function _openFsModal() {
+    const modal = document.getElementById('fontsize-modal');
+    if (!modal) return;
+    const cur = _getCur();
+    _renderChips(cur);
+    _updatePreview(cur);
+    modal.style.display = 'flex';
+    // 让预览区也应用当前档位的变量（挂在 fontsize-box 上通过 CSS var 覆盖）
+    const box = document.getElementById('fontsize-box');
+    if (box) box.setAttribute('data-fontsize', cur);
+  }
+
+  // ── 关闭弹窗 ──────────────────────────────────────────────────────
+  window._closeFsModal = function () {
+    const modal = document.getElementById('fontsize-modal');
+    if (modal) modal.style.display = 'none';
+  };
+
+  // ── 外部调用：设置档位 ────────────────────────────────────────────
+  window._setFontSize = function (v) {
+    _setCur(v);
+  };
+
+  // ── 长按监听：附加到 .quiz-body（做题区域）────────────────────────
+  var _lpTimer  = null;
+  var _lpActive = false;
+
+  function _attachLongPress() {
+    const body = document.getElementById('q-stage');
+    if (!body || body._fsLpAttached) return;
+    body._fsLpAttached = true;
+
+    function _start(e) {
+      // 仅当点击在题目内容区，而非选项按钮上
+      if (e.target.closest('.opt') || e.target.closest('button') ||
+          e.target.closest('.flag-btn') || e.target.closest('.nav-btn')) return;
+      _lpActive = true;
+      _lpTimer = setTimeout(function () {
+        if (_lpActive) {
+          _openFsModal();
+          navigator.vibrate && navigator.vibrate(12);
+        }
+      }, 600);
+    }
+    function _cancel() {
+      _lpActive = false;
+      clearTimeout(_lpTimer);
+    }
+
+    body.addEventListener('touchstart',  _start,  { passive: true });
+    body.addEventListener('touchend',    _cancel, { passive: true });
+    body.addEventListener('touchmove',   _cancel, { passive: true });
+    body.addEventListener('mousedown',   _start);
+    body.addEventListener('mouseup',     _cancel);
+    body.addEventListener('mouseleave',  _cancel);
+    // 防止长按触发系统文字选择菜单
+    body.addEventListener('contextmenu', function (e) {
+      if (_lpActive) e.preventDefault();
+    });
+  }
+
+  // ── 初始化 ────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', function () {
+    _applyOnLoad();
+    // q-stage 在 DOMContentLoaded 时已存在，直接附加
+    _attachLongPress();
+  });
+
+  // 如果 DOMContentLoaded 已过（脚本在末尾加载），直接执行
+  if (document.readyState !== 'loading') {
+    _applyOnLoad();
+    _attachLongPress();
+  }
 })();
