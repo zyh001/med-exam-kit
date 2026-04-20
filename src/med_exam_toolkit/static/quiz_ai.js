@@ -1017,9 +1017,29 @@ async function _startASR(key) {
   // 请求麦克风权限
   let stream;
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000, channelCount: 1, echoCancellation: true, noiseSuppression: true } });
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        // sampleRate 在 AudioContext 上设 16000 统一重采样，不写进 getUserMedia
+        // channelCount 不强制指定，避免 OverconstrainedError
+      }
+    });
   } catch (e) {
-    toast('无法访问麦克风，请检查权限设置');
+    let msg = '无法访问麦克风';
+    if (e.name === 'NotAllowedError' || e.name === 'PermissionDeniedError') {
+      msg = '麦克风权限被拒绝，请在浏览器地址栏点击🔒图标允许麦克风';
+    } else if (e.name === 'NotFoundError' || e.name === 'DevicesNotFoundError') {
+      msg = '未检测到麦克风设备';
+    } else if (e.name === 'NotReadableError') {
+      msg = '麦克风被其他应用占用，请关闭后重试';
+    } else if (e.name === 'OverconstrainedError') {
+      msg = '麦克风不支持当前参数，请换个设备试试';
+    } else if (e.name === 'SecurityError') {
+      msg = '需要 HTTPS 才能使用麦克风';
+    }
+    toast(msg);
+    console.error('[ASR] getUserMedia error:', e.name, e.message);
     return;
   }
 
