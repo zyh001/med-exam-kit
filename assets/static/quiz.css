@@ -16,30 +16,17 @@
 }
 
 /* ════════════════════════════════════════════
-   题目字体大小档位（5 档，长按题目可调）
-   默认档位 3 = 中，由 JS 写入 #s-quiz / #s-memo 的 data-fontsize 属性
+   题目字体大小 — 无极滑块调节
+   JS 通过 style 直接写入 --qfs-scale (0.75–1.6)
+   各尺寸 = base × scale，无需离散档位
 ════════════════════════════════════════════ */
 :root {
-  --qfs-text:    15px;
-  --qfs-stem:    14px;
-  --qfs-opt:     15px;
-  --qfs-explain: 14px;
-  --qfs-shared:  13px;
-}
-#s-quiz[data-fontsize="1"],#s-memo[data-fontsize="1"] {
-  --qfs-text:12px;--qfs-stem:12px;--qfs-opt:12px;--qfs-explain:12px;--qfs-shared:11px;
-}
-#s-quiz[data-fontsize="2"],#s-memo[data-fontsize="2"] {
-  --qfs-text:13px;--qfs-stem:13px;--qfs-opt:13px;--qfs-explain:13px;--qfs-shared:12px;
-}
-#s-quiz[data-fontsize="3"],#s-memo[data-fontsize="3"] {
-  --qfs-text:15px;--qfs-stem:14px;--qfs-opt:15px;--qfs-explain:14px;--qfs-shared:13px;
-}
-#s-quiz[data-fontsize="4"],#s-memo[data-fontsize="4"] {
-  --qfs-text:17px;--qfs-stem:16px;--qfs-opt:16px;--qfs-explain:15px;--qfs-shared:14px;
-}
-#s-quiz[data-fontsize="5"],#s-memo[data-fontsize="5"] {
-  --qfs-text:20px;--qfs-stem:19px;--qfs-opt:18px;--qfs-explain:17px;--qfs-shared:16px;
+  --qfs-scale:   1;       /* JS 写入，范围 0.75–1.6 */
+  --qfs-text:    calc(15px * var(--qfs-scale));
+  --qfs-stem:    calc(14px * var(--qfs-scale));
+  --qfs-opt:     calc(15px * var(--qfs-scale));
+  --qfs-explain: calc(14px * var(--qfs-scale));
+  --qfs-shared:  calc(13px * var(--qfs-scale));
 }
 
 
@@ -1355,45 +1342,46 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
    字体大小调节弹窗
 ════════════════════════════════════════════ */
 
-/* fontsize-box preview 区同步档位变量 */
-#fontsize-box[data-fontsize="1"]{--qfs-stem:12px;--qfs-opt:12px}
-#fontsize-box[data-fontsize="2"]{--qfs-stem:13px;--qfs-opt:13px}
-#fontsize-box[data-fontsize="3"]{--qfs-stem:14px;--qfs-opt:15px}
-#fontsize-box[data-fontsize="4"]{--qfs-stem:16px;--qfs-opt:16px}
-#fontsize-box[data-fontsize="5"]{--qfs-stem:19px;--qfs-opt:18px}
 .fontsize-box {
   background:var(--surface);border:1px solid var(--border);
   border-radius:var(--r-xl);max-width:320px;width:100%;
   padding:22px 20px 20px;
-  display:flex;flex-direction:column;gap:16px;
+  display:flex;flex-direction:column;gap:14px;
   box-shadow:var(--shadow-lg);
 }
 .fontsize-title {
   font-size:15px;font-weight:700;color:var(--fg1);text-align:center;
 }
-.fontsize-chips {
-  display:flex;gap:6px;justify-content:center;
+/* 滑块行：A字 + slider + A字 */
+.fontsize-slider-row {
+  display:flex;align-items:center;gap:10px;
 }
-.fontsize-chip {
-  flex:1;padding:8px 0;border-radius:var(--r-md);font-size:11px;font-weight:600;
-  background:var(--card);border:1.5px solid var(--border);color:var(--muted);
-  cursor:pointer;transition:all .15s;text-align:center;
-  display:flex;flex-direction:column;align-items:center;gap:4px;
+.fontsize-sz-label {
+  font-weight:700;color:var(--muted);flex-shrink:0;line-height:1;
+  user-select:none;
 }
-.fontsize-chip:hover { border-color:var(--accent);color:var(--accent) }
-.fontsize-chip.active {
-  background:var(--accent-bg);border-color:var(--accent);color:var(--accent);
+.fontsize-sz-label.small { font-size:12px }
+.fontsize-sz-label.large { font-size:20px }
+.fontsize-slider {
+  flex:1;-webkit-appearance:none;appearance:none;
+  height:4px;border-radius:2px;background:var(--border);outline:none;cursor:pointer;
 }
-.fontsize-chip-dot {
-  width:4px;height:4px;border-radius:50%;background:currentColor;margin-bottom:1px;
+.fontsize-slider::-webkit-slider-thumb {
+  -webkit-appearance:none;width:22px;height:22px;border-radius:50%;
+  background:var(--accent);box-shadow:0 2px 6px var(--accent-ring);cursor:pointer;
+  transition:transform .1s;
 }
-/* 当前档位的小指示圆点行 */
-.fontsize-chip-dots {
-  display:flex;align-items:flex-end;gap:3px;height:14px;
+.fontsize-slider::-webkit-slider-thumb:active { transform:scale(1.2) }
+.fontsize-slider::-moz-range-thumb {
+  width:22px;height:22px;border-radius:50%;border:none;
+  background:var(--accent);box-shadow:0 2px 6px var(--accent-ring);cursor:pointer;
 }
-.fontsize-chip-dots span {
-  background:currentColor;border-radius:1px;width:3px;
+/* 当前大小数值显示 */
+.fontsize-val {
+  text-align:center;font-size:12px;color:var(--muted);
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;
 }
+/* 预览区 */
 .fontsize-preview {
   background:var(--card);border:1px solid var(--border);border-radius:var(--r-md);
   padding:14px 16px;
@@ -1407,12 +1395,14 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   margin-bottom:10px;
   background:var(--surface);border-left:3px solid var(--accent);
   padding:8px 10px;border-radius:0 var(--r-xs) var(--r-xs) 0;
+  transition:font-size .15s;
 }
 .fontsize-preview-opt {
   display:flex;align-items:center;gap:10px;
   background:var(--surface);border:1.5px solid var(--border);
   border-radius:var(--r-sm);padding:7px 10px;
   font-size:var(--qfs-opt);color:var(--fg1);
+  transition:font-size .15s;
 }
 .fontsize-preview-opt-lbl {
   width:22px;height:22px;border-radius:var(--r-xs);
