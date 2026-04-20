@@ -7583,101 +7583,75 @@ init();
 })();
 
 // ════════════════════════════════════════════
-// 题目字体大小调节（长按题目区域触发）
+// 题目字体大小 — 无极滑块调节
+// 点击题号圆球 (.q-num) 弹出，拖滑块实时预览
 // ════════════════════════════════════════════
 (function () {
-  const LS_KEY  = 'quiz_fontsize';
-  const LEVELS  = [
-    { val: 1, label: '较小', desc: '偏小' },
-    { val: 2, label: '小',   desc: '稍小' },
-    { val: 3, label: '中',   desc: '默认' },
-    { val: 4, label: '大',   desc: '舒适' },
-    { val: 5, label: '较大', desc: '超大' },
-  ];
-  const SCREENS = ['s-quiz', 's-memo'];
+  var LS_KEY  = 'quiz_fontsize_scale'; // 存储 scale 百分比整数，如 100
+  var SCREENS = ['s-quiz', 's-memo'];
+  var MIN = 75, MAX = 160, DEFAULT = 100;
 
-  // ── 读 / 写 当前档位 ──────────────────────────────────────────────
-  function _getCur() {
-    return parseInt(localStorage.getItem(LS_KEY) || '3', 10);
+  // ── 读 / 写比例 ───────────────────────────────────────────────────
+  function _getScale() {
+    return parseInt(localStorage.getItem(LS_KEY) || DEFAULT, 10);
   }
-  function _setCur(v) {
-    v = Math.max(1, Math.min(5, v));
-    localStorage.setItem(LS_KEY, v);
-    SCREENS.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.setAttribute('data-fontsize', v);
+  function _applyScale(pct) {
+    pct = Math.max(MIN, Math.min(MAX, pct));
+    var scale = (pct / 100).toFixed(3);
+    SCREENS.forEach(function (id) {
+      var el = document.getElementById(id);
+      if (el) el.style.setProperty('--qfs-scale', scale);
     });
-    _renderChips(v);
-    _updatePreview(v);
+    localStorage.setItem(LS_KEY, pct);
   }
 
-  // ── 初始化：页面加载时应用已保存的档位 ────────────────────────────
+  // ── 初始化 ────────────────────────────────────────────────────────
   function _applyOnLoad() {
-    const v = _getCur();
-    SCREENS.forEach(id => {
-      const el = document.getElementById(id);
-      if (el) el.setAttribute('data-fontsize', v);
-    });
-  }
-
-  // ── 渲染弹窗 chip 列表 ─────────────────────────────────────────────
-  function _renderChips(cur) {
-    const wrap = document.getElementById('fontsize-chips');
-    if (!wrap) return;
-    wrap.innerHTML = LEVELS.map(l => {
-      const active = l.val === cur ? ' active' : '';
-      // 5 个竖条，高度随档位递增，当前档位加色
-      const bars = LEVELS.map(b => {
-        const h = 4 + b.val * 3;           // 7 10 13 16 19 px
-        const style = `height:${h}px`;
-        return `<span style="${style}"></span>`;
-      }).join('');
-      return `<button class="fontsize-chip${active}" onclick="_setFontSize(${l.val})" title="${l.desc}">
-        <div class="fontsize-chip-dots">${bars}</div>
-        <span>${l.label}</span>
-      </button>`;
-    }).join('');
-  }
-
-  // ── 更新预览区字体档位 ─────────────────────────────────────────────
-  function _updatePreview(v) {
-    const box = document.getElementById('fontsize-box');
-    if (box) box.setAttribute('data-fontsize', v);
+    _applyScale(_getScale());
   }
 
   // ── 打开弹窗 ──────────────────────────────────────────────────────
   function _openFsModal() {
-    const modal = document.getElementById('fontsize-modal');
+    var modal = document.getElementById('fontsize-modal');
     if (!modal) return;
-    const cur = _getCur();
-    _renderChips(cur);
-    _updatePreview(cur);
+    var pct    = _getScale();
+    var slider = document.getElementById('fontsize-slider');
+    var valEl  = document.getElementById('fontsize-val');
+    if (slider) slider.value = pct;
+    if (valEl)  valEl.textContent = pct + '%';
+    _syncPreview(pct);
     modal.style.display = 'flex';
-    // 让预览区也应用当前档位的变量（挂在 fontsize-box 上通过 CSS var 覆盖）
-    const box = document.getElementById('fontsize-box');
-    if (box) box.setAttribute('data-fontsize', cur);
+  }
+
+  // ── 预览区同步 ────────────────────────────────────────────────────
+  function _syncPreview(pct) {
+    var scale = (pct / 100).toFixed(3);
+    var box   = document.getElementById('fontsize-box');
+    if (box) box.style.setProperty('--qfs-scale', scale);
   }
 
   // ── 关闭弹窗 ──────────────────────────────────────────────────────
   window._closeFsModal = function () {
-    const modal = document.getElementById('fontsize-modal');
+    var modal = document.getElementById('fontsize-modal');
     if (modal) modal.style.display = 'none';
   };
 
-  // ── 外部调用：设置档位 ────────────────────────────────────────────
-  window._setFontSize = function (v) {
-    _setCur(v);
+  // ── 滑块 oninput ──────────────────────────────────────────────────
+  window._onFsSlider = function (val) {
+    var pct   = parseInt(val, 10);
+    var valEl = document.getElementById('fontsize-val');
+    if (valEl) valEl.textContent = pct + '%';
+    _applyScale(pct);   // 实时应用到页面
+    _syncPreview(pct);  // 实时更新预览
   };
 
-  // ── 点击 .q-num（题号圆球）触发字体调节弹窗 ────────────────────
-  // 使用事件委托挂在稳定父容器 .quiz-body 上，q-stage 重建后仍有效
+  // ── 点击 .q-num（题号圆球）触发弹窗 ──────────────────────────────
   function _attachQNumClick() {
-    const quizBody = document.getElementById('s-quiz');
+    var quizBody = document.getElementById('s-quiz');
     if (!quizBody || quizBody._fsClickAttached) return;
     quizBody._fsClickAttached = true;
-
     quizBody.addEventListener('click', function (e) {
-      const num = e.target.closest('.q-num');
+      var num = e.target.closest('.q-num');
       if (!num) return;
       e.stopPropagation();
       _openFsModal();
@@ -7685,12 +7659,10 @@ init();
     });
   }
 
-  // ── 初始化 ────────────────────────────────────────────────────────
   document.addEventListener('DOMContentLoaded', function () {
     _applyOnLoad();
     _attachQNumClick();
   });
-
   if (document.readyState !== 'loading') {
     _applyOnLoad();
     _attachQNumClick();
