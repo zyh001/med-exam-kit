@@ -17,16 +17,15 @@
 
 /* ════════════════════════════════════════════
    题目字体大小 — 无极滑块调节
-   JS 通过 style 直接写入 --qfs-scale (0.75–1.6)
-   各尺寸 = base × scale，无需离散档位
+   JS 直接将计算好的像素值写入各 --qfs-* 变量
+   (calc+var 链在继承时不可靠，改为 JS 直接赋值)
 ════════════════════════════════════════════ */
 :root {
-  --qfs-scale:   1;       /* JS 写入，范围 0.75–1.6 */
-  --qfs-text:    calc(15px * var(--qfs-scale));
-  --qfs-stem:    calc(14px * var(--qfs-scale));
-  --qfs-opt:     calc(15px * var(--qfs-scale));
-  --qfs-explain: calc(14px * var(--qfs-scale));
-  --qfs-shared:  calc(13px * var(--qfs-scale));
+  --qfs-text:    15px;
+  --qfs-stem:    14px;
+  --qfs-opt:     15px;
+  --qfs-explain: 14px;
+  --qfs-shared:  13px;
 }
 
 
