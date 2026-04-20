@@ -7595,12 +7595,24 @@ init();
   function _getScale() {
     return parseInt(localStorage.getItem(LS_KEY) || DEFAULT, 10);
   }
+  // 各字号基准值 (px)
+  var BASE = { text: 15, stem: 14, opt: 15, explain: 14, shared: 13 };
+
   function _applyScale(pct) {
     pct = Math.max(MIN, Math.min(MAX, pct));
-    var scale = (pct / 100).toFixed(3);
+    var s = pct / 100;
+    // 直接计算像素值写入 CSS 变量，避免 calc(var()) 继承问题
+    var vars = {
+      '--qfs-text':    (BASE.text    * s).toFixed(2) + 'px',
+      '--qfs-stem':    (BASE.stem    * s).toFixed(2) + 'px',
+      '--qfs-opt':     (BASE.opt     * s).toFixed(2) + 'px',
+      '--qfs-explain': (BASE.explain * s).toFixed(2) + 'px',
+      '--qfs-shared':  (BASE.shared  * s).toFixed(2) + 'px',
+    };
     SCREENS.forEach(function (id) {
       var el = document.getElementById(id);
-      if (el) el.style.setProperty('--qfs-scale', scale);
+      if (!el) return;
+      Object.keys(vars).forEach(function (k) { el.style.setProperty(k, vars[k]); });
     });
     localStorage.setItem(LS_KEY, pct);
   }
@@ -7625,9 +7637,17 @@ init();
 
   // ── 预览区同步 ────────────────────────────────────────────────────
   function _syncPreview(pct) {
-    var scale = (pct / 100).toFixed(3);
-    var box   = document.getElementById('fontsize-box');
-    if (box) box.style.setProperty('--qfs-scale', scale);
+    var s = pct / 100;
+    var vars = {
+      '--qfs-text':    (BASE.text    * s).toFixed(2) + 'px',
+      '--qfs-stem':    (BASE.stem    * s).toFixed(2) + 'px',
+      '--qfs-opt':     (BASE.opt     * s).toFixed(2) + 'px',
+      '--qfs-explain': (BASE.explain * s).toFixed(2) + 'px',
+      '--qfs-shared':  (BASE.shared  * s).toFixed(2) + 'px',
+    };
+    var box = document.getElementById('fontsize-box');
+    if (!box) return;
+    Object.keys(vars).forEach(function (k) { box.style.setProperty(k, vars[k]); });
   }
 
   // ── 关闭弹窗 ──────────────────────────────────────────────────────
