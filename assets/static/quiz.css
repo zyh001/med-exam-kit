@@ -2748,20 +2748,20 @@ button,a,[role=button],label{touch-action:manipulation}
   to{opacity:1;transform:none}
 }
 .ai-thinking-fadein{animation:aiFadeIn .2s cubic-bezier(0,0,.2,1) both}
-/* 生成完成后内容整体淡入 */
-.ai-content-in{
-  animation:aiContentIn .45s cubic-bezier(0,0,.2,1) both;
+/* 每一段渲染完成时的淡入动画 */
+.ai-para-in{
+  animation:aiParaIn .4s cubic-bezier(0,0,.2,1) both;
 }
-@keyframes aiContentIn{
+@keyframes aiParaIn{
   from{opacity:0;transform:translateY(6px)}
   to{opacity:1;transform:none}
 }
-/* 生成中：三点跳动动画 */
+/* 段落之间的生成中动画：三点跳动 */
 .ai-typing-dots{
-  display:flex;gap:5px;align-items:center;padding:8px 2px;
+  display:flex;gap:5px;align-items:center;padding:6px 2px;
 }
 .ai-typing-dots span{
-  width:7px;height:7px;border-radius:50%;
+  width:6px;height:6px;border-radius:50%;
   background:var(--accent);
   animation:aiDotPulse 1.2s ease-in-out infinite;
 }
