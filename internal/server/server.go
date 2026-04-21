@@ -43,11 +43,11 @@ type BankEntry struct {
 	Password      string
 	Questions     []*models.Question
 	DB            *sql.DB  // SQLite progress DB (nil when using PgStore)
-	PgStore       pgStorer // PostgreSQL store (nil when using SQLite)
+	PgStore       PgStorer // PostgreSQL store (nil when using SQLite)
 	RecordEnabled bool
 }
 
-// shareStorer is an optional interface that pgStorer implementations may satisfy
+// shareStorer is an optional interface that PgStorer implementations may satisfy
 // to persist share tokens across server restarts (PG mode only).
 // JSON []byte is used to bridge the type without creating an import cycle.
 type shareStorer interface {
@@ -64,7 +64,7 @@ type favStorer interface {
 }
 
 // allowing server.go to stay decoupled from the concrete pgstore type.
-type pgStorer interface {
+type PgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
 	RecordSessionsBatch(ctx context.Context, sessions []map[string]any, userID string) (processed, skipped []string)
 	GetOverallStats(ctx context.Context, userID string, bankID int, clientDate string) store.OverallStats
@@ -139,6 +139,9 @@ type Server struct {
 	// 扫描器封禁：IP → 解封时间（零值表示永久封禁）
 	scanBans     map[string]time.Time
 	httpServer   *http.Server
+	// 热重载
+	reloadFn     ReloadFunc // 由 cmd/quiz.go 注入
+	configPath   string     // 当前配置文件路径（SIGHUP 时重读）
 	// 图标 PNG 缓存（启动时按需生成一次，避免每次请求重复编码）
 	iconOnce sync.Once
 	icon192  []byte
@@ -256,6 +259,20 @@ func (s *Server) ListenAndServe() error {
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 
+	// SIGHUP：热重载配置（类似 nginx -s reload）
+	hup := make(chan os.Signal, 1)
+	signal.Notify(hup, syscall.SIGHUP)
+	go func() {
+		for range hup {
+			logger.Infof("[reload] 收到 SIGHUP，开始热重载题库...")
+			if err := s.HotReload(nil, ""); err != nil {
+				logger.Errorf("[reload] 热重载失败: %v", err)
+			} else {
+				logger.Infof("[reload] 热重载完成")
+			}
+		}
+	}()
+
 	errCh := make(chan error, 1)
 	go func() {
 		logger.Infof("Server listening on %s", addr)
@@ -291,6 +308,12 @@ func (s *Server) ListenAndServe() error {
 	}
 	return nil
 }
+
+// SetReloadFunc registers the function used for hot-reload.
+func (s *Server) SetReloadFunc(fn ReloadFunc) { s.reloadFn = fn }
+
+// SetConfigPath records the config file path for SIGHUP reloads.
+func (s *Server) SetConfigPath(p string) { s.configPath = p }
 
 // Close closes all database connections.
 func (s *Server) Close() {
@@ -479,6 +502,8 @@ func (s *Server) registerRoutes() {
 	}
 	// Multi-bank listing endpoint
 	m.HandleFunc("GET /api/banks", s.handleBanks)
+	// Hot-reload endpoint (POST /api/admin/reload)
+	m.HandleFunc("POST /api/admin/reload", s.handleAdminReload)
 	// Per-bank endpoints – all accept ?bank=N (default 0)
 	m.HandleFunc("GET /api/info", s.handleInfo)
 	m.HandleFunc("GET /api/questions", s.handleQuestions)
@@ -529,7 +554,10 @@ func (s *Server) registerRoutes() {
 // ── Bank selection ────────────────────────────────────────────────────
 
 // bankForReq returns the BankEntry for the request's ?bank=N param.
+// Uses a read lock so hot-reload can safely swap s.cfg.Banks concurrently.
 func (s *Server) bankForReq(r *http.Request) (*BankEntry, int, bool) {
+	banksMu.RLock()
+	defer banksMu.RUnlock()
 	idxStr := r.URL.Query().Get("bank")
 	idx := 0
 	if idxStr != "" {
@@ -542,7 +570,8 @@ func (s *Server) bankForReq(r *http.Request) (*BankEntry, int, bool) {
 	if idx >= len(s.cfg.Banks) {
 		return nil, 0, false
 	}
-	return &s.cfg.Banks[idx], idx, true
+	b := s.cfg.Banks[idx] // copy, not pointer into slice
+	return &b, idx, true
 }
 
 // ── Page handlers ─────────────────────────────────────────────────────

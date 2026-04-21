@@ -147,79 +147,21 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		fmt.Println("🗄  已连接 PostgreSQL，学习记录将存储到数据库")
 	}
 
-	// ── 加载题库 ────────────────────────────────────────────────
-	var banks []server.BankEntry
-
-	// 方式1：从本地 .mqb 文件加载
-	for _, bp := range bankPaths {
-		fmt.Printf("📂 加载题库：%s\n", bp)
-		questions, err := bank.LoadBank(bp, password)
-		if err != nil {
-			return fmt.Errorf("加载 %s 失败: %w", bp, err)
-		}
-		// 自动修复答案与解析对调的题目（静默修正，不影响加载）
-		if fixed := models.SanitizeQuestions(questions); fixed > 0 {
-			fmt.Printf("   ⚙ 自动修正 %d 道答案/解析对调的题目\n", fixed)
-		}
-		fmt.Printf("   共 %d 道题\n", len(questions))
-
-		var db *sql.DB
-		recordEnabled := !noRecord
-		if recordEnabled {
-			if pg != nil {
-				// 使用 PostgreSQL 存进度
-				db = nil // server 通过 pg store 访问
-			} else {
-				dbPath := progress.DBPathForBank(bp)
-				db, err = progress.InitDB(dbPath)
-				if err != nil {
-					fmt.Fprintf(os.Stderr, "⚠ 无法初始化进度数据库 (%s): %v\n", bp, err)
-					db = nil
-					recordEnabled = false
-				}
-			}
-		}
-		entry := server.BankEntry{
-			Path:          bp,
-			Password:      password,
-			Questions:     questions,
-			DB:            db,
-			RecordEnabled: recordEnabled,
-		}
-		if pg != nil { entry.PgStore = pg } // 避免 nil *Store 赋给 interface 变成非 nil interface
-		banks = append(banks, entry)
+	// ── 加载题库 ────────────────────────────────────────────────────
+	banks, err := loadBankEntries(ctx, bankPaths, password, pg, noRecord)
+	if err != nil {
+		return err
 	}
-
-	// 方式2：从 PostgreSQL 加载题库
+	// PostgreSQL bank IDs（额外追加）
 	if pg != nil {
 		for _, bid := range bankIDs {
 			fmt.Printf("🗄  从数据库加载题库 #%d ...\n", bid)
-			qs, err := pg.GetBank(ctx, bid)
-			if err != nil || len(qs) == 0 {
-				return fmt.Errorf("数据库中未找到题库 #%d（请先运行 db import）", bid)
+			bp := fmt.Sprintf("pg:bank:%d", bid)
+			e, err2 := loadBankEntries(ctx, []string{bp}, password, pg, noRecord)
+			if err2 != nil {
+				return err2
 			}
-			// 自动修复答案与解析对调的题目
-			if fixed := models.SanitizeQuestions(qs); fixed > 0 {
-				fmt.Printf("   ⚙ 自动修正 %d 道答案/解析对调的题目\n", fixed)
-			}
-			meta, _ := pg.ListBanks(ctx)
-			name := fmt.Sprintf("bank_%d", bid)
-			for _, m := range meta {
-				if m.ID == bid {
-					name = m.Name
-					break
-				}
-			}
-			fmt.Printf("   %s: %d 道题\n", name, len(qs))
-			pgEntry := server.BankEntry{
-				Path:          fmt.Sprintf("pg:bank:%d", bid),
-				Name:          name,
-				BankID:        int(bid),
-				Questions:     qs,
-				RecordEnabled: !noRecord,
-			}
-			if pg != nil { pgEntry.PgStore = pg }
-			banks = append(banks, pgEntry)
+			banks = append(banks, e...)
 		}
 	}
 
@@ -274,5 +216,97 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	fmt.Println("   按 Ctrl+C 停止服务")
 
 	srv := server.New(cfg)
+
+	// 注入热重载函数（SIGHUP / POST /api/admin/reload 使用）
+	srv.SetReloadFunc(func(bankOverride []string, passwordOverride string) ([]server.BankEntry, error) {
+		// 若未指定 override，重读配置文件
+		paths := bankOverride
+		pwd := passwordOverride
+		if len(paths) == 0 && cfgFile != "" {
+			reloaded, err := loadConfig(cfgFile)
+			if err != nil {
+				return nil, fmt.Errorf("重读配置文件失败: %w", err)
+			}
+			paths = reloaded.Banks
+			if pwd == "" {
+				pwd = reloaded.Password
+			}
+		}
+		if len(paths) == 0 {
+			return nil, fmt.Errorf("配置文件中未找到 banks 列表")
+		}
+		noRec := noRecord
+		return loadBankEntries(ctx, paths, pwd, pg, noRec)
+	})
+	srv.SetConfigPath(cfgFile)
+
+	// 写 PID 文件（方便 reload 子命令找到进程）
+	pidFile := fileCfg.PidFile
+	if pidFile == "" {
+		pidFile = "med-exam.pid"
+	}
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err != nil {
+		logger.Warnf("[pid] 写入 PID 文件失败 (%s): %v", pidFile, err)
+	} else {
+		defer os.Remove(pidFile)
+	}
+
 	return srv.ListenAndServe()
 }
+
+// loadBankEntries 加载一批题库路径（.mqb 或 pg:bank:N），供热重载和首次启动共用。
+func loadBankEntries(ctx context.Context, paths []string, password string, pg *pgstore.Store, noRecord bool) ([]server.BankEntry, error) {
+	var entries []server.BankEntry
+	for _, bp := range paths {
+		var entry server.BankEntry
+		if len(bp) > 7 && bp[:3] == "pg:" {
+			// pg:bank:N
+			if pg == nil {
+				return nil, fmt.Errorf("题库 %s 需要 PostgreSQL 连接", bp)
+			}
+			var bankID int64
+			fmt.Sscanf(bp, "pg:bank:%d", &bankID)
+			qs, err := pg.GetBank(ctx, bankID)
+			if err != nil || len(qs) == 0 {
+				return nil, fmt.Errorf("数据库中未找到题库 #%d", bankID)
+			}
+			models.SanitizeQuestions(qs)
+			meta, _ := pg.ListBanks(ctx)
+			name := fmt.Sprintf("bank_%d", bankID)
+			for _, m := range meta {
+				if m.ID == bankID { name = m.Name; break }
+			}
+			entry = server.BankEntry{
+				Path: bp, Name: name, BankID: int(bankID),
+				Questions: qs, RecordEnabled: !noRecord,
+			}
+			entry.PgStore = pg
+		} else {
+			// local .mqb
+			qs, err := bank.LoadBank(bp, password)
+			if err != nil {
+				return nil, fmt.Errorf("加载 %s 失败: %w", bp, err)
+			}
+			models.SanitizeQuestions(qs)
+			var db *sql.DB
+			recordEnabled := !noRecord
+			if recordEnabled && pg == nil {
+				dbPath := progress.DBPathForBank(bp)
+				db, err = progress.InitDB(dbPath)
+				if err != nil {
+					logger.Warnf("[reload] 无法初始化进度数据库 (%s): %v", bp, err)
+					db = nil; recordEnabled = false
+				}
+			}
+			entry = server.BankEntry{
+				Path: bp, Password: password, Questions: qs,
+				DB: db, RecordEnabled: recordEnabled,
+			}
+			if pg != nil { entry.PgStore = pg }
+		}
+		entries = append(entries, entry)
+	}
+	return entries, nil
+}
+
+

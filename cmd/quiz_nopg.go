@@ -73,10 +73,54 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 		fmt.Printf("\n🔑  访问码：%s\n", accessCode)
 	}
 	cookieSecret = auth.DeriveSecret(accessCode)
+	cfgFile := "med-exam-kit.yaml"
+	if _, err := os.Stat(cfgFile); err != nil { cfgFile = "" }
 	cfg := server.Config{Banks: banks, Host: host, Port: port,
 		AccessCode: accessCode, CookieSecret: cookieSecret, PinLen: pinLen}
 	cfg.Assets = Assets
 	fmt.Printf("\n🌐  服务地址：http://%s\n", net.JoinHostPort(host, fmt.Sprint(port)))
 	srv := server.New(cfg)
+
+	// 注入热重载函数（nopg：只支持 .mqb 文件）
+	srv.SetReloadFunc(func(bankOverride []string, passwordOverride string) ([]server.BankEntry, error) {
+		paths := bankOverride
+		pwd := passwordOverride
+		if len(paths) == 0 {
+			if cfgFile == "" {
+				return nil, fmt.Errorf("未找到配置文件")
+			}
+			reloaded, err := loadConfig(cfgFile)
+			if err != nil {
+				return nil, fmt.Errorf("重读配置失败: %w", err)
+			}
+			paths = reloaded.Banks
+			if pwd == "" { pwd = reloaded.Password }
+		}
+		var entries []server.BankEntry
+		for _, bp := range paths {
+			fmt.Printf("📂 重载题库：%s\n", bp)
+			qs, err := bank.LoadBank(bp, pwd)
+			if err != nil {
+				return nil, fmt.Errorf("加载 %s 失败: %w", bp, err)
+			}
+			var db *sql.DB
+			dbPath := progress.DBPathForBank(bp)
+			db, _ = progress.InitDB(dbPath)
+			entries = append(entries, server.BankEntry{
+				Path: bp, Password: pwd, Questions: qs,
+				DB: db, RecordEnabled: db != nil,
+			})
+		}
+		return entries, nil
+	})
+	srv.SetConfigPath(cfgFile)
+
+	// PID 文件
+	pidFile := fileCfg.PidFile
+	if pidFile == "" { pidFile = "med-exam.pid" }
+	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err == nil {
+		defer os.Remove(pidFile)
+	}
+
 	return srv.ListenAndServe()
 }

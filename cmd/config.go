@@ -44,6 +44,8 @@ type AppConfig struct {
 	// 日志
 	LogFile  string `yaml:"log_file"`  // 日志文件路径，留空=只打印终端
 	LogLevel string `yaml:"log_level"` // debug / info / warn / error，默认 info
+	// 进程管理
+	PidFile  string `yaml:"pid_file"`  // PID 文件路径，默认 med-exam.pid
 }
 
 // defaultConfig returns a zero-value config with sensible defaults.
@@ -174,6 +176,8 @@ func loadConfig(path string) (AppConfig, error) {
 			cfg.LogFile = val
 		case "log_level":
 			cfg.LogLevel = val
+		case "pid_file":
+			cfg.PidFile = val
 		case "banks":
 			// inline single value: banks: exam.mqb
 			bankList = append(bankList, val)
