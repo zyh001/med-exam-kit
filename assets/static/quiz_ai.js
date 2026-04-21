@@ -312,75 +312,142 @@ function autoResizeTextarea(el) {
   el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
 }
 
-// ── Streaming renderer ─────────────────────────────────────────────
-// Design goal: zero artificial throttle — render each SSE chunk
-// immediately, use CSS animation for perceived smoothness.
-// smd parser handles incremental Markdown → DOM with no full rewrite.
+// ── Streaming renderer — paragraph-by-paragraph with fade-in ──────
 //
-// push(chunk) → feeds chunk to smd immediately in the same microtask
-// flush()     → finalises smd, does one marked re-render for LaTeX/GFM
+// Strategy (matches ChatGPT / DeepSeek UX):
+//   1. Accumulate SSE chunks into a raw text buffer.
+//   2. On every rAF tick, scan for complete "paragraphs":
+//      - a double-newline (\n\n) marks a paragraph boundary
+//      - a code-fence block (``` ... ```) is kept whole
+//   3. Each complete paragraph is rendered with marked() and appended
+//      as a <div class="ai-para-in"> block, triggering the CSS fade-up.
+//   4. In-progress text (no complete para yet) is shown as plain text
+//      with a blinking cursor so the user knows generation is happening.
+//   5. flush() drains everything and does one final marked re-render
+//      for full LaTeX / GFM / table polish.
+//
+// This eliminates smd (which caused sync-layout jank) and avoids the
+// "invisible wall" of immediate writes.
 
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let fullText   = '';
-  let smdParser  = null;
-  let rafId      = null;   // single rAF loop
-  let pending    = '';     // chunks accumulated between rAF ticks
+  let fullText  = '';     // everything received so far
+  let buf       = '';     // raw buffer not yet rendered as a paragraph
+  let rafId     = null;
+  let inCodeFence = false;
+  let dotsEl    = null;   // typing-dots shown before first paragraph
+  let liveEl    = null;   // <span> showing in-progress text + cursor
+  let hasPara   = false;  // true once we've rendered at least one para
 
-  if (typeof smd !== 'undefined' && smd.default_renderer && smd.parser) {
-    const renderer = smd.default_renderer(container);
-    smdParser = smd.parser(renderer);
+  // ── Typing-dots placeholder (shown while waiting for first para) ──
+  function _showDots() {
+    if (dotsEl) return;
+    dotsEl = document.createElement('div');
+    dotsEl.className = 'ai-typing-dots';
+    dotsEl.innerHTML = '<span></span><span></span><span></span>';
+    container.appendChild(dotsEl);
+    if (scrollTarget) scrollMessages(scrollTarget);
+  }
+  function _hideDots() {
+    if (dotsEl) { dotsEl.remove(); dotsEl = null; }
   }
 
-  // Block-element entrance animation via MutationObserver
-  let observer = null;
-  try {
-    observer = new MutationObserver(function(mutations) {
-      for (const m of mutations) {
-        for (const node of m.addedNodes) {
-          if (node.nodeType === 1 &&
-              /^(P|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName)) {
-            node.classList.add('ai-block-in');
-          }
-        }
-      }
-    });
-    observer.observe(container, { childList: true, subtree: true });
-  } catch(e) {}
-
-  // rAF loop: flushes accumulated text once per frame
-  // Batching multiple SSE chunks into one DOM write prevents forced
-  // synchronous layouts and keeps the frame budget under 16ms.
-  function _tick() {
-    rafId = null;
-    if (!pending) return;
-    const batch = pending;
-    pending = '';
-    fullText += batch;
-    if (smdParser) {
-      smd.parser_write(smdParser, batch);
-    } else {
-      container.appendChild(document.createTextNode(batch));
+  // ── In-progress live text element (current partial paragraph) ─────
+  function _ensureLive() {
+    if (!liveEl) {
+      liveEl = document.createElement('p');
+      liveEl.className = 'ai-live-text';
+      liveEl.innerHTML = '<span class="ai-gen-cursor"></span>';
+      container.appendChild(liveEl);
     }
+  }
+  function _updateLive(text) {
+    _ensureLive();
+    // Keep cursor at end; show raw text (no markdown parsing for partial)
+    const cursor = liveEl.querySelector('.ai-gen-cursor');
+    const textNode = document.createTextNode(text);
+    liveEl.insertBefore(textNode, cursor);
+  }
+  function _clearLive() {
+    if (liveEl) { liveEl.remove(); liveEl = null; }
+  }
+
+  // ── Append a fully rendered paragraph block ───────────────────────
+  function _appendPara(md) {
+    if (!md.trim()) return;
+    _hideDots();
+    _clearLive();
+    const div = document.createElement('div');
+    div.className = 'ai-para-in';
+    try {
+      div.innerHTML = markedRender(md);
+    } catch(e) {
+      div.textContent = md;
+    }
+    container.appendChild(div);
+    hasPara = true;
     if (scrollTarget) scrollMessages(scrollTarget);
   }
 
-  // push: accumulate text, schedule one rAF tick
+  // ── Detect paragraph boundary ─────────────────────────────────────
+  // Returns {para, rest} where para is the complete paragraph and
+  // rest is whatever comes after. Returns null if no complete para yet.
+  function _splitPara(text) {
+    let i = 0;
+    while (i < text.length) {
+      // Track code fences so we don't split inside them
+      if (text.slice(i, i+3) === '```') {
+        inCodeFence = !inCodeFence;
+        i += 3;
+        continue;
+      }
+      if (!inCodeFence && text[i] === '\n' && text[i+1] === '\n') {
+        return { para: text.slice(0, i), rest: text.slice(i+2) };
+      }
+      i++;
+    }
+    return null;
+  }
+
+  // ── rAF tick: drain complete paragraphs, update live text ─────────
+  function _tick() {
+    rafId = null;
+    // Drain all complete paragraphs
+    let split;
+    while ((split = _splitPara(buf)) !== null) {
+      if (split.para.trim()) _appendPara(split.para);
+      buf = split.rest;
+    }
+    // Show remaining partial text as live text with cursor
+    if (buf.trim()) {
+      if (!hasPara) _showDots();   // still waiting for first para
+      _clearLive();
+      _ensureLive();
+      // Re-render live element with current buf
+      const cursorEl = liveEl.querySelector('.ai-gen-cursor');
+      // Remove old text nodes
+      Array.from(liveEl.childNodes).forEach(n => {
+        if (n !== cursorEl) n.remove();
+      });
+      liveEl.insertBefore(document.createTextNode(buf), cursorEl);
+      if (scrollTarget) scrollMessages(scrollTarget);
+    }
+  }
+
   function push(text) {
     if (!text) return;
-    pending += text;
+    fullText += text;
+    buf      += text;
     if (!rafId) rafId = requestAnimationFrame(_tick);
   }
 
   function flush() {
     if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    // Drain any pending text synchronously
-    if (pending) {
-      fullText += pending;
-      if (smdParser) smd.parser_write(smdParser, pending);
-      pending = '';
-    }
-    if (smdParser) { smd.parser_end(smdParser); smdParser = null; }
-    if (observer)  { observer.disconnect(); observer = null; }
+    _hideDots();
+    _clearLive();
+    // Drain remaining buffer as final paragraph
+    if (buf.trim()) _appendPara(buf);
+    buf = '';
+    // Re-render everything with marked for full LaTeX/GFM polish
     if (fullText) {
       try { container.innerHTML = markedRender(fullText); } catch(e) {}
     }
@@ -388,6 +455,7 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
     if (scrollTarget) scrollMessages(scrollTarget);
   }
 
+  _showDots();   // show dots immediately when renderer is created
   return { push, flush };
 }
 
