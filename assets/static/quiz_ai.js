@@ -313,35 +313,32 @@ function autoResizeTextarea(el) {
 }
 
 // ── Streaming renderer ─────────────────────────────────────────────
-// Uses streaming-markdown (smd) for incremental DOM rendering.
-// smd only appends to the DOM — never rewrites — so text always
-// appears at its final position with zero layout jumps.
-// Characters are drip-fed via requestAnimationFrame for smooth flow.
+// Design goal: zero artificial throttle — render each SSE chunk
+// immediately, use CSS animation for perceived smoothness.
+// smd parser handles incremental Markdown → DOM with no full rewrite.
+//
+// push(chunk) → feeds chunk to smd immediately in the same microtask
+// flush()     → finalises smd, does one marked re-render for LaTeX/GFM
 
-/**
- * Create a streaming renderer attached to a container + cursor.
- * - push(chunk): accumulate text, schedule drip animation
- * - flush():    finalize stream, do a final marked render for polish
- */
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let pending = '';
   let fullText = '';
-  let rafId = null;
   let smdParser = null;
+  let scrollRaf = null;
 
-  // Initialize smd parser
+  // ── smd incremental Markdown parser ──────────────────────────────
   if (typeof smd !== 'undefined' && smd.default_renderer && smd.parser) {
     const renderer = smd.default_renderer(container);
     smdParser = smd.parser(renderer);
   }
 
-  // Observe new block elements and animate them in
+  // ── Animate block-level elements as they appear (MutationObserver) ─
   let observer = null;
   try {
     observer = new MutationObserver(function(mutations) {
       for (const m of mutations) {
         for (const node of m.addedNodes) {
-          if (node.nodeType === 1 && /^(P|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName)) {
+          if (node.nodeType === 1 &&
+              /^(P|H[1-6]|UL|OL|LI|TABLE|BLOCKQUOTE|PRE)$/i.test(node.tagName)) {
             node.classList.add('ai-block-in');
           }
         }
@@ -350,73 +347,42 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
     observer.observe(container, { childList: true, subtree: true });
   } catch(e) {}
 
-  function placeCursor() {
-    if (cursor) container.appendChild(cursor);
+  // ── Debounced scroll — one rAF per many pushes ────────────────────
+  function scheduleScroll() {
+    if (!scrollTarget || scrollRaf) return;
+    scrollRaf = requestAnimationFrame(function() {
+      scrollRaf = null;
+      scrollMessages(scrollTarget);
+    });
   }
 
-  // 目标速率：约 40ms 写完一个 SSE chunk（raf ≈ 16ms/帧）
-  // 每帧释放字符数 = pending.length / FRAMES_PER_CHUNK，下限 1，上限 32
-  const FRAMES_PER_CHUNK = 3;  // 每个 chunk 用 3 帧写完
-  const MAX_PER_FRAME = 32;    // 单帧最多写 32 字符（避免过大 chunk 卡顿）
-  const MIN_PER_FRAME = 1;
-
-  function drip() {
-    if (pending.length === 0) { rafId = null; return; }
-
-    // 动态决定本帧写多少字符
-    const want = Math.ceil(pending.length / FRAMES_PER_CHUNK);
-    const n = Math.max(MIN_PER_FRAME, Math.min(MAX_PER_FRAME, want));
-
-    // 不在词中间断开（中文逐字，英文到词边界）
-    let end = n;
-    if (end < pending.length && !/[\s\u4e00-\u9fff\u3000-\u303f]/.test(pending[end])) {
-      // 在英文词中间：往后找词边界（最多再多 8 字符）
-      let look = end;
-      while (look < pending.length && look < end + 8 && !/\s/.test(pending[look])) look++;
-      end = look;
-    }
-    end = Math.min(end, pending.length);
-
-    const slice = pending.slice(0, end);
-    pending = pending.slice(end);
-    fullText += slice;
-
-    if (smdParser) {
-      smd.parser_write(smdParser, slice);
-    } else {
-      container.appendChild(document.createTextNode(slice));
-    }
-
-    placeCursor();
-    if (scrollTarget) scrollMessages(scrollTarget);
-    rafId = requestAnimationFrame(drip);
-  }
-
+  // ── push: render chunk immediately, no artificial delay ──────────
   function push(text) {
-    pending += text;
-    if (!rafId) rafId = requestAnimationFrame(drip);
+    if (!text) return;
+    fullText += text;
+    if (smdParser) {
+      smd.parser_write(smdParser, text);
+    } else {
+      // Fallback: plain text node
+      container.appendChild(document.createTextNode(text));
+    }
+    scheduleScroll();
   }
 
+  // ── flush: finalise smd, re-render with marked for LaTeX/GFM ─────
   function flush() {
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    if (pending.length > 0) {
-      fullText += pending;
-      if (smdParser) smd.parser_write(smdParser, pending);
-      pending = '';
-    }
+    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null; }
     if (smdParser) {
       smd.parser_end(smdParser);
       smdParser = null;
     }
     if (observer) { observer.disconnect(); observer = null; }
-    // Re-render with marked for LaTeX/GFM polish + table fix
+    // One final marked render for full GFM + LaTeX + table polish
     if (fullText) {
-      try {
-        container.innerHTML = markedRender(fullText);
-      } catch (e) { /* keep smd output */ }
+      try { container.innerHTML = markedRender(fullText); } catch(e) {}
     }
-    // Post-render: replace mermaid code blocks with SVG diagrams
     renderMermaidBlocks(container).catch(() => {});
+    if (scrollTarget) scrollMessages(scrollTarget);
   }
 
   return { push, flush };
@@ -807,7 +773,7 @@ function sendAIMessage(key) {
               }
               reasoningRenderer.push(obj.reasoning);
               fullReasoning += obj.reasoning;
-              scrollMessages(messages);
+              // scroll handled inside makeStreamingRenderer.scheduleScroll()
             }
 
             // truncated 标志：服务端在 [DONE] 前发送 {"truncated":true}
