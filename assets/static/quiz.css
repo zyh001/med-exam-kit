@@ -1449,6 +1449,9 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .q-stage{touch-action:pan-y}
 /* 拖动中禁止 transition */
 .q-stage.is-dragging{transition:none !important}
+/* adj-stage：悬停在屏幕外，is-dragging 时同步移动 */
+.q-stage.adj-stage{overflow-y:auto;will-change:transform}
+.q-stage.adj-stage.is-dragging{transition:none !important}
 /* 边缘滑动提示箭头 */
 .swipe-hint{
   position:absolute;top:50%;transform:translateY(-50%);

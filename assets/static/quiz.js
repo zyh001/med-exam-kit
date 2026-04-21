@@ -6379,9 +6379,14 @@ function _isTouchInHScrollable(el) {
 }
 
 // ── 做题区：左右滑动切题 ─────────────────────
+// 练习模式：连续滑动（当前题 + 相邻题同时移动，视觉连续无空白）
+// 考试模式：保持原有翻页动画逻辑不变
 (function setupQuizSwipe(){
   const THRESHOLD=70, VELOCITY=0.32, RESIST=0.35;
+  const SNAP_DUR = 220; // ms，松手后 snap 动画时长
   let tx=0,ty=0,t0=0,locked=null,dragging=false,touchTarget=null;
+  let _adjStage = null;   // 练习模式下预渲染的相邻 stage
+  let _adjDir   = null;   // 'prev' | 'next'
 
   const quizScreen = document.getElementById('s-quiz');
   if(!quizScreen) return;
@@ -6390,7 +6395,7 @@ function _isTouchInHScrollable(el) {
   const hintL = document.getElementById('swipe-hint-left');
   const hintR = document.getElementById('swipe-hint-right');
 
-  function stage(){ return quizBody.querySelector('.q-stage'); }
+  function stage(){ return quizBody.querySelector('.q-stage:not(.adj-stage)'); }
   function canPrev(){
     if(S.cur<=0) return false;
     if(S.mode==='exam') return examCanGoBack(S.cur);
@@ -6399,12 +6404,10 @@ function _isTouchInHScrollable(el) {
   function canNext(){
     if(S.mode==='exam'){
       if(S.cur>=S.questions.length-1) return false;
-      // 跨题型组时不允许滑动（需按钮弹窗确认）
       const nextGIdx=getGroupIdxForQ(S.cur+1);
       const curGIdx =getGroupIdxForQ(S.cur);
       return nextGIdx===curGIdx;
     }
-    // 练习模式：自由滑动，只要不是最后一题
     return S.cur < S.questions.length - 1;
   }
   function updateHints(dx){
@@ -6418,27 +6421,98 @@ function _isTouchInHScrollable(el) {
     hintR?.classList.remove('visible','active');
   }
 
+  // ── 练习模式：预渲染相邻题 ──────────────────────────────────────
+  function _buildAdjStage(adjIdx, side){
+    // side: 'prev'(-100%) | 'next'(+100%)
+    if(_adjStage) { _adjStage.remove(); _adjStage=null; }
+    const q = S.questions[adjIdx];
+    if(!q) return;
+    const el = document.createElement('div');
+    el.className = 'q-stage adj-stage';
+    el.style.cssText = `position:absolute;inset:0;will-change:transform;` +
+      `transform:translateX(${side==='prev'?'-100%':'100%'});overflow-y:auto;`;
+    const wrap = document.createElement('div');
+    wrap.className = 'question-wrap';
+    el.appendChild(wrap);
+    // 临时把 S.cur 换成相邻题索引来复用 _fillQ
+    const savedCur = S.cur;
+    S.cur = adjIdx;
+    _fillQ(wrap, q, false, true);
+    S.cur = savedCur;
+    // 渲染后让选项禁用（用户不能在预览里答题）
+    el.querySelectorAll('.opt,.confirm-btn').forEach(b => { b.disabled=true; b.style.pointerEvents='none'; });
+    quizBody.appendChild(el);
+    _adjStage = el;
+    _adjDir   = side;
+  }
+
+  function _removeAdjStage(){
+    if(_adjStage){ _adjStage.remove(); _adjStage=null; _adjDir=null; }
+  }
+
+  // ── 移动：cur + adj 联动 ─────────────────────────────────────────
+  function _moveBoth(dx){
+    const s=stage(); if(!s) return;
+    s.style.transform=`translateX(${dx}px)`;
+    if(_adjStage){
+      const base = _adjDir==='prev' ? -quizBody.clientWidth : quizBody.clientWidth;
+      _adjStage.style.transform=`translateX(${base+dx}px)`;
+    }
+  }
+
+  // ── Snap 动画：两者同时移动到目标位置 ───────────────────────────
+  function _snapBoth(targetDx, cb){
+    const s=stage();
+    const ease='transform '+SNAP_DUR+'ms cubic-bezier(.25,.46,.45,.94)';
+    if(s){ s.style.transition=ease; s.style.transform=`translateX(${targetDx}px)`; }
+    if(_adjStage){
+      const base = _adjDir==='prev' ? -quizBody.clientWidth : quizBody.clientWidth;
+      _adjStage.style.transition=ease;
+      _adjStage.style.transform=`translateX(${base+targetDx}px)`;
+    }
+    setTimeout(()=>{ if(s){s.style.transition='';} cb && cb(); }, SNAP_DUR);
+  }
+
+  // ── 取消（回弹）───────────────────────────────────────────────────
+  function _cancelSwipe(dx){
+    _snapBoth(0, ()=>{ _removeAdjStage(); });
+    if(Math.abs(dx)>8){
+      // 轻微过冲回弹（只对当前题）
+      const s=stage(); if(!s) return;
+      s.style.transition='transform .2s cubic-bezier(.25,.46,.45,.94)';
+      setTimeout(()=>{ if(s) s.style.transition=''; }, 220);
+    }
+  }
+
   quizBody.addEventListener('touchstart', e=>{
     if(document.querySelector('.screen.active')?.id!=='s-quiz') return;
     const t=e.touches[0]; tx=t.clientX; ty=t.clientY; t0=Date.now();
     locked=null; dragging=false; touchTarget=e.target;
+    _removeAdjStage(); // 清理上一次可能残留的 adj stage
   },{passive:true});
 
   quizBody.addEventListener('touchmove', e=>{
     if(document.querySelector('.screen.active')?.id!=='s-quiz') return;
     const t=e.touches[0], dx=t.clientX-tx, dy=t.clientY-ty;
-    if(!locked){ const d=getSwipeDir(dx,dy); if(!d) return;
+    if(!locked){
+      const d=getSwipeDir(dx,dy); if(!d) return;
       if(d!=='vertical'&&_isTouchInHScrollable(touchTarget)){locked='vertical';return;}
       locked=d;
+      // 方向确定后，练习模式立即预渲染相邻题
+      if(d!=='vertical' && S.mode==='practice'){
+        if(dx>0 && canPrev()) _buildAdjStage(S.cur-1,'prev');
+        else if(dx<0 && canNext()) _buildAdjStage(S.cur+1,'next');
+      }
     }
     if(locked==='vertical') return;
     e.preventDefault();
     dragging=true;
     const s=stage(); if(!s) return;
     s.classList.add('is-dragging');
+    if(_adjStage) _adjStage.classList.add('is-dragging');
     let move=dx;
     if((dx>0&&!canPrev())||(dx<0&&!canNext())) move=dx*RESIST;
-    s.style.transform=`translateX(${move}px)`;
+    _moveBoth(move);
     updateHints(dx);
   },{passive:false});
 
@@ -6447,21 +6521,55 @@ function _isTouchInHScrollable(el) {
     dragging=false; resetHints();
     const s=stage(); if(!s) return;
     s.classList.remove('is-dragging');
-    s.style.transform='';
+    if(_adjStage) _adjStage.classList.remove('is-dragging');
     const dx=e.changedTouches[0].clientX-tx;
     const dt=Date.now()-t0;
     const vel=Math.abs(dx)/dt;
     const ok=Math.abs(dx)>=THRESHOLD||vel>=VELOCITY;
+
     if(ok){
       if(dx>0&&canPrev()){
-        vibrate(10); S.cur--; renderQ('back');
-        if(S.mode==='exam') updateGridDot();
-      } else if(dx<0&&canNext()){
-        vibrate(10); S.cur++; renderQ('forward');
-        if(S.mode==='exam') updateGridDot();
-      } else if(dx<0 && _zenMode && S.cur===S.questions.length-1){
-        // 极简模式下最后一题左滑：触发交卷（练习=完成/考试=提交确认）
+        // ── 向右滑（上一题）──────────────────────────────────────
         vibrate(10);
+        if(S.mode==='practice' && _adjStage && _adjDir==='prev'){
+          // 连续滑动：把 adj 滑到 0，当前滑出右边
+          const w=quizBody.clientWidth;
+          const ease='transform '+SNAP_DUR+'ms cubic-bezier(.25,.46,.45,.94)';
+          s.style.transition=ease; s.style.transform=`translateX(${w}px)`;
+          _adjStage.style.transition=ease; _adjStage.style.transform='translateX(0)';
+          setTimeout(()=>{
+            S.cur--;
+            renderQ('none');    // 用 'none'（无动画）重建真正的 stage
+            _removeAdjStage();
+            updateGridDot && updateGridDot();
+            savePracticeSession && savePracticeSession();
+          }, SNAP_DUR);
+        } else {
+          s.style.transform=''; _removeAdjStage();
+          S.cur--; renderQ('back');
+        }
+      } else if(dx<0&&canNext()){
+        // ── 向左滑（下一题）──────────────────────────────────────
+        vibrate(10);
+        if(S.mode==='practice' && _adjStage && _adjDir==='next'){
+          const w=quizBody.clientWidth;
+          const ease='transform '+SNAP_DUR+'ms cubic-bezier(.25,.46,.45,.94)';
+          s.style.transition=ease; s.style.transform=`translateX(${-w}px)`;
+          _adjStage.style.transition=ease; _adjStage.style.transform='translateX(0)';
+          setTimeout(()=>{
+            S.cur++;
+            renderQ('none');
+            _removeAdjStage();
+            updateGridDot && updateGridDot();
+            savePracticeSession && savePracticeSession();
+          }, SNAP_DUR);
+        } else {
+          s.style.transform=''; _removeAdjStage();
+          S.cur++; renderQ('forward');
+        }
+      } else if(dx<0 && _zenMode && S.cur===S.questions.length-1){
+        vibrate(10); _removeAdjStage();
+        s.style.transform='';
         if(S.mode==='practice'){
           finishPractice();
         } else if(S.mode==='exam'){
@@ -6470,23 +6578,16 @@ function _isTouchInHScrollable(el) {
             const sel=S.ans[i];
             return !sel || (sel instanceof Set && sel.size===0);
           }).length;
-          if(S.examReviewMode){
-            submitExam();
-          } else if(unanswered>0){
-            showExamSubmitConfirm(unanswered,total);
-          } else {
-            _enterExamReview();
-          }
+          if(S.examReviewMode) submitExam();
+          else if(unanswered>0) showExamSubmitConfirm(unanswered,total);
+          else _enterExamReview();
         }
       } else {
-        s.style.transition='transform .22s cubic-bezier(.25,.46,.45,.94)';
-        s.style.transform=`translateX(${dx>0?5:-5}px)`;
-        setTimeout(()=>{s.style.transition='';s.style.transform='';},230);
+        _cancelSwipe(dx);
         vibrate([6,30,6]);
       }
-    } else if(Math.abs(dx)>8){
-      s.style.transition='transform .2s cubic-bezier(.25,.46,.45,.94)';
-      setTimeout(()=>{s.style.transition='';},220);
+    } else {
+      _cancelSwipe(dx);
     }
   },{passive:true});
 })();
