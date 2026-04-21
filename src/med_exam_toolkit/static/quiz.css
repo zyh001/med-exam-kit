@@ -2739,12 +2739,12 @@ button,a,[role=button],label{touch-action:manipulation}
   from{opacity:0;transform:translateY(4px)}
   to{opacity:1;transform:none}
 }
-.ai-block-in{animation:aiBlockIn .3s ease both}
+.ai-block-in{animation:aiBlockIn .18s cubic-bezier(0,0,.2,1) both}
 @keyframes aiBlockIn{
-  from{opacity:0;transform:translateY(6px)}
+  from{opacity:0;transform:translateY(4px)}
   to{opacity:1;transform:none}
 }
-.ai-thinking-fadein{animation:aiFadeIn .3s ease both}
+.ai-thinking-fadein{animation:aiFadeIn .2s cubic-bezier(0,0,.2,1) both}
 
 .ai-error{color:var(--danger) !important}
 
