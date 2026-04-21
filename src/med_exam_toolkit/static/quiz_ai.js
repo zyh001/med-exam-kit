@@ -312,46 +312,85 @@ function autoResizeTextarea(el) {
   el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
 }
 
-// ── Streaming renderer — buffer-then-render ────────────────────────
+// ── Streaming renderer — paragraph-buffered, one-by-one fade-in ───
 //
-// 策略：流式阶段只缓存文本，生成中显示跳动动画，
-// 流结束后一次性用 marked() 渲染并整体淡入。
-// 思维链（reasoning）也同样处理，独立缓存。
-//
-// push(chunk)  → 追加到 buffer，不做任何 DOM 操作
-// flush()      → 停止动画，一次性渲染，content 整体淡入
+// 规则：
+//   - 收到 chunk → 追加到 buf，不做任何 DOM 操作
+//   - buf 中出现 \n\n（段落分隔）→ 取出完整段落，用 marked() 渲染，
+//     以 ai-para-in 动画淡入追加到容器
+//   - 期间始终显示跳动三点动画，告知用户正在生成
+//   - 代码块 ``` 内不分段
+//   - flush() → 渲染剩余 buf，移除动画
 
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let fullText = '';
-  let dotsEl   = null;
+  let fullText    = '';   // 全量文本（flush 用）
+  let buf         = '';   // 当前未渲染的缓冲
+  let inFence     = false;
+  let dotsEl      = null;
 
-  // ── 生成中：三点跳动占位 ─────────────────────────────────────────
-  dotsEl = document.createElement('div');
-  dotsEl.className = 'ai-typing-dots';
-  dotsEl.innerHTML = '<span></span><span></span><span></span>';
-  container.appendChild(dotsEl);
-  if (scrollTarget) scrollMessages(scrollTarget);
+  // ── 三点动画 ──────────────────────────────────────────────────────
+  function _showDots() {
+    if (dotsEl) return;
+    dotsEl = document.createElement('div');
+    dotsEl.className = 'ai-typing-dots';
+    dotsEl.innerHTML = '<span></span><span></span><span></span>';
+    container.appendChild(dotsEl);
+    if (scrollTarget) scrollMessages(scrollTarget);
+  }
+  function _hideDots() {
+    if (dotsEl) { dotsEl.remove(); dotsEl = null; }
+  }
 
-  // ── push：只缓存，不渲染 ─────────────────────────────────────────
+  // ── 渲染一个完整段落，淡入追加 ────────────────────────────────────
+  function _renderPara(md) {
+    if (!md.trim()) return;
+    _hideDots();
+    const div = document.createElement('div');
+    div.className = 'ai-para-in';
+    try { div.innerHTML = markedRender(md); } catch(e) { div.textContent = md; }
+    container.appendChild(div);
+    if (scrollTarget) scrollMessages(scrollTarget);
+    // 每段渲染完立即重新显示动画，等待下一段
+    _showDots();
+  }
+
+  // ── 扫描 buf，提取所有已完成段落 ──────────────────────────────────
+  function _drain() {
+    let i = 0;
+    while (i < buf.length) {
+      if (buf.slice(i, i + 3) === '```') { inFence = !inFence; i += 3; continue; }
+      if (!inFence && buf[i] === '\n' && buf[i + 1] === '\n') {
+        _renderPara(buf.slice(0, i));
+        buf = buf.slice(i + 2);
+        i = 0;
+        continue;
+      }
+      i++;
+    }
+  }
+
+  // ── push：追加 chunk，扫描段落 ─────────────────────────────────────
   function push(text) {
     if (!text) return;
     fullText += text;
+    buf      += text;
+    _drain();
   }
 
-  // ── flush：移除动画，一次性渲染，整体淡入 ──────────────────────
+  // ── flush：渲染剩余内容，移除动画 ─────────────────────────────────
   function flush() {
-    if (dotsEl) { dotsEl.remove(); dotsEl = null; }
-    if (!fullText) return;
-    try {
-      container.innerHTML = markedRender(fullText);
-    } catch(e) {
-      container.textContent = fullText;
+    if (buf.trim()) _renderPara(buf);
+    buf = '';
+    _hideDots();
+    // 最终用 marked 整体重渲，确保 LaTeX/表格/mermaid 正确
+    if (fullText) {
+      try { container.innerHTML = markedRender(fullText); } catch(e) {}
     }
-    container.classList.add('ai-content-in');
     renderMermaidBlocks(container).catch(() => {});
     if (scrollTarget) scrollMessages(scrollTarget);
   }
 
+  _showDots();  // 一开始就显示动画
   return { push, flush };
 }
 

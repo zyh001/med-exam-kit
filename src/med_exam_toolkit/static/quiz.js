@@ -6421,42 +6421,29 @@ function _isTouchInHScrollable(el) {
     hintR?.classList.remove('visible','active');
   }
 
-  // ── 练习模式：预渲染相邻题（轻量骨架，不阻塞手势）────────────
-  // 只建容器 + 填入最小内容（题目文字+选项文字），不触发重量级操作
+  // ── 练习模式：预渲染相邻题 ──────────────────────────────────────
   function _buildAdjStage(adjIdx, side){
+    // side: 'prev'(-100%) | 'next'(+100%)
     if(_adjStage) { _adjStage.remove(); _adjStage=null; }
     const q = S.questions[adjIdx];
     if(!q) return;
     const el = document.createElement('div');
     el.className = 'q-stage adj-stage';
-    el.style.cssText = 'position:absolute;inset:0;will-change:transform;overflow-y:auto;' +
-      'transform:translateX(' + (side==='prev'?'-100%':'100%') + ');pointer-events:none;';
-    // 轻量骨架：只渲染题目文字和选项，跳过解析/AI/stem 等重型内容
-    const qContent = q.text || q.stem || '';
-    const optHtml = (q.options||[]).map(function(opt,i){
-      const letter = String.fromCharCode(65+i);
-      const clean = opt.replace(/^[A-Za-z]\s*[.．、·）)\s]\s*/u,'').trim();
-      return '<button class="opt" disabled style="pointer-events:none">' +
-        '<span class="opt-label">'+letter+'</span>' +
-        '<span class="opt-text">'+esc(clean)+'</span></button>';
-    }).join('');
-    el.innerHTML = '<div class="question-wrap">' +
-      '<div class="q-text"><span class="q-num">'+(adjIdx+1)+'</span>'+
-      esc(qContent.replace(/<[^>]+>/g,'').slice(0,200))+'</div>'+
-      '<div class="options-list">'+optHtml+'</div></div>';
+    el.style.cssText = `position:absolute;inset:0;will-change:transform;` +
+      `transform:translateX(${side==='prev'?'-100%':'100%'});overflow-y:auto;`;
+    const wrap = document.createElement('div');
+    wrap.className = 'question-wrap';
+    el.appendChild(wrap);
+    // 临时把 S.cur 换成相邻题索引来复用 _fillQ
+    const savedCur = S.cur;
+    S.cur = adjIdx;
+    _fillQ(wrap, q, false, true);
+    S.cur = savedCur;
+    // 渲染后让选项禁用（用户不能在预览里答题）
+    el.querySelectorAll('.opt,.confirm-btn').forEach(b => { b.disabled=true; b.style.pointerEvents='none'; });
     quizBody.appendChild(el);
     _adjStage = el;
     _adjDir   = side;
-    // 如果手势仍在进行，立即同步 adj-stage 到当前拖动位置
-    if(dragging){
-      const curStage = stage();
-      if(curStage){
-        const curX = new WebKitCSSMatrix(getComputedStyle(curStage).transform).m41 ||
-                     parseFloat(curStage.style.transform.replace('translateX(','')) || 0;
-        const base = side==='prev' ? -quizBody.clientWidth : quizBody.clientWidth;
-        el.style.transform = 'translateX('+(base+curX)+'px)';
-      }
-    }
   }
 
   function _removeAdjStage(){
@@ -6511,12 +6498,10 @@ function _isTouchInHScrollable(el) {
       const d=getSwipeDir(dx,dy); if(!d) return;
       if(d!=='vertical'&&_isTouchInHScrollable(touchTarget)){locked='vertical';return;}
       locked=d;
-      // 方向确定后，练习模式异步预渲染相邻题（避免在手势中阻塞主线程）
+      // 方向确定后，练习模式立即预渲染相邻题
       if(d!=='vertical' && S.mode==='practice'){
-        const _adjIdx = dx>0 ? S.cur-1 : S.cur+1;
-        const _adjSide = dx>0 ? 'prev' : 'next';
-        const _adjCan = dx>0 ? canPrev() : canNext();
-        if(_adjCan) setTimeout(function(){ _buildAdjStage(_adjIdx, _adjSide); }, 0);
+        if(dx>0 && canPrev()) _buildAdjStage(S.cur-1,'prev');
+        else if(dx<0 && canNext()) _buildAdjStage(S.cur+1,'next');
       }
     }
     if(locked==='vertical') return;
