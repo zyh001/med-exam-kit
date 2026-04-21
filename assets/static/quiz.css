@@ -1449,6 +1449,9 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .q-stage{touch-action:pan-y}
 /* 拖动中禁止 transition */
 .q-stage.is-dragging{transition:none !important}
+/* adj-stage：悬停在屏幕外，is-dragging 时同步移动 */
+.q-stage.adj-stage{overflow-y:auto;will-change:transform}
+.q-stage.adj-stage.is-dragging{transition:none !important}
 /* 边缘滑动提示箭头 */
 .swipe-hint{
   position:absolute;top:50%;transform:translateY(-50%);
@@ -2739,40 +2742,35 @@ button,a,[role=button],label{touch-action:manipulation}
   from{opacity:0;transform:translateY(4px)}
   to{opacity:1;transform:none}
 }
-/* 段落淡入（流式生成时每段渲染完后触发）*/
-.ai-para-in{
-  animation:aiParaIn .38s cubic-bezier(0,0,.2,1) both;
-}
-@keyframes aiParaIn{
-  from{opacity:0;transform:translateY(8px)}
-  to  {opacity:1;transform:none}
-}
-/* 兼容旧代码：ai-block-in 复用段落动画 */
-.ai-block-in{animation:aiParaIn .22s cubic-bezier(0,0,.2,1) both}
+.ai-block-in{animation:aiBlockIn .18s cubic-bezier(0,0,.2,1) both}
 @keyframes aiBlockIn{
   from{opacity:0;transform:translateY(4px)}
   to{opacity:1;transform:none}
 }
 .ai-thinking-fadein{animation:aiFadeIn .2s cubic-bezier(0,0,.2,1) both}
-/* 生成中光标闪烁 */
-.ai-gen-cursor{
-  display:inline-block;width:2px;height:1.1em;
-  background:var(--accent);border-radius:1px;
-  vertical-align:text-bottom;margin-left:2px;
-  animation:aiCursorBlink .7s step-end infinite;
+/* 生成完成后内容整体淡入 */
+.ai-content-in{
+  animation:aiContentIn .45s cubic-bezier(0,0,.2,1) both;
 }
-@keyframes aiCursorBlink{0%,100%{opacity:1}50%{opacity:0}}
-/* 生成中的"打点"占位行（首段出现前显示）*/
+@keyframes aiContentIn{
+  from{opacity:0;transform:translateY(6px)}
+  to{opacity:1;transform:none}
+}
+/* 生成中：三点跳动动画 */
 .ai-typing-dots{
-  display:flex;gap:5px;align-items:center;padding:6px 0;min-height:24px;
+  display:flex;gap:5px;align-items:center;padding:8px 2px;
 }
 .ai-typing-dots span{
-  width:6px;height:6px;border-radius:50%;background:var(--accent);opacity:.4;
+  width:7px;height:7px;border-radius:50%;
+  background:var(--accent);
   animation:aiDotPulse 1.2s ease-in-out infinite;
 }
 .ai-typing-dots span:nth-child(2){animation-delay:.2s}
 .ai-typing-dots span:nth-child(3){animation-delay:.4s}
-@keyframes aiDotPulse{0%,80%,100%{opacity:.2;transform:scale(.8)}40%{opacity:1;transform:scale(1)}}
+@keyframes aiDotPulse{
+  0%,80%,100%{opacity:.25;transform:scale(.75)}
+  40%{opacity:1;transform:scale(1)}
+}
 
 .ai-error{color:var(--danger) !important}
 

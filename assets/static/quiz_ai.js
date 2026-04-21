@@ -312,150 +312,46 @@ function autoResizeTextarea(el) {
   el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
 }
 
-// ── Streaming renderer — paragraph-by-paragraph with fade-in ──────
+// ── Streaming renderer — buffer-then-render ────────────────────────
 //
-// Strategy (matches ChatGPT / DeepSeek UX):
-//   1. Accumulate SSE chunks into a raw text buffer.
-//   2. On every rAF tick, scan for complete "paragraphs":
-//      - a double-newline (\n\n) marks a paragraph boundary
-//      - a code-fence block (``` ... ```) is kept whole
-//   3. Each complete paragraph is rendered with marked() and appended
-//      as a <div class="ai-para-in"> block, triggering the CSS fade-up.
-//   4. In-progress text (no complete para yet) is shown as plain text
-//      with a blinking cursor so the user knows generation is happening.
-//   5. flush() drains everything and does one final marked re-render
-//      for full LaTeX / GFM / table polish.
+// 策略：流式阶段只缓存文本，生成中显示跳动动画，
+// 流结束后一次性用 marked() 渲染并整体淡入。
+// 思维链（reasoning）也同样处理，独立缓存。
 //
-// This eliminates smd (which caused sync-layout jank) and avoids the
-// "invisible wall" of immediate writes.
+// push(chunk)  → 追加到 buffer，不做任何 DOM 操作
+// flush()      → 停止动画，一次性渲染，content 整体淡入
 
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let fullText  = '';     // everything received so far
-  let buf       = '';     // raw buffer not yet rendered as a paragraph
-  let rafId     = null;
-  let inCodeFence = false;
-  let dotsEl    = null;   // typing-dots shown before first paragraph
-  let liveEl    = null;   // <span> showing in-progress text + cursor
-  let hasPara   = false;  // true once we've rendered at least one para
+  let fullText = '';
+  let dotsEl   = null;
 
-  // ── Typing-dots placeholder (shown while waiting for first para) ──
-  function _showDots() {
-    if (dotsEl) return;
-    dotsEl = document.createElement('div');
-    dotsEl.className = 'ai-typing-dots';
-    dotsEl.innerHTML = '<span></span><span></span><span></span>';
-    container.appendChild(dotsEl);
-    if (scrollTarget) scrollMessages(scrollTarget);
-  }
-  function _hideDots() {
-    if (dotsEl) { dotsEl.remove(); dotsEl = null; }
-  }
+  // ── 生成中：三点跳动占位 ─────────────────────────────────────────
+  dotsEl = document.createElement('div');
+  dotsEl.className = 'ai-typing-dots';
+  dotsEl.innerHTML = '<span></span><span></span><span></span>';
+  container.appendChild(dotsEl);
+  if (scrollTarget) scrollMessages(scrollTarget);
 
-  // ── In-progress live text element (current partial paragraph) ─────
-  function _ensureLive() {
-    if (!liveEl) {
-      liveEl = document.createElement('p');
-      liveEl.className = 'ai-live-text';
-      liveEl.innerHTML = '<span class="ai-gen-cursor"></span>';
-      container.appendChild(liveEl);
-    }
-  }
-  function _updateLive(text) {
-    _ensureLive();
-    // Keep cursor at end; show raw text (no markdown parsing for partial)
-    const cursor = liveEl.querySelector('.ai-gen-cursor');
-    const textNode = document.createTextNode(text);
-    liveEl.insertBefore(textNode, cursor);
-  }
-  function _clearLive() {
-    if (liveEl) { liveEl.remove(); liveEl = null; }
-  }
-
-  // ── Append a fully rendered paragraph block ───────────────────────
-  function _appendPara(md) {
-    if (!md.trim()) return;
-    _hideDots();
-    _clearLive();
-    const div = document.createElement('div');
-    div.className = 'ai-para-in';
-    try {
-      div.innerHTML = markedRender(md);
-    } catch(e) {
-      div.textContent = md;
-    }
-    container.appendChild(div);
-    hasPara = true;
-    if (scrollTarget) scrollMessages(scrollTarget);
-  }
-
-  // ── Detect paragraph boundary ─────────────────────────────────────
-  // Returns {para, rest} where para is the complete paragraph and
-  // rest is whatever comes after. Returns null if no complete para yet.
-  function _splitPara(text) {
-    let i = 0;
-    while (i < text.length) {
-      // Track code fences so we don't split inside them
-      if (text.slice(i, i+3) === '```') {
-        inCodeFence = !inCodeFence;
-        i += 3;
-        continue;
-      }
-      if (!inCodeFence && text[i] === '\n' && text[i+1] === '\n') {
-        return { para: text.slice(0, i), rest: text.slice(i+2) };
-      }
-      i++;
-    }
-    return null;
-  }
-
-  // ── rAF tick: drain complete paragraphs, update live text ─────────
-  function _tick() {
-    rafId = null;
-    // Drain all complete paragraphs
-    let split;
-    while ((split = _splitPara(buf)) !== null) {
-      if (split.para.trim()) _appendPara(split.para);
-      buf = split.rest;
-    }
-    // Show remaining partial text as live text with cursor
-    if (buf.trim()) {
-      if (!hasPara) _showDots();   // still waiting for first para
-      _clearLive();
-      _ensureLive();
-      // Re-render live element with current buf
-      const cursorEl = liveEl.querySelector('.ai-gen-cursor');
-      // Remove old text nodes
-      Array.from(liveEl.childNodes).forEach(n => {
-        if (n !== cursorEl) n.remove();
-      });
-      liveEl.insertBefore(document.createTextNode(buf), cursorEl);
-      if (scrollTarget) scrollMessages(scrollTarget);
-    }
-  }
-
+  // ── push：只缓存，不渲染 ─────────────────────────────────────────
   function push(text) {
     if (!text) return;
     fullText += text;
-    buf      += text;
-    if (!rafId) rafId = requestAnimationFrame(_tick);
   }
 
+  // ── flush：移除动画，一次性渲染，整体淡入 ──────────────────────
   function flush() {
-    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
-    _hideDots();
-    _clearLive();
-    // Drain remaining buffer as final paragraph
-    if (buf.trim()) _appendPara(buf);
-    buf = '';
-    // Re-render everything with marked for full LaTeX/GFM polish
-    if (fullText) {
-      try { container.innerHTML = markedRender(fullText); } catch(e) {}
+    if (dotsEl) { dotsEl.remove(); dotsEl = null; }
+    if (!fullText) return;
+    try {
+      container.innerHTML = markedRender(fullText);
+    } catch(e) {
+      container.textContent = fullText;
     }
+    container.classList.add('ai-content-in');
     renderMermaidBlocks(container).catch(() => {});
     if (scrollTarget) scrollMessages(scrollTarget);
   }
 
-  _showDots();   // show dots immediately when renderer is created
   return { push, flush };
 }
 
@@ -889,14 +785,19 @@ function sendAIMessage(key) {
     msgEl.classList.remove('ai-typing');
 
     // If reasoning was never collapsed (no content came after), collapse it now
-    if (hasReasoning && !thinkingCollapsed) {
-      thinkingCollapsed = true;
-      collapseThinking(thinkingHeader, thinkingBody);
+    // Final flush of streaming renderers
+    if (reasoningRenderer) {
+      reasoningRenderer.flush();
+      reasoningRenderer = null;
     }
-
-    // Final flush of streaming renderer
     if (contentRenderer) {
       contentRenderer.flush();
+      contentRenderer = null;
+    }
+    // Collapse thinking after content is rendered
+    if (hasReasoning && !thinkingCollapsed) {
+      thinkingCollapsed = true;
+      setTimeout(() => collapseThinking(thinkingHeader, thinkingBody), 50);
     }
 
     // Save assistant response to history
