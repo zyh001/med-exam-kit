@@ -321,17 +321,17 @@ function autoResizeTextarea(el) {
 // flush()     → finalises smd, does one marked re-render for LaTeX/GFM
 
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let fullText = '';
-  let smdParser = null;
-  let scrollRaf = null;
+  let fullText   = '';
+  let smdParser  = null;
+  let rafId      = null;   // single rAF loop
+  let pending    = '';     // chunks accumulated between rAF ticks
 
-  // ── smd incremental Markdown parser ──────────────────────────────
   if (typeof smd !== 'undefined' && smd.default_renderer && smd.parser) {
     const renderer = smd.default_renderer(container);
     smdParser = smd.parser(renderer);
   }
 
-  // ── Animate block-level elements as they appear (MutationObserver) ─
+  // Block-element entrance animation via MutationObserver
   let observer = null;
   try {
     observer = new MutationObserver(function(mutations) {
@@ -347,37 +347,40 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
     observer.observe(container, { childList: true, subtree: true });
   } catch(e) {}
 
-  // ── Debounced scroll — one rAF per many pushes ────────────────────
-  function scheduleScroll() {
-    if (!scrollTarget || scrollRaf) return;
-    scrollRaf = requestAnimationFrame(function() {
-      scrollRaf = null;
-      scrollMessages(scrollTarget);
-    });
+  // rAF loop: flushes accumulated text once per frame
+  // Batching multiple SSE chunks into one DOM write prevents forced
+  // synchronous layouts and keeps the frame budget under 16ms.
+  function _tick() {
+    rafId = null;
+    if (!pending) return;
+    const batch = pending;
+    pending = '';
+    fullText += batch;
+    if (smdParser) {
+      smd.parser_write(smdParser, batch);
+    } else {
+      container.appendChild(document.createTextNode(batch));
+    }
+    if (scrollTarget) scrollMessages(scrollTarget);
   }
 
-  // ── push: render chunk immediately, no artificial delay ──────────
+  // push: accumulate text, schedule one rAF tick
   function push(text) {
     if (!text) return;
-    fullText += text;
-    if (smdParser) {
-      smd.parser_write(smdParser, text);
-    } else {
-      // Fallback: plain text node
-      container.appendChild(document.createTextNode(text));
-    }
-    scheduleScroll();
+    pending += text;
+    if (!rafId) rafId = requestAnimationFrame(_tick);
   }
 
-  // ── flush: finalise smd, re-render with marked for LaTeX/GFM ─────
   function flush() {
-    if (scrollRaf) { cancelAnimationFrame(scrollRaf); scrollRaf = null; }
-    if (smdParser) {
-      smd.parser_end(smdParser);
-      smdParser = null;
+    if (rafId) { cancelAnimationFrame(rafId); rafId = null; }
+    // Drain any pending text synchronously
+    if (pending) {
+      fullText += pending;
+      if (smdParser) smd.parser_write(smdParser, pending);
+      pending = '';
     }
-    if (observer) { observer.disconnect(); observer = null; }
-    // One final marked render for full GFM + LaTeX + table polish
+    if (smdParser) { smd.parser_end(smdParser); smdParser = null; }
+    if (observer)  { observer.disconnect(); observer = null; }
     if (fullText) {
       try { container.innerHTML = markedRender(fullText); } catch(e) {}
     }
