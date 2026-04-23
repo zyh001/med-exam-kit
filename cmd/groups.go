@@ -19,8 +19,10 @@ import (
 //
 // db / config / reload 保持原样（它们本来就是独立领域）。
 //
-// 旧的顶层命令名（quiz / editor / build / info / ...）仍然可用，
-// 但标记为 Hidden=true，不在 `--help` 中展示，仅供过去的脚本 / 文档向后兼容。
+// 旧的顶层命令名（quiz / editor / build / info / ...）继续**可见**在 `--help`
+// 列表中，Short 里附带一个 "→ serve/bank ..." 的指示，让熟悉老命令的用户
+// 无缝过渡，同时也能发现新的分组写法。真实的 flag/RunE 实现挂在分组下的那一份；
+// 顶层的只是一个薄转发别名。
 var (
 	serveCmd = &cobra.Command{
 		Use:   "serve",
@@ -45,14 +47,15 @@ var (
 )
 
 // installGroupedCommands 在 Execute 阶段（所有 init() 都已把子命令挂到 rootCmd 之后）
-// 把指定的顶层命令搬到 serve / bank 下，并在 rootCmd 保留一个隐藏的同名别名，
-// 以保证 `med-exam quiz ...`、`med-exam build ...` 这类旧用法继续生效。
+// 把指定的顶层命令搬到 serve / bank 下，然后回灌一个**可见的**同名顶层别名，
+// 保证 `med-exam quiz ...`、`med-exam build ...` 这类旧用法在 `--help` 中依然
+// 看得到，只是 Short 描述里会多一行"→ serve quiz"之类的分组指示。
 func installGroupedCommands() {
 	rootCmd.AddCommand(serveCmd, bankCmd)
 
 	type target struct {
 		parent  *cobra.Command
-		newName string // 非空表示在分组里重命名（旧名仍然作为顶层 Hidden 别名保留）
+		newName string // 非空表示在分组里重命名（顶层别名仍用旧名）
 	}
 	toRegroup := map[string]target{
 		"quiz":        {serveCmd, ""},
@@ -81,24 +84,25 @@ func installGroupedCommands() {
 		if !ok {
 			continue
 		}
-		// 旧命令从 root 卸下
+		// 旧命令先从 root 卸下（稍后会以别名形式再加回来）
 		rootCmd.RemoveCommand(c)
 
-		// 保留一个隐藏的旧名别名，底层逻辑复用同一份 RunE/Flags：浅拷贝能行，
-		// 因为 cobra Command 的私有字段（parent/subcommands 列表）会在后续
-		// AddCommand 时被重新设置；FlagSet 虽然共享，但一次进程里只跑一条路径，
-		// 不会互相污染。
+		// 保留一个顶层别名：浅拷贝 Command，flag/RunE 共享底层实现。
+		// 因为 cobra.Command 的私有字段（parent / subcommands 列表）会在后续
+		// AddCommand 时被重新设置，所以浅拷贝安全；FlagSet 虽然共享，一次进程
+		// 只跑一条路径，不会互相污染。
 		aliasCopy := *c
 		alias := &aliasCopy
 		canon := name
 		if tgt.newName != "" {
 			canon = tgt.newName
 		}
-		alias.Hidden = true
-		alias.Short = "（已弃用，请使用 `" + tgt.parent.Name() + " " + canon + "`）"
+		// 可见别名，Short 里加一个箭头指向分组后的正式路径，引导用户过渡。
+		alias.Hidden = false
+		alias.Short = c.Short + "  (= " + tgt.parent.Name() + " " + canon + ")"
 		rootCmd.AddCommand(alias)
 
-		// 把真命令挂到分组下；如需重命名则改 Use。
+		// 把真正的命令挂到分组下；如需重命名则改 Use。
 		if tgt.newName != "" {
 			c.Use = tgt.newName
 		}
