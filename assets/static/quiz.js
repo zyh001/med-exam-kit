@@ -2069,10 +2069,20 @@ function _slideQ(dir, buildFn) {
   ghostStage.classList.add(exitCls);
   newStage.classList.add(enterCls);
 
+  // Issue 4（滑动偶尔卡顿）：动画期间给两个 stage 加上 CSS containment，
+  // 使浏览器把 layout / paint 范围限制在 stage 内部。新题图片加载、解析面板
+  // 延迟渲染等都不会触发整个滚动容器重排，滑动帧率更稳定。
+  // 动画结束后清除，避免影响后续正常排版。
+  newStage.style.contain   = 'layout paint';
+  newStage.style.willChange = 'transform';
+  ghostStage.style.contain = 'layout paint';
+
   const DUR = 230;
   _slideCleanTimer = setTimeout(() => {
     ghostStage.remove();
     newStage.classList.remove(enterCls);
+    newStage.style.contain    = '';
+    newStage.style.willChange = '';
     _slideCleanTimer = null;
   }, DUR);
 }
@@ -2293,7 +2303,27 @@ function _fillQ(wrap, q, isExam, isPractice) {
 
   // Explanation
   if (isPractice && isRevealed) {
-    wrap.appendChild(buildExplain(q, curSel));
+    // Issue 4（滑动卡顿）：explain 面板包含长解析 + 图片 + AI 入口，同步构建容易
+    // 让 230ms 滑动动画的第一帧被拖慢。先放一个同样 className 的占位节点（CSS
+    // 不变），让滑入动画有稳定高度参照；然后 double-RAF 推迟到"滑动已开始"之后
+    // 再把真内容替换进去。快速连滑时若已切到别的题（wrap 不在 DOM 或 S.cur 已变），
+    // 直接放弃这次延迟渲染，避免往已卸载节点里塞内容。
+    const placeholder = document.createElement('div');
+    placeholder.className = 'explain-panel';
+    placeholder.id = 'explain-panel';
+    wrap.appendChild(placeholder);
+    const q0 = q, sel0 = curSel;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!wrap.isConnected) return;            // 已滑走
+        if (S.questions[S.cur] !== q0) return;    // 当前题已变
+        if (!placeholder.parentNode) return;      // 占位已被替换或移除
+        const explain = buildExplain(q0, sel0);
+        explain.id = 'explain-panel';
+        explain.classList.add('explain-fade-in'); // 让替换平滑一点
+        placeholder.parentNode.replaceChild(explain, placeholder);
+      });
+    });
   } else if (isPractice) {
     const p = document.createElement('div');
     p.className = 'explain-panel';

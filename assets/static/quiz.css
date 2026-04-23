@@ -818,6 +818,13 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   opacity:0;
 }
 .explain-panel.open{max-height:none;opacity:1}
+/* Issue 4：滑动到下一题时，explain 面板是 RAF 延迟渲染的（先放占位，动画
+   开始后再替换真内容）。给替换进来的节点加一个轻量淡入，避免"突然出现"。 */
+.explain-fade-in{animation:explainFadeIn .25s cubic-bezier(.22,1,.36,1) both}
+@keyframes explainFadeIn{
+  from{opacity:0;transform:translateY(4px)}
+  to{opacity:1;transform:none}
+}
 
 .explain-inner{
   background:var(--card);border:1px solid var(--border);border-radius:12px;
