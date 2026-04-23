@@ -2302,28 +2302,19 @@ function _fillQ(wrap, q, isExam, isPractice) {
   }
 
   // Explanation
+  //
+  // Session K 回滚 Session D 的延迟逻辑：之前为了"让滑入动画的第一帧不被拖慢"
+  // 把 buildExplain 用 double-RAF 延后，先放一个 max-height:0 的空 placeholder，
+  // 滑动完成后再替换成真实面板。这导致了每次滑到已揭示答案的题时页面
+  // 在动画结束后"排版稍微变一下"—— placeholder 零高度 → 真实面板完整高度。
+  //
+  // 而且练习模式的 swipe 其实已经通过 _buildAdjStage 在 touchmove 阶段把相邻题
+  // 完整预渲染了（见 L6485 附近）；_fillQ 本身并不在滑动动画的关键帧路径上。
+  // 所以同步调用 buildExplain 既消除了 layout shift，也不会引入 swipe 卡顿。
+  // _slideQ 里的 `contain: layout paint` 仍保留，继续隔离题干内图片加载等
+  // 引起的局部重排。
   if (isPractice && isRevealed) {
-    // Issue 4（滑动卡顿）：explain 面板包含长解析 + 图片 + AI 入口，同步构建容易
-    // 让 230ms 滑动动画的第一帧被拖慢。先放一个同样 className 的占位节点（CSS
-    // 不变），让滑入动画有稳定高度参照；然后 double-RAF 推迟到"滑动已开始"之后
-    // 再把真内容替换进去。快速连滑时若已切到别的题（wrap 不在 DOM 或 S.cur 已变），
-    // 直接放弃这次延迟渲染，避免往已卸载节点里塞内容。
-    const placeholder = document.createElement('div');
-    placeholder.className = 'explain-panel';
-    placeholder.id = 'explain-panel';
-    wrap.appendChild(placeholder);
-    const q0 = q, sel0 = curSel;
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        if (!wrap.isConnected) return;            // 已滑走
-        if (S.questions[S.cur] !== q0) return;    // 当前题已变
-        if (!placeholder.parentNode) return;      // 占位已被替换或移除
-        const explain = buildExplain(q0, sel0);
-        explain.id = 'explain-panel';
-        explain.classList.add('explain-fade-in'); // 让替换平滑一点
-        placeholder.parentNode.replaceChild(explain, placeholder);
-      });
-    });
+    wrap.appendChild(buildExplain(q, curSel));
   } else if (isPractice) {
     const p = document.createElement('div');
     p.className = 'explain-panel';
