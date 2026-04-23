@@ -333,7 +333,7 @@ function autoResizeTextarea(el) {
 //   · 尾部保留 .ai-typing-dots 三点动画作为"仍在生成"提示。
 //   · smd 未加载时自动降级：按原生文本追加到 <pre>，仍保证不丢内容。
 
-function makeStreamingRenderer(container, cursor, scrollTarget) {
+function makeStreamingRenderer(container, scrollTarget) {
   // DOM 布局：
   //   container  (.ai-stream-live 在流式阶段；flush 后换成 .ai-stream-final)
   //     ├─ streamEl  (.ai-stream-body)  → smd 向此节点直接 append
@@ -352,12 +352,46 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
   container.appendChild(dotsEl);
 
   // 构建 smd 解析器；若 smd 未加载（首次调用 AI 时可能还在下载），降级为 <pre>
+  //
+  // 逐字水流动画：包装 smd.default_renderer 的 add_text 回调，把原本的
+  //   document.createTextNode(c)
+  // 替换成逐字符 <span class="ai-ch">。smd 内部只保存 e.nodes[e.index]（当前
+  // 父块级元素），不关心子节点是 text node 还是 span，因此不会破坏解析树。
+  // 这样既保留了 smd 的实时 markdown 渲染（加粗/标题/列表立即成形），又拿回
+  // Session A 那种水流逐字动画；CJK 字符得到更长的动画时长，节奏更符合中文阅读。
+  function _isCJK(ch) {
+    const c = ch.charCodeAt(0);
+    return (c >= 0x3400 && c <= 0x9FFF) ||  // 统一汉字 + 扩展 A
+           (c >= 0xF900 && c <= 0xFAFF) ||  // 兼容汉字
+           (c >= 0x3040 && c <= 0x30FF) ||  // 日文假名
+           (c >= 0xAC00 && c <= 0xD7AF) ||  // 韩文
+           (c >= 0x3000 && c <= 0x303F) ||  // CJK 标点
+           (c >= 0xFF00 && c <= 0xFFEF);    // 全宽
+  }
+  function _makeFlowRenderer(root) {
+    const base = window.smd.default_renderer(root);
+    base.add_text = function (data, text) {
+      const parent = data.nodes[data.index];
+      if (!parent || !text) return;
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        const span = document.createElement('span');
+        span.className = _isCJK(ch) ? 'ai-ch ai-ch-cjk' : 'ai-ch';
+        span.textContent = ch;
+        frag.appendChild(span);
+      }
+      parent.appendChild(frag);
+    };
+    return base;
+  }
+
   let smdParser = null;
   let plainPre  = null;
   if (typeof window !== 'undefined' && window.smd &&
       typeof window.smd.default_renderer === 'function') {
     try {
-      const renderer = window.smd.default_renderer(streamEl);
+      const renderer = _makeFlowRenderer(streamEl);
       smdParser = window.smd.parser(renderer);
     } catch (e) { smdParser = null; }
   }
@@ -835,8 +869,8 @@ function sendAIMessage(key) {
               try {
                 const obj = JSON.parse(data);
                 if (obj.truncated) truncated = true;
-                if (obj.content) { if (!contentRenderer) contentRenderer = makeStreamingRenderer(contentWrap, null, messages); contentRenderer.push(obj.content); fullRawText += obj.content; }
-                if (obj.reasoning) { if (!reasoningRenderer) reasoningRenderer = makeStreamingRenderer(thinkingBody, null, messages); reasoningRenderer.push(obj.reasoning); fullReasoning += obj.reasoning; }
+                if (obj.content) { if (!contentRenderer) contentRenderer = makeStreamingRenderer(contentWrap, messages); contentRenderer.push(obj.content); fullRawText += obj.content; }
+                if (obj.reasoning) { if (!reasoningRenderer) reasoningRenderer = makeStreamingRenderer(thinkingBody, messages); reasoningRenderer.push(obj.reasoning); fullReasoning += obj.reasoning; }
               } catch(e) {}
             }
           }
@@ -871,7 +905,7 @@ function sendAIMessage(key) {
                 hasReasoning = true;
                 thinkingWrap.style.display = '';
                 thinkingWrap.classList.add('ai-thinking-fadein');
-                reasoningRenderer = makeStreamingRenderer(thinkingBody, null, messages);
+                reasoningRenderer = makeStreamingRenderer(thinkingBody, messages);
               }
               reasoningRenderer.push(obj.reasoning);
               fullReasoning += obj.reasoning;
@@ -890,7 +924,7 @@ function sendAIMessage(key) {
               }
               // Lazily create streaming renderer on first content chunk
               if (!contentRenderer) {
-                contentRenderer = makeStreamingRenderer(contentWrap, null, messages);
+                contentRenderer = makeStreamingRenderer(contentWrap, messages);
               }
               contentRenderer.push(obj.content);
               fullRawText += obj.content;

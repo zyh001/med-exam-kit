@@ -2756,12 +2756,11 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .ai-thinking-fadein{animation:aiFadeIn .2s cubic-bezier(0,0,.2,1) both}
 
-/* ── 流式渲染（自适应缓冲 + smd 实时 markdown 渲染） ─────────────── */
+/* ── 流式渲染（自适应缓冲 + smd 实时 markdown + 逐字符水流动画） ─── */
 /* 结构：
  *   .ai-stream-live           流式阶段的容器（marked 重渲后换成 .ai-stream-final）
- *     ├─ .ai-stream-body      smd 向此节点 append 节点（自动 block 淡入）
- *     └─ .ai-typing-dots      尾部三点"正在生成"指示（flush 后由 marked 重渲替换，
- *                             因此会自然消失）
+ *     ├─ .ai-stream-body      smd 向此节点 append；每个字符单独包成 .ai-ch
+ *     └─ .ai-typing-dots      尾部三点"正在生成"指示
  */
 .ai-stream-live{
   display:block;
@@ -2771,20 +2770,23 @@ button,a,[role=button],label{touch-action:manipulation}
 .ai-stream-body > *:first-child{margin-top:0}
 .ai-stream-body > *:last-child{margin-bottom:0}
 
-/* 流式阶段：smd 新产生的块级元素自动淡入上浮，视觉连贯 */
-.ai-stream-live .ai-stream-body > p,
-.ai-stream-live .ai-stream-body > ul > li,
-.ai-stream-live .ai-stream-body > ol > li,
-.ai-stream-live .ai-stream-body > h1,
-.ai-stream-live .ai-stream-body > h2,
-.ai-stream-live .ai-stream-body > h3,
-.ai-stream-live .ai-stream-body > h4,
-.ai-stream-live .ai-stream-body > h5,
-.ai-stream-live .ai-stream-body > h6,
-.ai-stream-live .ai-stream-body > blockquote,
-.ai-stream-live .ai-stream-body > pre,
-.ai-stream-live .ai-stream-body > table{
-  animation:aiBlockIn .32s cubic-bezier(.22,1,.36,1) both;
+/* 每字符水流动画：smd 的 add_text 回调被包装成产生 <span class="ai-ch">，
+ * CSS 自动给每个新字符 span 播放 aiChFlow 入场动画（下方上浮 + 淡入 + 轻微模糊到清晰）。
+ * 注意：内嵌在 smd 的 <p><strong><em> 等结构里也依然生效，因为动画作用于 span 本身。 */
+.ai-ch{
+  display:inline-block;
+  animation:aiChFlow .36s cubic-bezier(.22,1,.36,1) both;
+  will-change:opacity,transform,filter;
+}
+/* CJK 字符（汉字、假名、韩文、全宽标点）：一字一意，动画更舒展 */
+.ai-ch-cjk{
+  animation-duration:.46s;
+  animation-timing-function:cubic-bezier(.16,1,.3,1);
+}
+@keyframes aiChFlow{
+  0%   {opacity:0; transform:translate(1px,5px); filter:blur(1.2px)}
+  55%  {opacity:.85; filter:blur(.2px)}
+  100% {opacity:1; transform:none; filter:none}
 }
 
 /* flush 之后：marked 整体重渲一次，不再对任何子节点做入场动画 */
@@ -2812,22 +2814,9 @@ button,a,[role=button],label{touch-action:manipulation}
   white-space:pre-wrap;
 }
 
-/* 向后兼容：Session A 遗留的逐字水流类 / 旧段落淡入类保留为无影响样式，
-   以防浏览器缓存了老版本 HTML 仍引用这些类名 */
-.ai-stream-stable{}
-.ai-stream-stable > *:first-child{margin-top:0}
-.ai-stream-stable > *:last-child{margin-bottom:0}
-.ai-live-tail{display:inline;white-space:pre-wrap}
-.ai-ch{display:inline-block}
-.ai-ch-cjk{}
-@keyframes aiChFlow{0%,100%{opacity:1;transform:none;filter:none}}
-.ai-para-in{animation:aiParaIn .4s cubic-bezier(0,0,.2,1) both}
-@keyframes aiParaIn{
-  from{opacity:0;transform:translateY(6px)}
-  to{opacity:1;transform:none}
-}
 @media (prefers-reduced-motion:reduce){
-  .ai-stream-live .ai-stream-body > *{animation:none !important}
+  .ai-ch,.ai-ch-cjk{animation:none; opacity:1}
+  .ai-stream-body *{animation:none !important}
 }
 
 /* 尾部三点：紧贴文本末尾，不再占一整行 */
