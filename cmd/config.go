@@ -48,6 +48,9 @@ type AppConfig struct {
 	PidFile  string `yaml:"pid_file"`  // PID 文件路径，默认 med-exam.pid
 	// 调试模式（勿用于生产）
 	Debug bool `yaml:"debug"` // true 时暴露 /api/debug 与 /api/debug/exam-sessions 端点
+	// 题库热重载监视器（stdlib 轮询，无需外部依赖）
+	AutoReloadWatch    bool `yaml:"auto_reload_watch"`    // true 启用后台题库变更监视
+	AutoReloadInterval int  `yaml:"auto_reload_interval"` // 轮询间隔秒数，0=默认 10
 }
 
 // defaultConfig returns a zero-value config with sensible defaults.
@@ -182,6 +185,12 @@ func loadConfig(path string) (AppConfig, error) {
 			cfg.PidFile = val
 		case "debug":
 			cfg.Debug = val == "true"
+		case "auto_reload_watch":
+			cfg.AutoReloadWatch = val == "true"
+		case "auto_reload_interval":
+			if v, err := strconv.Atoi(val); err == nil && v > 0 {
+				cfg.AutoReloadInterval = v
+			}
 		case "banks":
 			// inline single value: banks: exam.mqb
 			bankList = append(bankList, val)

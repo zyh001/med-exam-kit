@@ -10,6 +10,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 	"github.com/zyh001/med-exam-kit/internal/auth"
@@ -61,6 +62,8 @@ func init() {
 	quizCmd.Flags().Int("cleanup-days", 0, "不活跃用户数据保留天数（0=使用配置文件值，默认 7 天）")
 	quizCmd.Flags().Int("ai-max-tokens", 0, "AI 单次回复最大 token 数（0=使用配置文件值，默认 2048）")
 	quizCmd.Flags().Bool("debug", false, "启用调试端点 /api/debug 与 /api/debug/exam-sessions（仅排障用，切勿在生产环境开启）")
+	quizCmd.Flags().Bool("auto-reload", false, "启用题库自动热重载（监视 .mqb 文件和 PG banks 表，检测到变化自动 swap）")
+	quizCmd.Flags().Int("auto-reload-interval", 0, "热重载轮询间隔秒数（0=默认 10；过短会增加 DB 负载）")
 }
 
 func runQuiz(cmd *cobra.Command, args []string) error {
@@ -126,6 +129,12 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 
 	debug, _ := cmd.Flags().GetBool("debug")
 	if !cmd.Flags().Changed("debug") { debug = fileCfg.Debug }
+
+	autoReload, _ := cmd.Flags().GetBool("auto-reload")
+	if !cmd.Flags().Changed("auto-reload") { autoReload = fileCfg.AutoReloadWatch }
+	autoReloadInterval, _ := cmd.Flags().GetInt("auto-reload-interval")
+	if !cmd.Flags().Changed("auto-reload-interval") { autoReloadInterval = fileCfg.AutoReloadInterval }
+	if autoReloadInterval <= 0 { autoReloadInterval = 10 }
 
 	pgDSN, _ := cmd.Flags().GetString("db")
 	if !cmd.Flags().Changed("db") { pgDSN = fileCfg.DB }
@@ -257,6 +266,16 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		logger.Warnf("[pid] 写入 PID 文件失败 (%s): %v", pidFile, err)
 	} else {
 		defer os.Remove(pidFile)
+	}
+
+	// 启动题库自动热重载监视器（可选）：stdlib 轮询，检测到变化自动调用 HotReload
+	if autoReload {
+		w := NewBankWatcher(srv, time.Duration(autoReloadInterval)*time.Second,
+			bankPaths, pg, bankIDs, cfgFile)
+		watchCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+		w.Start(watchCtx)
+		fmt.Printf("👁  题库热重载监视器已启动（每 %d 秒轮询一次）\n", autoReloadInterval)
 	}
 
 	return srv.ListenAndServe()
