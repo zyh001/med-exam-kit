@@ -22,11 +22,11 @@ type AppConfig struct {
 	DB       string   `yaml:"db"`
 	BankIDs  []int64  `yaml:"bank_ids"`
 	// AI Q&A
-	AIProvider      string `yaml:"ai_provider"`
-	AIModel         string `yaml:"ai_model"`
-	AIAPIKey        string `yaml:"ai_api_key"`
-	AIBaseURL       string `yaml:"ai_base_url"`
-	AIEnableThinking *bool `yaml:"ai_thinking"`
+	AIProvider       string `yaml:"ai_provider"`
+	AIModel          string `yaml:"ai_model"`
+	AIAPIKey         string `yaml:"ai_api_key"`
+	AIBaseURL        string `yaml:"ai_base_url"`
+	AIEnableThinking *bool  `yaml:"ai_thinking"`
 	// ASR (语音识别)
 	ASRAPIKey  string `yaml:"asr_api_key"`
 	ASRModel   string `yaml:"asr_model"`
@@ -39,13 +39,15 @@ type AppConfig struct {
 	S3PublicBase string `yaml:"s3_public_base"`
 	// 数据保留
 	CleanupDays int `yaml:"cleanup_days"` // 不活跃用户数据保留天数，0=使用默认值7
+	// AI chat 合规日志保留
+	AIChatLogRetentionDays int `yaml:"ai_chat_log_retention_days"` // AI chat 日志保留天数，0=使用默认值30
 	// AI 输出控制
 	AIMaxTokens int `yaml:"ai_max_tokens"` // AI 单次回复最大 token 数，0=使用默认值2048
 	// 日志
 	LogFile  string `yaml:"log_file"`  // 日志文件路径，留空=只打印终端
 	LogLevel string `yaml:"log_level"` // debug / info / warn / error，默认 info
 	// 进程管理
-	PidFile  string `yaml:"pid_file"`  // PID 文件路径，默认 med-exam.pid
+	PidFile string `yaml:"pid_file"` // PID 文件路径，默认 med-exam.pid
 	// 调试模式（勿用于生产）
 	Debug bool `yaml:"debug"` // true 时暴露 /api/debug 与 /api/debug/exam-sessions 端点
 	// 可信代理 IP/CIDR 列表。loopback (127/8, ::1) 始终可信；
@@ -69,8 +71,8 @@ func defaultConfig() AppConfig {
 // Format: key: value   # comment
 // Lists:  key:
 //
-//	- item1
-//	- item2
+//   - item1
+//   - item2
 func loadConfig(path string) (AppConfig, error) {
 	cfg := defaultConfig()
 
@@ -179,6 +181,10 @@ func loadConfig(path string) (AppConfig, error) {
 		case "cleanup_days":
 			if v, err := strconv.Atoi(val); err == nil && v > 0 {
 				cfg.CleanupDays = v
+			}
+		case "ai_chat_log_retention_days":
+			if v, err := strconv.Atoi(val); err == nil && v > 0 {
+				cfg.AIChatLogRetentionDays = v
 			}
 		case "ai_max_tokens":
 			if v, err := strconv.Atoi(val); err == nil && v > 0 {
@@ -300,6 +306,11 @@ s3_public_base:        # 公开访问 base URL（留空则使用 s3_endpoint/s3_
 # log_level: debug / info / warn / error（默认 info）
 log_file:              # 日志文件路径，例：/var/log/med-exam-kit.log
 log_level: info        # 日志级别
+
+# ─── AI chat 合规日志（可选）──────────────────────────────────────
+# AI 答疑对话的输入输出日志保留天数，供合规审查，超期自动清理。
+# 留空或 0 = 默认保留 30 天。仅在配置了 ai_provider 时生效。
+ai_chat_log_retention_days: 30
 `
 
 var configCmd = &cobra.Command{

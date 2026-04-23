@@ -165,3 +165,25 @@ CREATE TABLE IF NOT EXISTS favorites (
 );
 CREATE INDEX IF NOT EXISTS idx_fav_uid_bank ON favorites(user_id, bank_id);
 
+-- ── AI Chat Logs（合规审计日志，PG+SQLite 双模式）──────────────────────
+-- 存储每次 AI 答疑对话的输入输出，供合规性审查。保留天数由配置
+-- ai_chat_log_retention_days 控制（默认 30 天），超期自动清理。
+CREATE TABLE IF NOT EXISTS ai_chat_logs (
+    id          BIGSERIAL   PRIMARY KEY,
+    user_id     TEXT        NOT NULL DEFAULT '_legacy',
+    bank_id     BIGINT      NOT NULL DEFAULT 0,
+    fingerprint TEXT        NOT NULL,
+    sq_index    INTEGER     NOT NULL DEFAULT 0,
+    user_answer TEXT        DEFAULT '',
+    prompt      JSONB       NOT NULL DEFAULT '[]',
+    history_in  JSONB       DEFAULT '[]',
+    response    TEXT        DEFAULT '',
+    reasoning   TEXT        DEFAULT '',
+    truncated   BOOLEAN     DEFAULT false,
+    model       TEXT        NOT NULL,
+    provider    TEXT        DEFAULT '',
+    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_acl_created  ON ai_chat_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_acl_uid_bank ON ai_chat_logs(user_id, bank_id);
+

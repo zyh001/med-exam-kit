@@ -5,6 +5,9 @@ import (
 	"math"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/zyh001/med-exam-kit/internal/ai"
 )
 
 func openTestDB(t *testing.T) *sql.DB {
@@ -174,5 +177,102 @@ func TestDBPathForBank(t *testing.T) {
 	want := "/data/output/bank.progress.db"
 	if got != want {
 		t.Fatalf("want %s, got %s", want, got)
+	}
+}
+
+func TestSaveAIChatLog_Basic(t *testing.T) {
+	db := openTestDB(t)
+
+	prompt := []ai.ChatMessage{
+		{Role: "system", Content: "你是医学考试辅导专家"},
+		{Role: "user", Content: "题干: 患者出现..."},
+	}
+	history := []ai.ChatMessage{
+		{Role: "user", Content: "为什么选B？"},
+	}
+
+	err := SaveAIChatLog(db, "u1", "fp123", 0, "A", prompt, history,
+		"本题考查...", "推理过程...", false, "deepseek-chat", "deepseek")
+	if err != nil {
+		t.Fatalf("SaveAIChatLog: %v", err)
+	}
+
+	// Verify the row was inserted
+	var count int
+	err = db.QueryRow("SELECT COUNT(*) FROM ai_chat_logs WHERE user_id='u1' AND fingerprint='fp123'").Scan(&count)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("want 1 row, got %d", count)
+	}
+
+	// Verify fields
+	var userID, fp, response, reasoning, model, provider string
+	var sqIdx, truncated int
+	err = db.QueryRow("SELECT user_id, fingerprint, sq_index, response, reasoning, truncated, model, provider FROM ai_chat_logs WHERE user_id='u1'").Scan(
+		&userID, &fp, &sqIdx, &response, &reasoning, &truncated, &model, &provider)
+	if err != nil {
+		t.Fatalf("scan: %v", err)
+	}
+	if userID != "u1" || fp != "fp123" || sqIdx != 0 || response != "本题考查..." || model != "deepseek-chat" {
+		t.Fatalf("fields mismatch: uid=%s fp=%s sqIdx=%d response=%s model=%s", userID, fp, sqIdx, response, model)
+	}
+	if truncated != 0 {
+		t.Fatalf("want truncated=0, got %d", truncated)
+	}
+}
+
+func TestSaveAIChatLog_Truncated(t *testing.T) {
+	db := openTestDB(t)
+
+	err := SaveAIChatLog(db, "u2", "fp456", 1, "C", nil, nil,
+		"部分回复...", "", true, "gpt-4o", "openai")
+	if err != nil {
+		t.Fatalf("SaveAIChatLog: %v", err)
+	}
+
+	var truncated int
+	err = db.QueryRow("SELECT truncated FROM ai_chat_logs WHERE user_id='u2'").Scan(&truncated)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if truncated != 1 {
+		t.Fatalf("want truncated=1, got %d", truncated)
+	}
+}
+
+func TestCleanupAIChatLogs(t *testing.T) {
+	db := openTestDB(t)
+
+	// Insert a "current" log
+	err := SaveAIChatLog(db, "u3", "fp_cur", 0, "A", nil, nil,
+		"current", "", false, "model", "provider")
+	if err != nil {
+		t.Fatalf("SaveAIChatLog: %v", err)
+	}
+
+	// Insert an "old" log by manually setting created_at to 31 days ago
+	cutoff := time.Now().Add(-31 * 24 * time.Hour).UnixMilli()
+	_, err = db.Exec(`INSERT INTO ai_chat_logs(user_id,fingerprint,sq_index,user_answer,prompt,history_in,response,reasoning,truncated,model,provider,created_at)
+		VALUES('u3','fp_old',0,'B','[]','[]','old','',0,'model','provider',?)`, cutoff)
+	if err != nil {
+		t.Fatalf("insert old log: %v", err)
+	}
+
+	// Cleanup with 30-day retention
+	n, err := CleanupAIChatLogs(db, 30)
+	if err != nil {
+		t.Fatalf("CleanupAIChatLogs: %v", err)
+	}
+	if n != 1 {
+		t.Fatalf("want 1 deleted, got %d", n)
+	}
+
+	// Verify old row removed, current row remains
+	var count int
+	db.QueryRow("SELECT COUNT(*) FROM ai_chat_logs WHERE user_id='u3'").Scan(&count)
+	if count != 1 {
+		t.Fatalf("want 1 remaining row, got %d", count)
 	}
 }

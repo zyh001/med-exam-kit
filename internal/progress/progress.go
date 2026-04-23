@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/zyh001/med-exam-kit/internal/ai"
 	_ "modernc.org/sqlite"
 )
 
@@ -72,7 +73,24 @@ CREATE TABLE IF NOT EXISTS sm2 (
     next_due    TEXT    NOT NULL,
     updated_at  INTEGER NOT NULL,
     PRIMARY KEY (user_id, fingerprint)
-);`
+);
+
+CREATE TABLE IF NOT EXISTS ai_chat_logs (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     TEXT    NOT NULL DEFAULT '_legacy',
+    fingerprint TEXT    NOT NULL,
+    sq_index    INTEGER NOT NULL DEFAULT 0,
+    user_answer TEXT    DEFAULT '',
+    prompt      TEXT    NOT NULL DEFAULT '[]',
+    history_in  TEXT    DEFAULT '[]',
+    response    TEXT    DEFAULT '',
+    reasoning   TEXT    DEFAULT '',
+    truncated   INTEGER DEFAULT 0,
+    model       TEXT    NOT NULL,
+    provider    TEXT    DEFAULT '',
+    created_at  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_acl_created ON ai_chat_logs(created_at);`
 
 	if _, err = db.Exec(ddl); err != nil {
 		return nil, fmt.Errorf("progress: init schema: %w", err)
@@ -947,4 +965,43 @@ func CleanupStaleUsers(db *sql.DB, maxAgeDays int) (users int, rows int) {
 		users++
 	}
 	return
+}
+
+// ── AI Chat Logs ────────────────────────────────────────────────────────
+
+// SaveAIChatLog persists an AI Q&A conversation log for compliance audit.
+func SaveAIChatLog(db *sql.DB, userID string, fp string, sqIdx int, userAnswer string,
+	prompt []ai.ChatMessage, history []ai.ChatMessage,
+	response string, reasoning string, truncated bool,
+	model string, provider string) error {
+
+	promptJSON, _ := json.Marshal(prompt)
+	historyJSON, _ := json.Marshal(history)
+	truncatedInt := 0
+	if truncated {
+		truncatedInt = 1
+	}
+
+	_, err := db.Exec(`
+		INSERT INTO ai_chat_logs(user_id,fingerprint,sq_index,user_answer,
+			prompt,history_in,response,reasoning,truncated,model,provider,created_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`,
+		userID, fp, sqIdx, userAnswer,
+		string(promptJSON), string(historyJSON),
+		response, reasoning, truncatedInt, model, provider,
+		time.Now().UnixMilli())
+	return err
+}
+
+// CleanupAIChatLogs deletes logs older than retentionDays. Returns deleted count.
+func CleanupAIChatLogs(db *sql.DB, retentionDays int) (int64, error) {
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	cutoff := time.Now().Add(-time.Duration(retentionDays) * 24 * time.Hour).UnixMilli()
+	res, err := db.Exec(`DELETE FROM ai_chat_logs WHERE created_at < ?`, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return res.RowsAffected()
 }

@@ -213,6 +213,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		S3SecretKey:     fileCfg.S3SecretKey,
 		S3PublicBase:    fileCfg.S3PublicBase,
 		CleanupDays:     cleanupDays,
+		AIChatLogRetentionDays: fileCfg.AIChatLogRetentionDays,
 		Debug:           debug,
 		TrustedProxies:  fileCfg.TrustedProxies,
 	}

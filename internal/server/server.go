@@ -63,6 +63,12 @@ type favStorer interface {
 	SyncFavorites(ctx context.Context, userID string, bankID int, adds []store.FavItem, removes [][2]any) ([]store.FavItem, error)
 }
 
+// aiChatLogStorer is an optional interface for AI chat compliance log persistence.
+type aiChatLogStorer interface {
+	SaveAIChatLog(ctx context.Context, userID string, bankID int64, fp string, sqIdx int, userAnswer string, prompt []ai.ChatMessage, history []ai.ChatMessage, response string, reasoning string, truncated bool, model string, provider string) error
+	CleanupAIChatLogs(ctx context.Context, retentionDays int) (int64, error)
+}
+
 // allowing server.go to stay decoupled from the concrete pgstore type.
 type PgStorer interface {
 	DeleteSession(ctx context.Context, sessionID, userID string) bool
@@ -118,6 +124,9 @@ type Config struct {
 
 	// 数据保留策略
 	CleanupDays int // 不活跃用户数据保留天数，0 = 使用默认值 7
+
+	// AI chat 日志保留天数，0 = 使用默认值 30
+	AIChatLogRetentionDays int
 
 	// 调试模式（绝不在生产环境启用）
 	// 打开后暴露 /api/debug 与 /api/debug/exam-sessions 等诊断端点，
@@ -372,6 +381,32 @@ func (s *Server) runUserCleanup() {
 		users, rows := progress.CleanupStaleUsers(b.DB, days)
 		if users > 0 {
 			logger.Warnf("[cleanup] bank=%d: removed %d stale users (%d rows) [threshold=%dd]", i, users, rows, days)
+		}
+	}
+
+	// 清理超期 AI chat 合规日志
+	retention := s.cfg.AIChatLogRetentionDays
+	if retention <= 0 {
+		retention = 30
+	}
+	for i, b := range s.cfg.Banks {
+		if b.PgStore != nil {
+			if st, ok := b.PgStore.(aiChatLogStorer); ok {
+				n, err := st.CleanupAIChatLogs(context.Background(), retention)
+				if err != nil {
+					logger.Errorf("[cleanup] ai_chat_logs bank=%d pg: %v", i, err)
+				} else if n > 0 {
+					logger.Infof("[cleanup] ai_chat_logs bank=%d pg: cleaned %d rows older than %dd", i, n, retention)
+				}
+			}
+		}
+		if b.DB != nil {
+			n, err := progress.CleanupAIChatLogs(b.DB, retention)
+			if err != nil {
+				logger.Errorf("[cleanup] ai_chat_logs bank=%d sqlite: %v", i, err)
+			} else if n > 0 {
+				logger.Infof("[cleanup] ai_chat_logs bank=%d sqlite: cleaned %d rows older than %dd", i, n, retention)
+			}
 		}
 	}
 	// 清理 rateBuckets：删除窗口期内无任何请求的 IP 条目，防止长期运行内存无限增长
@@ -2139,6 +2174,10 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
 
+	// Collect full response/reasoning for compliance log
+	var fullContent, fullReasoning string
+	var isTruncated bool
+
 	for {
 		select {
 		case <-heartbeat.C:
@@ -2146,13 +2185,20 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 			flusher.Flush()
 		case chunk, ok := <-ch:
 			if !ok {
+				s.saveAIChatLogAsync(r, bankIdx, body, messages, fullContent, fullReasoning, isTruncated)
 				return // channel closed
 			}
 			if chunk.Err != nil {
 				data, _ := json.Marshal(map[string]string{"error": chunk.Err.Error()})
 				fmt.Fprintf(w, "data: %s\n\n", data)
 				flusher.Flush()
+				s.saveAIChatLogAsync(r, bankIdx, body, messages, fullContent, fullReasoning, isTruncated)
 				return
+			}
+			fullContent += chunk.Content
+			fullReasoning += chunk.ReasoningContent
+			if chunk.Truncated {
+				isTruncated = true
 			}
 			if chunk.Done {
 				if chunk.Truncated {
@@ -2163,13 +2209,54 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 				}
 				fmt.Fprintf(w, "data: [DONE]\n\n")
 				flusher.Flush()
+				s.saveAIChatLogAsync(r, bankIdx, body, messages, fullContent, fullReasoning, isTruncated)
 				return
 			}
 			data, _ := json.Marshal(map[string]string{"content": chunk.Content, "reasoning": chunk.ReasoningContent})
 			fmt.Fprintf(w, "data: %s\n\n", data)
 			flusher.Flush()
 		case <-r.Context().Done():
+			s.saveAIChatLogAsync(r, bankIdx, body, messages, fullContent, fullReasoning, isTruncated)
 			return
+		}
+	}
+}
+
+// saveAIChatLogAsync persists the AI chat conversation log to the database.
+// Errors are logged but never propagated — this is a non-blocking compliance audit write.
+func (s *Server) saveAIChatLogAsync(r *http.Request, bankIdx int,
+	body struct {
+		Fingerprint string           `json:"fingerprint"`
+		SQIndex     int              `json:"sq_index"`
+		UserAnswer  string           `json:"user_answer"`
+		Bank        int              `json:"bank"`
+		History     []ai.ChatMessage `json:"history"`
+	},
+	prompt []ai.ChatMessage,
+	response string, reasoning string, truncated bool) {
+
+	if response == "" && reasoning == "" {
+		return // nothing to log (e.g. aborted before any content)
+	}
+
+	if bankIdx < 0 || bankIdx >= len(s.cfg.Banks) {
+		bankIdx = 0
+	}
+	b := &s.cfg.Banks[bankIdx]
+	uid := getUserID(r)
+	ctx := r.Context()
+
+	if b.PgStore != nil {
+		if st, ok := b.PgStore.(aiChatLogStorer); ok {
+			if err := st.SaveAIChatLog(ctx, uid, int64(b.BankID), body.Fingerprint, body.SQIndex, body.UserAnswer, prompt, body.History, response, reasoning, truncated, s.aiClient.Model, s.aiClient.Provider); err != nil {
+				logger.Errorf("[ai-chat-log] PG save failed: %v", err)
+			}
+			return
+		}
+	}
+	if b.DB != nil {
+		if err := progress.SaveAIChatLog(b.DB, uid, body.Fingerprint, body.SQIndex, body.UserAnswer, prompt, body.History, response, reasoning, truncated, s.aiClient.Model, s.aiClient.Provider); err != nil {
+			logger.Errorf("[ai-chat-log] SQLite save failed: %v", err)
 		}
 	}
 }

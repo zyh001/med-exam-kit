@@ -6,6 +6,7 @@
 package postgres
 
 import (
+	"github.com/zyh001/med-exam-kit/internal/ai"
 	"github.com/zyh001/med-exam-kit/internal/logger"
 	"context"
 	"database/sql"
@@ -1117,4 +1118,40 @@ func (s *Store) DeleteShareToken(ctx context.Context, token string) {
 // CleanExpiredShareTokens removes all expired tokens from the database.
 func (s *Store) CleanExpiredShareTokens(ctx context.Context) {
 	s.pool.Exec(ctx, `DELETE FROM share_tokens WHERE expires_at < $1`, time.Now().Unix()) //nolint:errcheck
+}
+
+// ── AI Chat Log Storer ─────────────────────────────────────────────────
+
+// SaveAIChatLog persists an AI Q&A conversation log for compliance audit.
+func (s *Store) SaveAIChatLog(ctx context.Context, userID string, bankID int64,
+	fp string, sqIdx int, userAnswer string,
+	prompt []ai.ChatMessage, history []ai.ChatMessage,
+	response string, reasoning string, truncated bool,
+	model string, provider string) error {
+
+	promptJSON, _ := json.Marshal(prompt)
+	historyJSON, _ := json.Marshal(history)
+
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO ai_chat_logs(user_id,bank_id,fingerprint,sq_index,user_answer,
+			prompt,history_in,response,reasoning,truncated,model,provider)
+		VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		userID, bankID, fp, sqIdx, userAnswer,
+		string(promptJSON), string(historyJSON),
+		response, reasoning, truncated, model, provider)
+	if err != nil {
+		logger.Errorf("[pgstore] SaveAIChatLog failed: %v", err)
+	}
+	return err
+}
+
+// CleanupAIChatLogs deletes logs older than retentionDays. Returns deleted count.
+func (s *Store) CleanupAIChatLogs(ctx context.Context, retentionDays int) (int64, error) {
+	tag, err := s.pool.Exec(ctx,
+		`DELETE FROM ai_chat_logs WHERE created_at < now() - $1 * interval '1 day'`,
+		retentionDays)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
 }
