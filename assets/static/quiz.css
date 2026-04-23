@@ -2748,27 +2748,69 @@ button,a,[role=button],label{touch-action:manipulation}
   to{opacity:1;transform:none}
 }
 .ai-thinking-fadein{animation:aiFadeIn .2s cubic-bezier(0,0,.2,1) both}
-/* 每一段渲染完成时的淡入动画 */
-.ai-para-in{
-  animation:aiParaIn .4s cubic-bezier(0,0,.2,1) both;
+
+/* ── 流式渲染（自适应缓冲 + 中文水流逐字淡入） ─────────────────── */
+/* 容器结构：.ai-stream-stable 已 commit 的 markdown / .ai-stream-live 正在流出的尾部 */
+.ai-stream-stable{}
+.ai-stream-stable > *:first-child{margin-top:0}
+.ai-stream-stable > *:last-child{margin-bottom:0}
+
+.ai-stream-live{
+  display:block;
+  line-height:1.65;
+  word-break:break-word;
 }
+.ai-live-tail{
+  display:inline;
+  white-space:pre-wrap;
+}
+
+/* 每个字符的水流动画 —— 从下方上浮 + 淡入 + 轻微模糊到清晰 */
+.ai-ch{
+  display:inline-block;
+  animation:aiChFlow .36s cubic-bezier(.22,1,.36,1) both;
+  will-change:opacity,transform,filter;
+}
+/* CJK 字符（汉字、假名、韩文、全宽标点）：一字一意，动画更舒展 */
+.ai-ch-cjk{
+  animation-duration:.46s;
+  animation-timing-function:cubic-bezier(.16,1,.3,1);
+}
+@keyframes aiChFlow{
+  0%   {opacity:0; transform:translate(1px,5px); filter:blur(1.2px)}
+  55%  {opacity:.85; filter:blur(.2px)}
+  100% {opacity:1; transform:none; filter:none}
+}
+/* reduce-motion：直接显示，不做动画 */
+@media (prefers-reduced-motion:reduce){
+  .ai-ch,.ai-ch-cjk{animation:none; opacity:1}
+}
+
+/* 旧段落淡入动画保留（历史缓存的旧页面向后兼容，当前代码不再使用） */
+.ai-para-in{animation:aiParaIn .4s cubic-bezier(0,0,.2,1) both}
 @keyframes aiParaIn{
   from{opacity:0;transform:translateY(6px)}
   to{opacity:1;transform:none}
 }
-/* 段落之间的生成中动画：三点跳动 */
+
+/* 尾部三点：紧贴文本末尾，不再占一整行 */
 .ai-typing-dots{
-  display:flex;gap:5px;align-items:center;padding:6px 2px;
+  display:inline-flex;
+  gap:4px;
+  align-items:center;
+  vertical-align:middle;
+  margin-left:6px;
+  padding:0 2px;
 }
 .ai-typing-dots span{
-  width:6px;height:6px;border-radius:50%;
+  width:5px;height:5px;border-radius:50%;
   background:var(--accent);
   animation:aiDotPulse 1.2s ease-in-out infinite;
 }
 .ai-typing-dots span:nth-child(2){animation-delay:.2s}
 .ai-typing-dots span:nth-child(3){animation-delay:.4s}
 @keyframes aiDotPulse{
-  0%,80%,100%{opacity:.25;transform:scale(.75)}
+  0%,80%,100%{opacity:.25;transform:scale(.7)}
   40%{opacity:1;transform:scale(1)}
 }
 

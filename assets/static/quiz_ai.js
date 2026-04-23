@@ -312,85 +312,237 @@ function autoResizeTextarea(el) {
   el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
 }
 
-// ── Streaming renderer — paragraph-buffered, one-by-one fade-in ───
+// ── Streaming renderer — adaptive-buffer with per-char water-flow (Chinese-optimized) ──
 //
-// 规则：
-//   - 收到 chunk → 追加到 buf，不做任何 DOM 操作
-//   - buf 中出现 \n\n（段落分隔）→ 取出完整段落，用 marked() 渲染，
-//     以 ai-para-in 动画淡入追加到容器
-//   - 期间始终显示跳动三点动画，告知用户正在生成
-//   - 代码块 ``` 内不分段
-//   - flush() → 渲染剩余 buf，移除动画
+// 设计：
+//   · 不使用光标，改用尾部三点 + 每个字符独立 CSS 淡入/上浮动画（"水流"效果）
+//   · 自适应缓冲：跟踪近 1.5s token 到达速率，输出速率随 backlog 动态调整
+//     - backlog < 8  字：以下限速率 (30 字/s) 走，避免抖动
+//     - backlog 8~120:  匹配输入速率，并轻微向 24 字目标 backlog 靠拢
+//     - backlog > 120: 以输入速率 × 1.35（或不长于 0.8s 耗尽）追赶
+//     - 输出速率全程 clamp 到 [30, 240] 字/s
+//   · 段落到达 (\n\n 且不在代码块内) → 将稳定段落 markdown 渲染进 stableEl，
+//     并清空 liveTail 中对应部分；正在流出的尾部仍以原生字符渲染
+//   · 中文 CJK 字符使用更长的动画时长，配合 Apple 风格 easing，视觉上如同水滴上浮
+//   · flush() → 以 ~1s 追赶剩余字符，然后整体 markdown 重渲（修正 LaTeX/表格/mermaid）
 
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let fullText    = '';   // 全量文本（flush 用）
-  let buf         = '';   // 当前未渲染的缓冲
-  let inFence     = false;
-  let dotsEl      = null;
+  // DOM: container
+  //        ├─ stableEl   (已提交的段落 — 完整 markdown)
+  //        └─ liveWrap   (流式尾部)
+  //             ├─ liveTail  (每字符一个 span，带水流动画)
+  //             └─ dotsEl    (三点动画，inline 紧贴文本末尾)
+  container.innerHTML = '';
+  const stableEl = document.createElement('div');
+  stableEl.className = 'ai-stream-stable';
+  const liveWrap = document.createElement('div');
+  liveWrap.className = 'ai-stream-live';
+  const liveTail = document.createElement('span');
+  liveTail.className = 'ai-live-tail';
+  const dotsEl = document.createElement('span');
+  dotsEl.className = 'ai-typing-dots';
+  dotsEl.innerHTML = '<span></span><span></span><span></span>';
+  liveWrap.appendChild(liveTail);
+  liveWrap.appendChild(dotsEl);
+  container.appendChild(stableEl);
+  container.appendChild(liveWrap);
 
-  // ── 三点动画 ──────────────────────────────────────────────────────
-  function _showDots() {
-    if (dotsEl) return;
-    dotsEl = document.createElement('div');
-    dotsEl.className = 'ai-typing-dots';
-    dotsEl.innerHTML = '<span></span><span></span><span></span>';
-    container.appendChild(dotsEl);
-    if (scrollTarget) scrollMessages(scrollTarget);
-  }
-  function _hideDots() {
-    if (dotsEl) { dotsEl.remove(); dotsEl = null; }
-  }
+  // ── 状态 ──────────────────────────────────────────────────────────
+  let fullText     = '';      // 已收到的全部文本
+  let committedLen = 0;       // 已 markdown 渲染进 stableEl 的前缀长度
+  let paintedLen   = 0;       // 已绘制到 DOM 的前缀长度（可能还在 liveTail 里）
+  let scannedTo    = 0;       // fence 扫描器当前位置
+  let inFence      = false;   // 扫描器状态：是否在代码块内
+  let lastSafeCommit = 0;     // 最新可安全 commit 的位置（\n\n 且不在 fence 中）
+  const pushSamples = [];     // [{t, n}] — 最近 RATE_WINDOW_MS 内到达样本
+  let finished = false;
+  let rafId     = null;
+  let lastTickTs = 0;
+  let fracChars  = 0;         // 浮点残余字符，跨帧累加
 
-  // ── 渲染一个完整段落，淡入追加 ────────────────────────────────────
-  function _renderPara(md) {
-    if (!md.trim()) return;
-    _hideDots();
-    const div = document.createElement('div');
-    div.className = 'ai-para-in';
-    try { div.innerHTML = markedRender(md); } catch(e) { div.textContent = md; }
-    container.appendChild(div);
-    if (scrollTarget) scrollMessages(scrollTarget);
-    // 每段渲染完立即重新显示动画，等待下一段
-    _showDots();
-  }
+  // ── 参数 ──────────────────────────────────────────────────────────
+  const RATE_WINDOW_MS = 1500;
+  const TARGET_BACKLOG = 24;   // 字符：稳态目标 backlog
+  const MIN_RATE       = 30;   // 字符/秒：下限
+  const MAX_RATE       = 240;  // 字符/秒：上限
+  const MAX_LIVE_CHARS = 600;  // 若无 \n\n，超过该长度强制在标点处 commit
 
-  // ── 扫描 buf，提取所有已完成段落 ──────────────────────────────────
-  function _drain() {
-    let i = 0;
-    while (i < buf.length) {
-      if (buf.slice(i, i + 3) === '```') { inFence = !inFence; i += 3; continue; }
-      if (!inFence && buf[i] === '\n' && buf[i + 1] === '\n') {
-        _renderPara(buf.slice(0, i));
-        buf = buf.slice(i + 2);
-        i = 0;
+  // ── 推进 fence 扫描器，并记录最新可 commit 点 ─────────────────────
+  function _advanceScanner(upTo) {
+    while (scannedTo < upTo) {
+      // 先判断是否在此位置之前进入/离开代码块（``` 行首）
+      if (fullText[scannedTo] === '`' &&
+          fullText[scannedTo+1] === '`' &&
+          fullText[scannedTo+2] === '`' &&
+          (scannedTo === 0 || fullText[scannedTo-1] === '\n')) {
+        inFence = !inFence;
+        scannedTo += 3;
         continue;
       }
-      i++;
+      // 在代码块外检测 \n\n（第一个 \n 在 scannedTo-1，第二个在 scannedTo）
+      if (!inFence && scannedTo >= 1 &&
+          fullText[scannedTo-1] === '\n' && fullText[scannedTo] === '\n') {
+        lastSafeCommit = scannedTo + 1; // 将跨过两个 \n
+      }
+      scannedTo++;
     }
   }
 
-  // ── push：追加 chunk，扫描段落 ─────────────────────────────────────
-  function push(text) {
-    if (!text) return;
-    fullText += text;
-    buf      += text;
-    _drain();
+  // ── 强制 commit 点：在合理标点/空白处切分（避免 live 尾部无限长） ─
+  function _forceCommitBoundary() {
+    if (inFence) return committedLen;
+    for (let i = paintedLen - 1; i > committedLen + 50; i--) {
+      const c = fullText[i];
+      if (c === '\n' || c === ' ' ||
+          c === '。' || c === '！' || c === '？' ||
+          c === '，' || c === '；' || c === '：') {
+        return i + 1;
+      }
+    }
+    return committedLen;
   }
 
-  // ── flush：渲染剩余内容，移除动画 ─────────────────────────────────
-  function flush() {
-    if (buf.trim()) _renderPara(buf);
-    buf = '';
-    _hideDots();
-    // 最终用 marked 整体重渲，确保 LaTeX/表格/mermaid 正确
-    if (fullText) {
-      try { container.innerHTML = markedRender(fullText); } catch(e) {}
+  // ── 判断是否 CJK（含日韩汉字、全宽标点等） ───────────────────────
+  function _isCJK(ch) {
+    const c = ch.charCodeAt(0);
+    return (c >= 0x3400 && c <= 0x9FFF)  ||  // 统一汉字 + 扩展 A
+           (c >= 0xF900 && c <= 0xFAFF)  ||  // 兼容汉字
+           (c >= 0x3040 && c <= 0x30FF)  ||  // 日文假名
+           (c >= 0xAC00 && c <= 0xD7AF)  ||  // 韩文
+           (c >= 0x3000 && c <= 0x303F)  ||  // CJK 标点
+           (c >= 0xFF00 && c <= 0xFFEF);     // 全宽
+  }
+
+  function _appendChar(parent, ch, animate) {
+    if (ch === '\n') { parent.appendChild(document.createElement('br')); return; }
+    const span = document.createElement('span');
+    if (animate) span.className = _isCJK(ch) ? 'ai-ch ai-ch-cjk' : 'ai-ch';
+    span.textContent = ch;
+    parent.appendChild(span);
+  }
+
+  function _paintChars(n) {
+    if (n <= 0) return;
+    const target = Math.min(paintedLen + n, fullText.length);
+    if (target === paintedLen) return;
+    const frag = document.createDocumentFragment();
+    for (let i = paintedLen; i < target; i++) {
+      _appendChar(frag, fullText[i], true);
     }
+    liveTail.appendChild(frag);
+    paintedLen = target;
+  }
+
+  function _commit(upTo) {
+    if (upTo <= committedLen) return;
+    committedLen = upTo;
+    // 更新 stableEl 的 markdown 渲染
+    try {
+      stableEl.innerHTML = markedRender(fullText.slice(0, committedLen));
+    } catch (e) {
+      stableEl.textContent = fullText.slice(0, committedLen);
+    }
+    // 清空 liveTail，重建 [committedLen..paintedLen] 那部分（这些字符之前已动画完成，无需再动画）
+    liveTail.innerHTML = '';
+    if (paintedLen > committedLen) {
+      const frag = document.createDocumentFragment();
+      for (let i = committedLen; i < paintedLen; i++) _appendChar(frag, fullText[i], false);
+      liveTail.appendChild(frag);
+    }
+  }
+
+  function _computeRate(backlog) {
+    // 清理过期样本
+    const cutoff = performance.now() - RATE_WINDOW_MS;
+    while (pushSamples.length && pushSamples[0].t < cutoff) pushSamples.shift();
+    let chars = 0;
+    for (const s of pushSamples) chars += s.n;
+    const inputRate = chars / (RATE_WINDOW_MS / 1000); // 字符/秒
+    let target;
+    if (backlog < 8) {
+      target = MIN_RATE;
+    } else if (backlog <= 120) {
+      // 匹配输入速率，并向 TARGET_BACKLOG 轻微调节
+      const bias = (backlog - TARGET_BACKLOG) / TARGET_BACKLOG; // -1 .. +4
+      target = (inputRate || MIN_RATE) * (1 + 0.25 * bias);
+    } else {
+      // 追赶：至少按 1.35× 输入速率，且保证 0.8s 内耗尽
+      target = Math.max(inputRate * 1.35, backlog / 0.8);
+    }
+    if (!isFinite(target) || target <= 0) target = MIN_RATE;
+    return Math.max(MIN_RATE, Math.min(MAX_RATE, target));
+  }
+
+  function _tick(now) {
+    if (!lastTickTs) lastTickTs = now;
+    const dt = Math.min(0.1, (now - lastTickTs) / 1000); // 最大 100ms dt，防 tab 切换后爆发
+    lastTickTs = now;
+
+    const backlog = fullText.length - paintedLen;
+    let rate;
+    if (finished) {
+      // flush 阶段：1s 内耗尽，至少 MAX_RATE
+      rate = Math.max(MAX_RATE, backlog / 1.0);
+    } else {
+      rate = _computeRate(backlog);
+    }
+    fracChars += rate * dt;
+    const toPaint = Math.floor(fracChars);
+    if (toPaint > 0) {
+      fracChars -= toPaint;
+      _paintChars(toPaint);
+    }
+
+    // 尝试 commit
+    _advanceScanner(paintedLen);
+    if (lastSafeCommit > committedLen) {
+      _commit(lastSafeCommit);
+    } else if (paintedLen - committedLen > MAX_LIVE_CHARS) {
+      const safe = _forceCommitBoundary();
+      if (safe > committedLen) _commit(safe);
+    }
+
+    if (scrollTarget) scrollMessages(scrollTarget);
+
+    if (finished && paintedLen >= fullText.length) {
+      _finalize();
+      return;
+    }
+    rafId = requestAnimationFrame(_tick);
+  }
+
+  function _finalize() {
+    rafId = null;
+    if (paintedLen < fullText.length) _paintChars(fullText.length - paintedLen);
+    // 整体 markdown 重渲：LaTeX / 表格 / mermaid 需要完整语法树
+    try { container.innerHTML = markedRender(fullText); } catch (e) {}
     renderMermaidBlocks(container).catch(() => {});
     if (scrollTarget) scrollMessages(scrollTarget);
   }
 
-  _showDots();  // 一开始就显示动画
+  function _start() {
+    if (rafId == null && !finished) {
+      lastTickTs = 0;
+      rafId = requestAnimationFrame(_tick);
+    }
+  }
+
+  function push(text) {
+    if (!text) return;
+    fullText += text;
+    pushSamples.push({ t: performance.now(), n: text.length });
+    _start();
+  }
+
+  function flush() {
+    finished = true;
+    if (rafId == null) {
+      // 未启动过（空响应 / 极短）：立即 finalize
+      _finalize();
+    }
+    // 否则 _tick 会在 paintedLen 追上 fullText.length 时调用 _finalize
+  }
+
   return { push, flush };
 }
 

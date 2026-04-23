@@ -6573,7 +6573,7 @@ function _isTouchInHScrollable(el) {
             savePracticeSession && savePracticeSession();
           }, SNAP_DUR);
         } else {
-          // 考试模式：A3/A4/案例分析不允许回退的组，左滑前自动提交当前题答案
+          // 考试模式：A3/A4/案例分析不允许回退的组，左滑前需确保已作答
           s.style.transform=''; _removeAdjStage();
           if(S.mode==='exam'){
             const gIdx = getGroupIdxForQ(S.cur);
@@ -6581,22 +6581,23 @@ function _isTouchInHScrollable(el) {
             if(grp && !grp.allowBack){
               const sel = S.ans[S.cur];
               const isMulti = isMultiQ(S.questions[S.cur]);
-              if(isMulti){
-                // 多选：有选项就自动提交（相当于点了「确认选择」）
-                if(sel instanceof Set && sel.size > 0){
-                  // 标记已答，更新最远到达，保存
-                  const dot = document.querySelector(`.q-dot[data-idx="${S.cur}"]`);
-                  if(dot) dot.classList.add('answered');
-                  S.caseMaxReached[gIdx] = Math.max(S.caseMaxReached[gIdx] ?? (S.cur+1), S.cur+1);
-                  saveExamSession();
-                }
-              } else {
-                // 单选：已选的话记录最远到达，保存
-                if(sel !== undefined && sel !== null && sel !== ''){
-                  S.caseMaxReached[gIdx] = Math.max(S.caseMaxReached[gIdx] ?? (S.cur+1), S.cur+1);
-                  saveExamSession();
-                }
+              const answered = isMulti
+                ? (sel instanceof Set && sel.size > 0)
+                : (sel !== undefined && sel !== null && sel !== '');
+              // Issue 5：未作答不允许滑动到下一题（与底部「下一题」按钮行为一致）
+              if(!answered){
+                toast('请先回答本题再前进');
+                _cancelSwipe(dx);
+                vibrate([6,30,6]);
+                return;
               }
+              // 多选已选：自动标记 answered dot（等同于点了「确认选择」）
+              if(isMulti){
+                const dot = document.querySelector(`.q-dot[data-idx="${S.cur}"]`);
+                if(dot) dot.classList.add('answered');
+              }
+              S.caseMaxReached[gIdx] = Math.max(S.caseMaxReached[gIdx] ?? (S.cur+1), S.cur+1);
+              saveExamSession();
             }
             S.cur++; renderQ('forward'); updateGridDot();
           } else {
