@@ -48,6 +48,10 @@ type AppConfig struct {
 	PidFile  string `yaml:"pid_file"`  // PID 文件路径，默认 med-exam.pid
 	// 调试模式（勿用于生产）
 	Debug bool `yaml:"debug"` // true 时暴露 /api/debug 与 /api/debug/exam-sessions 端点
+	// 可信代理 IP/CIDR 列表。loopback (127/8, ::1) 始终可信；
+	// 其它代理（如同网段的 nginx / 负载均衡器）需要在这里显式列出才会
+	// 被信任 X-Real-IP / X-Forwarded-For。示例：["10.0.0.0/8", "192.168.1.5"]
+	TrustedProxies []string `yaml:"trusted_proxies"`
 	// 题库热重载监视器（stdlib 轮询，无需外部依赖）
 	AutoReloadWatch    bool `yaml:"auto_reload_watch"`    // true 启用后台题库变更监视
 	AutoReloadInterval int  `yaml:"auto_reload_interval"` // 轮询间隔秒数，0=默认 10
@@ -80,6 +84,7 @@ func loadConfig(path string) (AppConfig, error) {
 	var currentListKey string
 	var bankIDList []int64
 	var bankList []string
+	var trustedList []string
 
 	for scanner.Scan() {
 		line := scanner.Text()
@@ -103,6 +108,8 @@ func loadConfig(path string) (AppConfig, error) {
 				if id, err := strconv.ParseInt(item, 10, 64); err == nil {
 					bankIDList = append(bankIDList, id)
 				}
+			case "trusted_proxies":
+				trustedList = append(trustedList, item)
 			}
 			continue
 		}
@@ -191,6 +198,13 @@ func loadConfig(path string) (AppConfig, error) {
 			if v, err := strconv.Atoi(val); err == nil && v > 0 {
 				cfg.AutoReloadInterval = v
 			}
+		case "trusted_proxies":
+			// inline comma-separated: trusted_proxies: 10.0.0.1, 192.168.0.0/16
+			for _, part := range strings.Split(val, ",") {
+				if p := strings.TrimSpace(part); p != "" {
+					trustedList = append(trustedList, p)
+				}
+			}
 		case "banks":
 			// inline single value: banks: exam.mqb
 			bankList = append(bankList, val)
@@ -209,6 +223,9 @@ func loadConfig(path string) (AppConfig, error) {
 	}
 	if len(bankIDList) > 0 {
 		cfg.BankIDs = bankIDList
+	}
+	if len(trustedList) > 0 {
+		cfg.TrustedProxies = trustedList
 	}
 	return cfg, scanner.Err()
 }

@@ -22,7 +22,7 @@ type calcResponse struct {
 
 func (s *Server) handleCalculate(w http.ResponseWriter, r *http.Request) {
 	var req calcRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+	if err := decodeJSONBody(w, r, &req); err != nil {
 		http.Error(w, "bad request", 400)
 		return
 	}

@@ -124,6 +124,12 @@ type Config struct {
 	// 会泄露内部会话 ID、题库信息等，仅供排障使用。
 	Debug bool
 
+	// 可信代理 IP/CIDR 列表。只有来自这些地址的请求才会被信任
+	// X-Real-IP / X-Forwarded-For header。默认 loopback (127/8, ::1)
+	// 始终可信；其它代理（如同网段 nginx、负载均衡器）需要在这里显式列出。
+	// 空列表 + 非 loopback 源 = 忽略所有 forwarded header。
+	TrustedProxies []string
+
 	// Legacy single-bank fields kept for editor command compatibility.
 	// When Banks is set, these are ignored.
 	Questions     []*models.Question
@@ -141,6 +147,11 @@ type Server struct {
 	mux          *http.ServeMux
 	rateMu       sync.Mutex
 	rateBuckets  map[string][]time.Time
+	// Session J: 两个额外的、独立于通用 rateBuckets 的限流桶，
+	// 对特别昂贵的端点做更严格的 per-IP 节流。通用 rateBuckets 是 120 req/60s，
+	// 对转发 20MB 图片或每次消耗 AI token 的请求还是偏宽。
+	imgProxyBuckets map[string][]time.Time // /api/img/proxy + /api/img/local/*
+	aiChatBuckets   map[string][]time.Time // /api/ai/chat + /api/ai/report
 	// 扫描器封禁：IP → 解封时间（零值表示永久封禁）
 	scanBans     map[string]time.Time
 	httpServer   *http.Server
@@ -199,6 +210,14 @@ type shareConfig struct {
 const (
 	rateLimit  = 120
 	rateWindow = 60 * time.Second
+	// Session J：两个特殊端点的限流参数。窗口内请求数用滑动时间窗口统计。
+	// 10 次 / 10 秒 对正常用户足够（做题页面一屏常见 5~10 张题目图片），
+	// 但可以挡住恶意批量打 img-proxy 当免费 CDN / 外链流量放大器的行为。
+	imgProxyRateLimit  = 10
+	imgProxyRateWindow = 10 * time.Second
+	// AI chat 每次都消耗成本（LLM token），给 10 req/min 比较保守。
+	aiChatRateLimit  = 10
+	aiChatRateWindow = 60 * time.Second
 )
 
 func New(cfg Config) *Server {
@@ -217,12 +236,14 @@ func New(cfg Config) *Server {
 	ver := make([]byte, 4)
 	rand.Read(ver)
 	s := &Server{
-		cfg:          cfg,
-		sessionToken: hex.EncodeToString(tok),
-		assetVer:     hex.EncodeToString(ver),
-		mux:          http.NewServeMux(),
-		rateBuckets:  map[string][]time.Time{},
-		scanBans:     map[string]time.Time{},
+		cfg:             cfg,
+		sessionToken:    hex.EncodeToString(tok),
+		assetVer:        hex.EncodeToString(ver),
+		mux:             http.NewServeMux(),
+		rateBuckets:     map[string][]time.Time{},
+		imgProxyBuckets: map[string][]time.Time{},
+		aiChatBuckets:   map[string][]time.Time{},
+		scanBans:        map[string]time.Time{},
 	}
 	// 初始化 Web Push
 	pushStores := map[string]*pushStore{}
@@ -355,19 +376,24 @@ func (s *Server) runUserCleanup() {
 	}
 	// 清理 rateBuckets：删除窗口期内无任何请求的 IP 条目，防止长期运行内存无限增长
 	s.rateMu.Lock()
-	cutoff := time.Now().Add(-rateWindow)
-	for ip, bucket := range s.rateBuckets {
-		hasRecent := false
-		for _, t := range bucket {
-			if t.After(cutoff) {
-				hasRecent = true
-				break
+	cleanBucket := func(buckets map[string][]time.Time, window time.Duration) {
+		cutoff := time.Now().Add(-window)
+		for ip, bucket := range buckets {
+			hasRecent := false
+			for _, t := range bucket {
+				if t.After(cutoff) {
+					hasRecent = true
+					break
+				}
+			}
+			if !hasRecent {
+				delete(buckets, ip)
 			}
 		}
-		if !hasRecent {
-			delete(s.rateBuckets, ip)
-		}
 	}
+	cleanBucket(s.rateBuckets, rateWindow)
+	cleanBucket(s.imgProxyBuckets, imgProxyRateWindow)
+	cleanBucket(s.aiChatBuckets, aiChatRateWindow)
 	// 清理已过期的扫描器封禁条目
 	now := time.Now()
 	for ip, until := range s.scanBans {
@@ -387,7 +413,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	auth.ApplySecurityHeaders(wrapped)
 
-	ip := remoteIP(r)
+	ip := s.remoteIP(r)
 
 	// ── 扫描器检测：命中可疑路径立即封禁 24h ──────────────────────
 	if s.isScannerPath(r.URL.Path, r.Method) {
@@ -470,6 +496,23 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		if !s.checkRate(ip) {
 			jsonError(wrapped, "Too Many Requests", http.StatusTooManyRequests)
+			return
+		}
+	}
+	// Session J：对两个昂贵端点做额外的更严格限流（与通用桶叠加）。
+	// 注意这里放在通用 token + rate 检查之后，但必须覆盖所有能访问这些端点的
+	// 请求路径 —— img-proxy / img-local 豁免了 token 校验，所以上面 if 分支里
+	// 的 checkRate 不会对它们起作用；在这里补一道。
+	if r.URL.Path == "/api/img/proxy" ||
+		strings.HasPrefix(r.URL.Path, "/api/img/local/") {
+		if !s.checkImgProxyRate(ip) {
+			jsonError(wrapped, "图片请求过于频繁，请稍后再试", http.StatusTooManyRequests)
+			return
+		}
+	}
+	if r.URL.Path == "/api/ai/chat" || r.URL.Path == "/api/ai/report" {
+		if !s.checkAIChatRate(ip) {
+			jsonError(wrapped, "AI 请求过于频繁，请稍后再试", http.StatusTooManyRequests)
 			return
 		}
 	}
@@ -639,7 +682,7 @@ func (s *Server) handleEditor(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 	r.ParseForm()
 	code := strings.TrimSpace(strings.ToUpper(r.FormValue("code")))
-	ip := remoteIP(r)
+	ip := s.remoteIP(r)
 
 	// 如果需要验证码，先校验
 	if auth.NeedsCaptcha(ip) {
@@ -654,7 +697,10 @@ func (s *Server) handleAuth(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if s.cfg.AccessCode == "" || code == s.cfg.AccessCode {
+	// Session J 加固：访问码比较改为常数时间，防止逐字节时序攻击。
+	// 空访问码（禁用 PIN 模式）保持之前的直接放行语义。
+	if s.cfg.AccessCode == "" ||
+		subtle.ConstantTimeCompare([]byte(code), []byte(s.cfg.AccessCode)) == 1 {
 		auth.RecordSuccess(ip)
 		auth.SetAuthCookie(w, r, s.cfg.CookieSecret, s.cfg.AccessCode)
 		http.Redirect(w, r, "/", http.StatusSeeOther)
@@ -1004,7 +1050,7 @@ func (s *Server) handleCreateQuestion(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -1094,7 +1140,7 @@ func (s *Server) handleUpdateSubQuestion(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	var data map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -1181,7 +1227,7 @@ func (s *Server) handleReplacePreview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -1248,7 +1294,7 @@ func (s *Server) handleReplace(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil {
+	if err := decodeJSONBody(w, r, &data); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -1330,7 +1376,7 @@ func (s *Server) handleRecord(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var data map[string]any
-	if err := json.NewDecoder(r.Body).Decode(&data); err != nil || data == nil {
+	if err := decodeJSONBody(w, r, &data); err != nil || data == nil {
 		jsonError(w, "invalid request body", http.StatusBadRequest)
 		return
 	}
@@ -1540,7 +1586,7 @@ func (s *Server) handleSync(w http.ResponseWriter, r *http.Request) {
 	var payload struct {
 		Sessions []map[string]any `json:"sessions"`
 	}
-	json.NewDecoder(r.Body).Decode(&payload)
+	decodeJSONBody(w, r, &payload)
 	uid := getUserID(r)
 
 	// sessions 中既不在 processed 也不在 skipped 的 → 写入失败，让客户端重试
@@ -1715,7 +1761,7 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 		ScorePerMode   map[string]float64 `json:"score_per_mode"`
 		MultiScoreMode string             `json:"multi_score_mode"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || len(body.Fingerprints) == 0 {
+	if err := decodeJSONBody(w, r, &body); err != nil || len(body.Fingerprints) == 0 {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -1727,7 +1773,10 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 		body.MultiScoreMode = "strict"
 	}
 
-	tok := make([]byte, 8)
+	// Session J 加固：8 字节 token (64 bit) 熵不足，理论上可能被枚举。
+	// 提升到 16 字节 (128 bit)，对齐业界标准（NIST SP 800-63B）。
+	// 已存在的旧短 token 仍然可以被消费，因为查找只按字符串匹配。
+	tok := make([]byte, 16)
 	rand.Read(tok)
 	token := hex.EncodeToString(tok)
 
@@ -1970,7 +2019,7 @@ func (s *Server) handleFavSync(w http.ResponseWriter, r *http.Request) {
 			SI float64 `json:"si"`
 		} `json:"removes"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeJSONBody(w, r, &body); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -2022,7 +2071,7 @@ func (s *Server) handleAIChat(w http.ResponseWriter, r *http.Request) {
 		Bank        int              `json:"bank"`
 		History     []ai.ChatMessage `json:"history"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeJSONBody(w, r, &body); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -2164,7 +2213,7 @@ func (s *Server) handleAIReport(w http.ResponseWriter, r *http.Request) {
 			UserAns string `json:"user_ans"`
 		} `json:"wrong_sample"` // 前20条带题干，供AI识别错误规律
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if err := decodeJSONBody(w, r, &body); err != nil {
 		jsonError(w, "invalid request", http.StatusBadRequest)
 		return
 	}
@@ -2498,7 +2547,7 @@ func (s *Server) handleRecordMigrate(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		FromUID string `json:"from_uid"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.FromUID == "" {
+	if err := decodeJSONBody(w, r, &body); err != nil || body.FromUID == "" {
 		jsonError(w, "缺少 from_uid", http.StatusBadRequest)
 		return
 	}
@@ -2932,24 +2981,49 @@ func distributeByRatio(total int, weights map[string]int) map[string]int {
 
 // ── Rate limiter ───────────────────────────────────────────────────────
 
-func (s *Server) checkRate(ip string) bool {
-	s.rateMu.Lock()
-	defer s.rateMu.Unlock()
+// bumpBucket 是三个限流器（通用 / img-proxy / ai-chat）共用的核心逻辑。
+// 它把 map 传进来以便共享 rateMu 一把锁，避免多把锁导致的死锁风险。
+// 返回 true 表示本次请求被允许（已计入 bucket），false 表示触发限流。
+//
+// 注意：调用方必须持有 s.rateMu。
+func bumpBucket(buckets map[string][]time.Time, ip string, window time.Duration, limit int) bool {
 	now := time.Now()
-	cutoff := now.Add(-rateWindow)
-	bucket := s.rateBuckets[ip]
+	cutoff := now.Add(-window)
+	bucket := buckets[ip]
 	fresh := bucket[:0]
 	for _, t := range bucket {
 		if t.After(cutoff) {
 			fresh = append(fresh, t)
 		}
 	}
-	if len(fresh) >= rateLimit {
-		s.rateBuckets[ip] = fresh
+	if len(fresh) >= limit {
+		buckets[ip] = fresh
 		return false
 	}
-	s.rateBuckets[ip] = append(fresh, now)
+	buckets[ip] = append(fresh, now)
 	return true
+}
+
+func (s *Server) checkRate(ip string) bool {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	return bumpBucket(s.rateBuckets, ip, rateWindow, rateLimit)
+}
+
+// checkImgProxyRate 对 /api/img/proxy 和 /api/img/local/* 做额外限流。
+// 正常做题一屏 5-10 张图的峰值在窗口内完全够用；恶意批量请求被挡住。
+func (s *Server) checkImgProxyRate(ip string) bool {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	return bumpBucket(s.imgProxyBuckets, ip, imgProxyRateWindow, imgProxyRateLimit)
+}
+
+// checkAIChatRate 对 /api/ai/chat 和 /api/ai/report 做额外限流。
+// 每次 AI 请求都消耗 LLM token 成本，10 req/min 是个合理的上限。
+func (s *Server) checkAIChatRate(ip string) bool {
+	s.rateMu.Lock()
+	defer s.rateMu.Unlock()
+	return bumpBucket(s.aiChatBuckets, ip, aiChatRateWindow, aiChatRateLimit)
 }
 
 // banIP 封禁指定 IP 一段时间（duration=0 表示永久）。
@@ -3064,25 +3138,103 @@ func getUserID(r *http.Request) string {
 	return c.Value
 }
 
-func remoteIP(r *http.Request) string {
-	// 优先读取反代传递的真实客户端 IP（nginx: proxy_set_header X-Real-IP $remote_addr）
+// remoteIP returns the client IP.
+//
+// 安全加固（Session J）：只有当**直连的** TCP 源地址属于可信代理列表
+// （s.cfg.TrustedProxies，含 loopback 时会把 127/8、::1 也视为可信）时，
+// 才会信任 X-Real-IP / X-Forwarded-For header。否则一律忽略 header，
+// 回落到 r.RemoteAddr。
+//
+// 背景：早期实现无条件信任 header，任何人都可以用 X-Real-IP 伪造源 IP：
+//   - 绕过 checkRate（每次换个假 IP 就无限请求）
+//   - 绕过 banIP（扫描器被封后换 header 继续）
+//   - 绕过 auth.NeedsCaptcha / CheckBruteForce（匿名暴力破解访问码）
+//
+// 注意：该函数依赖 Server 的配置（TrustedProxies），因此改为方法而非
+// 包级函数；旧的 `remoteIP(r)` 调用点全部迁移为 `s.remoteIP(r)`。
+func (s *Server) remoteIP(r *http.Request) string {
+	// 先拿到直连 TCP 源地址
+	direct, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		direct = r.RemoteAddr
+	}
+	// 如果直连地址不可信，直接返回它（忽略任何 header）
+	if !s.isTrustedProxy(direct) {
+		return direct
+	}
+	// 可信代理：读 header
 	if ip := r.Header.Get("X-Real-IP"); ip != "" {
 		return strings.TrimSpace(strings.SplitN(ip, ",", 2)[0])
 	}
-	// 兼容多级代理链（取最左侧，即原始客户端）
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		return strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
 	}
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
+	return direct
+}
+
+// isTrustedProxy 判断给定 IP 是否在可信代理列表中。
+//
+// 默认行为：loopback (127.0.0.0/8, ::1) 始终可信，因为服务通常就是
+// 被本机上的 nginx/caddy 反代包一层。管理员可以通过 TrustedProxies
+// 追加其它 CIDR / 具体 IP。
+func (s *Server) isTrustedProxy(ip string) bool {
+	parsed := net.ParseIP(ip)
+	if parsed == nil {
+		return false
 	}
-	return ip
+	if parsed.IsLoopback() {
+		return true
+	}
+	for _, entry := range s.cfg.TrustedProxies {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		// 支持 CIDR 和单 IP 两种写法
+		if strings.Contains(entry, "/") {
+			_, cidr, err := net.ParseCIDR(entry)
+			if err == nil && cidr.Contains(parsed) {
+				return true
+			}
+		} else {
+			if ip2 := net.ParseIP(entry); ip2 != nil && ip2.Equal(parsed) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isLoopbackRemote 判断请求的**直连**TCP 源地址是否为 loopback (127/8, ::1)。
+//
+// 和 s.remoteIP(r) 不同：这里只看 r.RemoteAddr，完全忽略任何 X-Real-IP /
+// X-Forwarded-For header。调试端点等敏感路径必须用这个函数，防止在可信代理
+// 场景下被 header 伪造绕过。
+func isLoopbackRemote(r *http.Request) bool {
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		host = r.RemoteAddr
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
 }
 
 func jsonOK(w http.ResponseWriter, v any) {
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
 	json.NewEncoder(w).Encode(v)
+}
+
+// decodeJSONBody 读取并解析请求体 JSON，并强制限制 body 大小，防止恶意
+// 客户端用超大 JSON body 消耗服务器内存（OOM DoS）。1 MiB 对于本项目
+// 所有 API（答题记录、分享配置、AI 聊天历史等）都绰绰有余；极少数真正
+// 需要更大 body 的端点（目前没有）可以自行调用 http.MaxBytesReader 覆盖。
+//
+// 返回任何错误都意味着请求无效，调用方应立即返回 BadRequest 并中止处理。
+const defaultJSONMaxBody = 1 << 20 // 1 MiB
+
+func decodeJSONBody(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, defaultJSONMaxBody)
+	return json.NewDecoder(r.Body).Decode(v)
 }
 
 func jsonError(w http.ResponseWriter, msg string, code int) {
@@ -3190,7 +3342,12 @@ func (w *responseWriterWrapper) Flush() {
 }
 
 func logRequest(r *http.Request, status int, duration time.Duration) {
-	ip := remoteIP(r)
+	// 日志里的 IP 只作展示用，不参与任何安全决策，所以直接用 RemoteAddr 即可
+	// （安全相关路径已改为 s.remoteIP(r)，对 header 做可信代理校验）。
+	ip, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		ip = r.RemoteAddr
+	}
 	method := r.Method
 	path := r.URL.Path
 	if path == "" {
@@ -3222,7 +3379,7 @@ func (s *Server) handlePushSubscribe(w http.ResponseWriter, r *http.Request) {
 		PushSubscription
 		UID string `json:"uid"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&body); err != nil || body.Endpoint == "" {
+	if err := decodeJSONBody(w, r, &body); err != nil || body.Endpoint == "" {
 		jsonError(w, "invalid subscription", http.StatusBadRequest)
 		return
 	}
@@ -3247,7 +3404,7 @@ func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Endpoint string `json:"endpoint"`
 	}
-	json.NewDecoder(r.Body).Decode(&body)
+	decodeJSONBody(w, r, &body)
 	if store := s.pushStores[b.Path]; store != nil && body.Endpoint != "" {
 		store.remove(body.Endpoint)
 	}
@@ -3264,7 +3421,7 @@ func (s *Server) handlePushUnsubscribe(w http.ResponseWriter, r *http.Request) {
 // 每个 IP 限流：5次/小时，防止滥用。
 func (s *Server) handlePushTest(w http.ResponseWriter, r *http.Request) {
 	// 严格限流：每 IP 每小时最多 5 次
-	ip := remoteIP(r)
+	ip := s.remoteIP(r)
 	s.pushTestMu.Lock()
 	now := time.Now()
 	cutoff := now.Add(-time.Hour)
@@ -3414,6 +3571,14 @@ func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
 		http.NotFound(w, r)
 		return
 	}
+	// Session J 加固：调试端点**额外**要求直连地址是 loopback。
+	// 必须用 r.RemoteAddr 而不是 s.remoteIP(r)：后者在可信代理场景下会返回
+	// X-Forwarded-For 的值，可被伪造。调试端点只应被本机访问（SSH 隧道、
+	// 反代 allow 127.0.0.1 转发等），绝不应通过可信代理链暴露。
+	if !isLoopbackRemote(r) {
+		http.NotFound(w, r)
+		return
+	}
 	uid := getUserID(r)
 	ctx := r.Context()
 	type bankInfo struct {
@@ -3493,7 +3658,19 @@ func imgExtFromURL(u string) string {
 // GET /api/img/proxy?url=<encoded>
 // 服务端代理外链图片请求，解决前端跨域（CORS）问题。
 // 支持缓存头（Cache-Control: public, max-age=86400），可被 CDN / 浏览器缓存。
-var imgProxyClient = &http.Client{
+//
+// 两个 client 对应两条独立的信任链：
+//
+//   s3ImgClient        — 用于调用 s.cfg.S3Endpoint（通常是本机 MinIO/RustFS
+//                        如 127.0.0.1:9000 或内网私有 S3）。内网地址是合法
+//                        使用，因此不能做 SSRF 过滤。
+//
+//   upstreamImgClient  — 用于代理用户题目里的外链图片。必须禁止任何内网
+//                        地址，包括跟随重定向之后：攻击者可以构造
+//                        `GET /api/img/proxy?url=https://a.com/redirect-to-metadata`
+//                        让 a.com 把 302 指到 169.254.169.254。下面的
+//                        CheckRedirect 对每一跳都重新跑 SSRF 检查。
+var s3ImgClient = &http.Client{
 	Timeout: 20 * time.Second,
 	CheckRedirect: func(req *http.Request, via []*http.Request) error {
 		if len(via) >= 5 {
@@ -3501,6 +3678,61 @@ var imgProxyClient = &http.Client{
 		}
 		return nil
 	},
+}
+
+var upstreamImgClient = &http.Client{
+	Timeout: 20 * time.Second,
+	CheckRedirect: func(req *http.Request, via []*http.Request) error {
+		if len(via) >= 5 {
+			return fmt.Errorf("too many redirects")
+		}
+		if err := checkPublicURL(req.URL); err != nil {
+			// 重定向目标落在内网/回环/metadata 地址，拒绝跟随
+			return fmt.Errorf("redirect blocked: %w", err)
+		}
+		return nil
+	},
+}
+
+// checkPublicURL 验证 URL 是否为可代理的"公网 http(s) 资源"。
+// 同时被 handleImgProxy 主流程（第一次请求）与 upstreamImgClient.CheckRedirect
+// （每次重定向）使用，两个位置的策略必须一致。
+func checkPublicURL(u *url.URL) error {
+	if u == nil {
+		return fmt.Errorf("invalid url")
+	}
+	scheme := strings.ToLower(u.Scheme)
+	if scheme != "http" && scheme != "https" {
+		return fmt.Errorf("only http/https allowed")
+	}
+	host := strings.ToLower(u.Hostname())
+	// 封锁所有私网/回环地址，防止 SSRF
+	// RFC1918: 10/8, 172.16/12, 192.168/16
+	// 链路本地: 169.254/16, fe80::/10
+	// 回环: 127/8, ::1, localhost
+	// 特殊: 0.0.0.0, metadata (169.254.169.254)
+	blockedPrefixes := []string{
+		"localhost", "127.", "0.0.0.0",
+		"10.",
+		"192.168.",
+		"169.254.",
+		"::1", "[::1]", "fe80",
+	}
+	for _, blocked := range blockedPrefixes {
+		if strings.HasPrefix(host, blocked) || host == "localhost" {
+			return fmt.Errorf("private address blocked")
+		}
+	}
+	// 172.16.0.0/12 覆盖 172.16.x.x - 172.31.x.x
+	if strings.HasPrefix(host, "172.") {
+		parts := strings.SplitN(host, ".", 3)
+		if len(parts) >= 2 {
+			if second, err := strconv.Atoi(parts[1]); err == nil && second >= 16 && second <= 31 {
+				return fmt.Errorf("private address blocked")
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
@@ -3522,9 +3754,11 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 
 		// img-migrate 上传时以 Content-Type 为准定后缀，URL 里未必有扩展名。
 		// 这里先按 URL 推断，再补充遍历其他常见后缀，确保能命中 S3。
+		// 注意：.svg 已从白名单移除（isAllowedExt），这里也同步不再探测 .svg；
+		// 历史已存在的 .svg 对象将不再被 proxy 命中，会走外链降级。
 		urlExt := imgExtFromURL(rawURL)
 		candidates := []string{urlExt}
-		for _, ext := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg", ".avif"} {
+		for _, ext := range []string{".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"} {
 			if ext != urlExt {
 				candidates = append(candidates, ext)
 			}
@@ -3536,12 +3770,12 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 			var err error
 			// 有密钥时签名请求（支持私有 bucket），否则匿名请求
 			if s.cfg.S3AccessKey != "" && s.cfg.S3SecretKey != "" {
-				s3Resp, err = s3SignedGet(ctx, imgProxyClient, s3URL, s.cfg.S3AccessKey, s.cfg.S3SecretKey, "us-east-1")
+				s3Resp, err = s3SignedGet(ctx, s3ImgClient, s3URL, s.cfg.S3AccessKey, s.cfg.S3SecretKey, "us-east-1")
 			} else {
 				var req *http.Request
 				req, err = http.NewRequestWithContext(ctx, http.MethodGet, s3URL, nil)
 				if err == nil {
-					s3Resp, err = imgProxyClient.Do(req)
+					s3Resp, err = s3ImgClient.Do(req)
 				}
 			}
 			if err != nil {
@@ -3568,47 +3802,16 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 		// S3 中未找到该图片，降级到直接代理原始 URL
 	}
 
-	// 只允许 http / https，防止 SSRF 读取内部文件
-	lower := strings.ToLower(rawURL)
-	if !strings.HasPrefix(lower, "http://") && !strings.HasPrefix(lower, "https://") {
-		http.Error(w, "only http/https URLs are allowed", http.StatusBadRequest)
-		return
-	}
-
-	// 解析 URL，拒绝内网地址（简单 SSRF 防护）
+	// 解析 URL 后做统一的 scheme + 私网地址检查；同一套策略也会在
+	// upstreamImgClient.CheckRedirect 里对每一跳重定向重新执行。
 	parsed, err := url.Parse(rawURL)
 	if err != nil {
 		http.Error(w, "invalid url", http.StatusBadRequest)
 		return
 	}
-	host := strings.ToLower(parsed.Hostname())
-	// 封锁所有私网/回环地址，防止 SSRF
-	// RFC1918: 10/8, 172.16/12, 192.168/16
-	// 链路本地: 169.254/16, fe80::/10
-	// 回环: 127/8, ::1, localhost
-	// 特殊: 0.0.0.0, metadata (169.254.169.254)
-	blockedPrefixes := []string{
-		"localhost", "127.", "0.0.0.0",
-		"10.",
-		"192.168.",
-		"169.254.",
-		"::1", "[::1]", "fe80",
-	}
-	for _, blocked := range blockedPrefixes {
-		if strings.HasPrefix(host, blocked) || host == "localhost" {
-			http.Error(w, "access to private addresses is not allowed", http.StatusForbidden)
-			return
-		}
-	}
-	// 172.16.0.0/12 覆盖 172.16.x.x - 172.31.x.x
-	if strings.HasPrefix(host, "172.") {
-		parts := strings.SplitN(host, ".", 3)
-		if len(parts) >= 2 {
-			if second, err := strconv.Atoi(parts[1]); err == nil && second >= 16 && second <= 31 {
-				http.Error(w, "access to private addresses is not allowed", http.StatusForbidden)
-				return
-			}
-		}
+	if err := checkPublicURL(parsed); err != nil {
+		http.Error(w, "url rejected: "+err.Error(), http.StatusForbidden)
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -3623,7 +3826,7 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 	// 有些站点需要 Referer 才肯返回图片
 	req.Header.Set("Referer", parsed.Scheme+"://"+parsed.Host+"/")
 
-	resp, err := imgProxyClient.Do(req)
+	resp, err := upstreamImgClient.Do(req)
 	if err != nil {
 		http.Error(w, "upstream fetch failed: "+err.Error(), http.StatusBadGateway)
 		return
@@ -3673,6 +3876,10 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 //   - answer_count：服务端是否确实保存了答案，排除题库过滤导致全空的情况
 func (s *Server) handleDebugExamSessions(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.Debug {
+		http.NotFound(w, r)
+		return
+	}
+	if !isLoopbackRemote(r) {
 		http.NotFound(w, r)
 		return
 	}

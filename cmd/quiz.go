@@ -214,6 +214,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		S3PublicBase:    fileCfg.S3PublicBase,
 		CleanupDays:     cleanupDays,
 		Debug:           debug,
+		TrustedProxies:  fileCfg.TrustedProxies,
 	}
 	cfg.Assets = Assets
 

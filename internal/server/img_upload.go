@@ -66,7 +66,7 @@ func s3Put(ctx context.Context, endpoint, bucket, ak, sk, key, contentType strin
 	req.Header.Set("x-amz-content-sha256", payloadHash)
 	req.Header.Set("Authorization", authHeader)
 
-	resp, err := imgProxyClient.Do(req)
+	resp, err := s3ImgClient.Do(req)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func s3Get(ctx context.Context, endpoint, bucket, ak, sk, key string) (io.ReadCl
 	req.Header.Set("x-amz-content-sha256", emptyHash)
 	req.Header.Set("Authorization", authHeader)
 
-	resp, err := imgProxyClient.Do(req)
+	resp, err := s3ImgClient.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
@@ -263,8 +263,12 @@ func imgExtFromContentType(ct string) string {
 }
 
 func isAllowedExt(ext string) bool {
+	// Session J 加固：.svg 从白名单中移除。SVG 可以携带 <script> 或 onload 事件，
+	// 返回时 Content-Type 继承自 S3 又是 image/svg+xml，浏览器在同源域下会执行它的
+	// 脚本，构成存储型 XSS。题库里的医学插图几乎都是位图，移除 svg 不影响正常使用；
+	// 如果真的需要矢量图，建议先转换为 PNG/WebP 再上传。
 	switch ext {
-	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".svg":
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp":
 		return true
 	}
 	return false

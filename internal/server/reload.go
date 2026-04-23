@@ -1,7 +1,6 @@
 package server
 
 import (
-	"encoding/json"
 	"net/http"
 	"sync"
 
@@ -73,7 +72,7 @@ func (s *Server) handleAdminReload(w http.ResponseWriter, r *http.Request) {
 	}
 	var req reloadReq
 	if r.ContentLength > 0 {
-		json.NewDecoder(r.Body).Decode(&req)
+		decodeJSONBody(w, r, &req)
 	}
 
 	next, err := s.reloadFn(req.Banks, req.Password)
