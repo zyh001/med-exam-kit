@@ -3217,42 +3217,72 @@ document.addEventListener('click', e => {
 
 // ── Submit ──────────────────────────────────
 async function submitExam() {
-  clearInterval(S.timerInterval);
-  S.timerInterval = null;
-  // 关闭暂停遮罩并隐藏暂停按钮，避免交卷后残留
-  const pauseOverlay = document.getElementById('pause-overlay');
-  if (pauseOverlay) pauseOverlay.style.display = 'none';
-  document.body.classList.remove('exam-paused');
-  S.examPaused = false;
-  document.removeEventListener('keydown', _pauseEscHandler);
-  // 清理计时器长按状态
-  const timerEl2 = document.getElementById('quiz-timer');
-  if (timerEl2) timerEl2.classList.remove('exam-pausable');
-  clearExamSession();   // 正常交卷，清除存档
-  S.examSubmitted = true; // 防止任何路径重新保存
-  const origMode = S.mode; // 保存原始模式用于 calculateResults
-  S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
-  // 在 await reveal 之前记录交卷时间，防止 reveal 异步耗时导致 timeSec 偏大
-  // 用 serverNow() 与 S.examStart 保持同一时钟（都是服务端视角的 ms），
-  // 否则会被本地/服务端时差污染出几秒到几十秒的误差
-  const submitAt = serverNow();
+  // 重入保护：定时自动交卷 + 用户手动点击提交 + 浏览器 beforeunload 等
+  // 多条路径可能同时触发 submitExam。如果不锁，两次 reveal 竞争、第二次拿到
+  // 404 → 全部题目 q.answer 为空 → calculateResults 把所有题判错 → 0 分。
+  if (S._submittingExam) return;
+  S._submittingExam = true;
 
-  // sealed 模式：从服务端获取答案后再评分
-  if (S.examId) {
-    try {
-      const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(S.examId) + '&' + bankQS());
-      if (res.ok) {
-        const { answers } = await res.json();
-        // 将答案填回题目
-        S.questions.forEach(q => {
-          const a = answers[q.fingerprint + ':' + q.si];
-          if (a) { q.answer = a.answer; q.discuss = a.discuss; }
-        });
-        S.examId = null;
-      } else {
-        // 离线或服务端异常：提示稍后获取
+  try {
+    clearInterval(S.timerInterval);
+    S.timerInterval = null;
+    // 关闭暂停遮罩并隐藏暂停按钮，避免交卷后残留
+    const pauseOverlay = document.getElementById('pause-overlay');
+    if (pauseOverlay) pauseOverlay.style.display = 'none';
+    document.body.classList.remove('exam-paused');
+    S.examPaused = false;
+    document.removeEventListener('keydown', _pauseEscHandler);
+    // 清理计时器长按状态
+    const timerEl2 = document.getElementById('quiz-timer');
+    if (timerEl2) timerEl2.classList.remove('exam-pausable');
+    clearExamSession();   // 正常交卷，清除存档
+    S.examSubmitted = true; // 防止任何路径重新保存
+    const origMode = S.mode; // 保存原始模式用于 calculateResults
+    S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
+    // 在 await reveal 之前记录交卷时间，防止 reveal 异步耗时导致 timeSec 偏大
+    // 用 serverNow() 与 S.examStart 保持同一时钟（都是服务端视角的 ms），
+    // 否则会被本地/服务端时差污染出几秒到几十秒的误差
+    const submitAt = serverNow();
+
+    // sealed 模式：从服务端获取答案后再评分
+    if (S.examId) {
+      // 最多重试 3 次，指数退避；服务端的 180s 宽限窗口保证同一 eid 可以幂等领取。
+      // 只有 3 次全部失败才走"稍后联网补取"的降级分支。
+      let revealed = false;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3 && !revealed; attempt++) {
+        if (attempt > 0) {
+          await new Promise(r => setTimeout(r, 400 * attempt));
+        }
+        try {
+          const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(S.examId) + '&' + bankQS());
+          if (res.ok) {
+            const data = await res.json();
+            const answers = data && data.answers;
+            if (answers && typeof answers === 'object') {
+              // 将答案填回题目
+              S.questions.forEach(q => {
+                const a = answers[q.fingerprint + ':' + q.si];
+                if (a) { q.answer = a.answer; q.discuss = a.discuss; }
+              });
+              S.examId = null;
+              revealed = true;
+              break;
+            }
+          } else if (res.status === 404) {
+            // 会话确实不存在（过期或从未创建）——再试也无用
+            lastErr = new Error('session-not-found');
+            break;
+          }
+        } catch (e) {
+          lastErr = e;
+          // 网络异常 → 下一轮重试
+        }
+      }
+
+      if (!revealed) {
+        // 所有重试都失败：降级到"联网后自动补取"
         toast('⚠ 无法获取答案，请联网后重新打开应用自动补取', true);
-        // 存储 examId 到 localStorage，供后续联网获取
         try {
           const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
           pending.push({
@@ -3264,25 +3294,15 @@ async function submitExam() {
           localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
         } catch(e) {}
       }
-    } catch(e) {
-      toast('⚠ 网络异常，答案待联网后自动补取', true);
-      try {
-        const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
-        pending.push({
-          examId:  S.examId,
-          bankID:  S.bankID,
-          ts:      Date.now(),
-          fps:     S.questions.map(q => q.fingerprint + ':' + q.si),
-        });
-        localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
-      } catch(e2) {}
     }
-  }
 
-  // 再次确保清除（防止 await 期间被重新保存）
-  clearExamSession();
-  calculateResults(origMode, submitAt);
-  showScreen('s-results');
+    // 再次确保清除（防止 await 期间被重新保存）
+    clearExamSession();
+    calculateResults(origMode, submitAt);
+    showScreen('s-results');
+  } finally {
+    S._submittingExam = false;
+  }
 }
 function retryQuiz() {
   // 如果题目还在内存，直接重置状态重新做一遍
@@ -3290,6 +3310,7 @@ function retryQuiz() {
     // 恢复原始模式（submitExam 将 mode 设为 'exam_done'）
     if (S.mode === 'exam_done' && S.results) S.mode = S.results.mode || 'exam';
     S.examSubmitted = false; // 重置提交标记
+    S._submittingExam = false; // 重置重入锁（防御性：正常流程 finally 已清，但保险起见再 reset）
     S.examId = null;         // 清除密封 ID，重试不再走 reveal 流程（答案已填回）
     S.cur = 0;
     S.ans = {};

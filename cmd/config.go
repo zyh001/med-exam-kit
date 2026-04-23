@@ -46,6 +46,8 @@ type AppConfig struct {
 	LogLevel string `yaml:"log_level"` // debug / info / warn / error，默认 info
 	// 进程管理
 	PidFile  string `yaml:"pid_file"`  // PID 文件路径，默认 med-exam.pid
+	// 调试模式（勿用于生产）
+	Debug bool `yaml:"debug"` // true 时暴露 /api/debug 与 /api/debug/exam-sessions 端点
 }
 
 // defaultConfig returns a zero-value config with sensible defaults.
@@ -178,6 +180,8 @@ func loadConfig(path string) (AppConfig, error) {
 			cfg.LogLevel = val
 		case "pid_file":
 			cfg.PidFile = val
+		case "debug":
+			cfg.Debug = val == "true"
 		case "banks":
 			// inline single value: banks: exam.mqb
 			bankList = append(bankList, val)

@@ -119,6 +119,11 @@ type Config struct {
 	// 数据保留策略
 	CleanupDays int // 不活跃用户数据保留天数，0 = 使用默认值 7
 
+	// 调试模式（绝不在生产环境启用）
+	// 打开后暴露 /api/debug 与 /api/debug/exam-sessions 等诊断端点，
+	// 会泄露内部会话 ID、题库信息等，仅供排障使用。
+	Debug bool
+
 	// Legacy single-bank fields kept for editor command compatibility.
 	// When Banks is set, these are ignored.
 	Questions     []*models.Question
@@ -168,7 +173,15 @@ type examSession struct {
 	ts        int64                 // unix seconds — creation time, used for 24h retention
 	startedAt int64                 // unix milliseconds — authoritative exam start time (server clock)
 	timeLimit int                   // seconds; 0 = no limit
+	// revealedAt 在客户端调用 /api/exam/reveal 成功后设置为 unix 秒。
+	// 之后的 revealGraceWindow 秒内再次请求 reveal 会返回同样的答案（幂等）—
+	// 这是为了容错：网络抖动、响应中途断开、用户手动 + 自动双触发交卷等都可能
+	// 导致客户端第一次拿不到完整答案而需要重试。
+	// 宽限窗口过后 session 会被后台清理循环删除。
+	revealedAt int64                 // unix seconds, 0 = not yet revealed
 }
+
+const revealGraceWindow = 180 // seconds — 交卷答案可重复领取的宽限窗口
 
 type shareConfig struct {
 	Fingerprints   []string           `json:"fingerprints"`
@@ -533,6 +546,7 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/wrongbook", s.handleWrongbook)
 	m.HandleFunc("POST /api/sync", s.handleSync)
 	m.HandleFunc("GET /api/debug", s.handleDebug)
+	m.HandleFunc("GET /api/debug/exam-sessions", s.handleDebugExamSessions)
 	m.HandleFunc("GET /api/sync/status", s.handleSyncStatus)
 	m.HandleFunc("GET /api/exam/reveal", s.handleExamReveal)
 	m.HandleFunc("GET /api/exam/time", s.handleExamTime)
@@ -829,10 +843,12 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 		}
 		nowMS := time.Now().UnixMilli()
 		s.examMu.Lock()
-		// 清理超过 24h 的旧 session（简单 LRU）
+		// 清理超过 24h 的旧 session（简单 LRU）；
+		// 已 reveal 的 session 在宽限窗口结束后也一并清理，避免常驻内存。
 		nowS := time.Now().Unix()
 		for k, v := range s.examSessions {
-			if nowS-v.ts > 86400 {
+			if nowS-v.ts > 86400 ||
+				(v.revealedAt != 0 && nowS-v.revealedAt > int64(revealGraceWindow)) {
 				delete(s.examSessions, k)
 			}
 		}
@@ -1607,17 +1623,31 @@ func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "缺少 exam id", http.StatusBadRequest)
 		return
 	}
+	nowS := time.Now().Unix()
 	s.examMu.Lock()
 	sess, ok := s.examSessions[eid]
+	var answers map[string]examAnswer
 	if ok {
-		delete(s.examSessions, eid) // 一次性使用
+		// 幂等领取：第一次调用时记录 revealedAt，之后 revealGraceWindow 秒内
+		// 再次调用返回同样的答案。这样手动交卷和定时自动交卷的竞态、响应中
+		// 断导致的重试、前端 submitExam 被意外双触发等情况都不会丢答案。
+		if sess.revealedAt == 0 {
+			sess.revealedAt = nowS
+		} else if nowS-sess.revealedAt > int64(revealGraceWindow) {
+			// 宽限期已过，视同过期
+			delete(s.examSessions, eid)
+			ok = false
+		}
+		if ok {
+			answers = sess.answers
+		}
 	}
 	s.examMu.Unlock()
 	if !ok {
 		jsonError(w, "考试会话已过期或不存在", http.StatusNotFound)
 		return
 	}
-	jsonOK(w, map[string]any{"answers": sess.answers})
+	jsonOK(w, map[string]any{"answers": answers})
 }
 
 // handleExamTime 返回考试剩余时间（以服务端时钟为准）
@@ -1845,13 +1875,28 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 			rows[i].Answer = ""
 			rows[i].Discuss = ""
 		}
+		// 计算 timeLimit（移到这里，以便与 session 一起存储）
+		tl := cfg.TimeLimit
+		if tl <= 0 {
+			tl = 90 * 60
+		}
 		s.examMu.Lock()
+		// 清理：超过 24h 的旧 session，或已 reveal 且超出宽限窗口的 session
 		for k, v := range s.examSessions {
-			if now-v.ts > 86400 {
+			if now-v.ts > 86400 ||
+				(v.revealedAt != 0 && now-v.revealedAt > int64(revealGraceWindow)) {
 				delete(s.examSessions, k)
 			}
 		}
-		s.examSessions[eid] = &examSession{answers: answers, ts: now}
+		// 分享考试也必须设置 startedAt / timeLimit，否则 /api/exam/time 会返回 remaining=0
+		// 导致客户端一进入考试就认为已到期；而 reveal 则可能因为 ts 不一致导致答案
+		// 无法回填（q.answer 为空，calculateResults 会把所有题判错）。
+		s.examSessions[eid] = &examSession{
+			answers:   answers,
+			ts:        now,
+			startedAt: time.Now().UnixMilli(),
+			timeLimit: tl,
+		}
 		s.examMu.Unlock()
 	}
 
@@ -1866,9 +1911,24 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 		outMode = "exam"
 	}
 
+	// 与 handleQuestions 的 sealed 分支保持一致：把 started_at / server_now 一并下发，
+	// 客户端据此校准 clock offset、避免使用本地 Date.now() 被系统时间篡改。
+	nowMS := time.Now().UnixMilli()
+	var startedAt int64
+	if eid != "" {
+		// sealed 模式下 startedAt 已存入 session，取同一个值给客户端
+		s.examMu.Lock()
+		if sess, ok := s.examSessions[eid]; ok {
+			startedAt = sess.startedAt
+		}
+		s.examMu.Unlock()
+	}
+
 	jsonOK(w, map[string]any{
 		"items": rows, "total": len(rows), "mode": outMode,
 		"exam_id": eid, "time_limit": timeLimit,
+		"started_at":       startedAt,
+		"server_now":       nowMS,
 		"bank_idx":         cfg.BankIdx,
 		"scoring":          cfg.Scoring,
 		"score_per_mode":   cfg.ScorePerMode,
@@ -3350,6 +3410,10 @@ func (s *Server) handleDeleteSession(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/debug — 返回当前题库和数据库配置状态（仅供调试）
 func (s *Server) handleDebug(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.Debug {
+		http.NotFound(w, r)
+		return
+	}
 	uid := getUserID(r)
 	ctx := r.Context()
 	type bankInfo struct {
@@ -3594,4 +3658,52 @@ func (s *Server) handleImgProxy(w http.ResponseWriter, r *http.Request) {
 	if _, err := io.Copy(w, io.LimitReader(resp.Body, 20<<20)); err != nil {
 		logger.Errorf("[img-proxy] copy error for %s: %v", rawURL, err)
 	}
+}
+
+// handleDebugExamSessions dumps active exam sessions metadata for troubleshooting
+// the "submitted exam lost all answers / 0 分" bug. The response deliberately
+// omits the answer map — only the count is shown. Enabled only under --debug.
+//
+// 用途：当用户反馈"交卷后得 0 分"时，运维在 /api/debug/exam-sessions 上可以
+// 看到：
+//   - 对应 exam_id 的 session 是否仍然存在（未被 reveal 宽限窗口过期）
+//   - revealed_at：是否已经被某次 reveal 认领过，以及距今多久
+//   - started_at / time_limit：时间同步是否正常（为 0 意味着 handleExamJoin
+//     旧 bug 的症状，修复后应为正值）
+//   - answer_count：服务端是否确实保存了答案，排除题库过滤导致全空的情况
+func (s *Server) handleDebugExamSessions(w http.ResponseWriter, r *http.Request) {
+	if !s.cfg.Debug {
+		http.NotFound(w, r)
+		return
+	}
+	type sessInfo struct {
+		ID          string `json:"id"`
+		Ts          int64  `json:"ts"`          // unix seconds, created at
+		StartedAt   int64  `json:"started_at"`  // unix ms
+		TimeLimit   int    `json:"time_limit"`  // seconds
+		RevealedAt  int64  `json:"revealed_at"` // unix seconds, 0 = not revealed
+		AnswerCount int    `json:"answer_count"`
+		AgeSec      int64  `json:"age_sec"` // now - ts
+	}
+	nowS := time.Now().Unix()
+	s.examMu.Lock()
+	list := make([]sessInfo, 0, len(s.examSessions))
+	for id, v := range s.examSessions {
+		list = append(list, sessInfo{
+			ID:          id,
+			Ts:          v.ts,
+			StartedAt:   v.startedAt,
+			TimeLimit:   v.timeLimit,
+			RevealedAt:  v.revealedAt,
+			AnswerCount: len(v.answers),
+			AgeSec:      nowS - v.ts,
+		})
+	}
+	s.examMu.Unlock()
+	jsonOK(w, map[string]any{
+		"now":                  nowS,
+		"reveal_grace_window":  revealGraceWindow,
+		"exam_session_count":   len(list),
+		"exam_sessions":        list,
+	})
 }

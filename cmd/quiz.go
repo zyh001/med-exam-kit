@@ -60,6 +60,7 @@ func init() {
 	quizCmd.Flags().String("config", "", "配置文件路径（默认自动查找 med-exam-kit.yaml）")
 	quizCmd.Flags().Int("cleanup-days", 0, "不活跃用户数据保留天数（0=使用配置文件值，默认 7 天）")
 	quizCmd.Flags().Int("ai-max-tokens", 0, "AI 单次回复最大 token 数（0=使用配置文件值，默认 2048）")
+	quizCmd.Flags().Bool("debug", false, "启用调试端点 /api/debug 与 /api/debug/exam-sessions（仅排障用，切勿在生产环境开启）")
 }
 
 func runQuiz(cmd *cobra.Command, args []string) error {
@@ -122,6 +123,9 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	aiMaxTokens, _ := cmd.Flags().GetInt("ai-max-tokens")
 	if !cmd.Flags().Changed("ai-max-tokens") { aiMaxTokens = fileCfg.AIMaxTokens }
 	if aiMaxTokens <= 0 { aiMaxTokens = 2048 } // 默认 2048
+
+	debug, _ := cmd.Flags().GetBool("debug")
+	if !cmd.Flags().Changed("debug") { debug = fileCfg.Debug }
 
 	pgDSN, _ := cmd.Flags().GetString("db")
 	if !cmd.Flags().Changed("db") { pgDSN = fileCfg.DB }
@@ -200,6 +204,7 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 		S3SecretKey:     fileCfg.S3SecretKey,
 		S3PublicBase:    fileCfg.S3PublicBase,
 		CleanupDays:     cleanupDays,
+		Debug:           debug,
 	}
 	cfg.Assets = Assets
 
@@ -212,6 +217,9 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	}
 	if host != "127.0.0.1" {
 		auth.PrintPublicWarning(port)
+	}
+	if debug {
+		fmt.Println("⚠  调试模式已启用：/api/debug 与 /api/debug/exam-sessions 端点可访问（请勿在公网环境使用）")
 	}
 	fmt.Println("   按 Ctrl+C 停止服务")
 
