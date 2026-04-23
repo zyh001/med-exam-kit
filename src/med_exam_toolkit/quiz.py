@@ -63,6 +63,7 @@ _asr_model:    str = ""
 _asr_base_url: str = ""
 
 _cleanup_days: int = 7  # 不活跃用户数据保留天数
+_debug: bool = False    # 调试模式（启用 /api/debug 端点，仅限 loopback 访问）
 
 # ── 速率限制 ──
 _RATE_LIMIT  = 120
@@ -130,6 +131,7 @@ def _is_banned(ip: str) -> bool:
 # ── 考试防作弊：sealed 模式答案暂存 ──
 _exam_sessions: dict[str, dict] = {}   # exam_id -> {"fingerprint:si": {answer, discuss}, ts}
 _exam_lock = threading.Lock()
+_REVEAL_GRACE_WINDOW = 180  # 秒 — 交卷答案可重复领取的宽限窗口
 
 # ── 试卷分享令牌（内存存储，7天有效，服务重启后失效）──
 _share_tokens: dict[str, dict] = {}    # token -> {fingerprints, mode, bank_idx, time_limit, ts, expires_at}
@@ -685,12 +687,25 @@ def api_sync_status():
 
 @app.get("/api/exam/reveal")
 def api_exam_reveal():
-    """考试模式提交后下发答案（一次性，消费后删除）。"""
+    """考试模式提交后下发答案（幂等，宽限期内可重复领取）。
+
+    第一次调用时记录 revealed_at，之后 _REVEAL_GRACE_WINDOW 秒内
+    再次调用返回同样的答案。这样手动交卷和定时自动交卷的竞态、响应中
+    断导致的重试、前端 submitExam 被意外双触发等情况都不会丢答案。
+    """
     eid = request.args.get("id", "")
     if not eid:
         return jsonify({"error": "缺少 exam id"}), 400
+    now_s = int(time.time())
     with _exam_lock:
-        sess = _exam_sessions.pop(eid, None)
+        sess = _exam_sessions.get(eid)
+        if sess is not None:
+            if sess.get("revealed_at", 0) == 0:
+                sess["revealed_at"] = now_s
+            elif now_s - sess["revealed_at"] > _REVEAL_GRACE_WINDOW:
+                # 宽限期已过，视同过期
+                del _exam_sessions[eid]
+                sess = None
     if sess is None:
         return jsonify({"error": "考试会话已过期或不存在"}), 404
     return jsonify({"answers": sess["answers"]})
@@ -843,7 +858,9 @@ def api_exam_join():
         server_now_ms = int(time.time() * 1000)
         started_at_ms = server_now_ms
         with _exam_lock:
-            old = [k for k, v in _exam_sessions.items() if now - v["ts"] > 86400]
+            old = [k for k, v in _exam_sessions.items()
+                   if now - v["ts"] > 86400
+                   or (v.get("revealed_at", 0) != 0 and now - v["revealed_at"] > _REVEAL_GRACE_WINDOW)]
             for k in old:
                 del _exam_sessions[k]
             _exam_sessions[eid] = {
@@ -870,6 +887,40 @@ def api_exam_join():
         resp["started_at"] = started_at_ms
         resp["server_now"] = server_now_ms
     return jsonify(resp)
+
+
+# ════════════════════════════════════════════
+# API — 调试端点（仅 --debug 启用，且仅限 loopback 访问）
+# ════════════════════════════════════════════
+
+def _is_loopback() -> bool:
+    """检查请求是否来自 loopback 地址（127.x / ::1）。"""
+    remote = request.remote_addr or ""
+    return remote.startswith("127.") or remote == "::1"
+
+@app.get("/api/debug/exam-sessions")
+def api_debug_exam_sessions():
+    if not _debug or not _is_loopback():
+        return "", 404
+    now_s = int(time.time())
+    with _exam_lock:
+        sessions = []
+        for eid, v in _exam_sessions.items():
+            sessions.append({
+                "id":            eid,
+                "ts":            v.get("ts", 0),
+                "started_at":    v.get("started_at", 0),
+                "time_limit":    v.get("time_limit", 0),
+                "revealed_at":   v.get("revealed_at", 0),
+                "answer_count":  len(v.get("answers", {})),
+                "age_sec":       now_s - v.get("ts", now_s),
+            })
+    return jsonify({
+        "now":                 now_s,
+        "reveal_grace_window": _REVEAL_GRACE_WINDOW,
+        "exam_session_count":  len(sessions),
+        "exam_sessions":       sessions,
+    })
 
 
 # ════════════════════════════════════════════
@@ -2032,9 +2083,12 @@ def start_quiz(
     ai_api_key:  str = "",
     ai_base_url: str = "",
     ai_thinking: bool | None = None,
+    ai_max_tokens: int = 0,
     asr_api_key: str = "",
     asr_model:   str = "",
     asr_base_url: str = "",
+    cleanup_days: int = 0,
+    debug:       bool = False,
 ) -> None:
     """启动医考练习 Web 应用（支持多题库）。
 
@@ -2049,6 +2103,7 @@ def start_quiz(
            _server_port, _server_host, \
            _access_code, _cookie_secret, _pin_enabled, _pin_len, \
            _ai_client, _ai_model, _ai_provider, _ai_enable_thinking, \
+           _ai_max_tokens, _cleanup_days, _debug, \
            _asr_api_key, _asr_model, _asr_base_url
 
     # 兼容旧的单路径传参
@@ -2068,6 +2123,7 @@ def start_quiz(
     _ai_enable_thinking = ai_thinking
     _ai_max_tokens      = ai_max_tokens if ai_max_tokens > 0 else 2048
     _cleanup_days       = cleanup_days  if cleanup_days  > 0 else 7
+    _debug              = debug
     if ai_provider and ai_api_key:
         try:
             from med_exam_toolkit.ai.client import make_client, default_model
@@ -2161,6 +2217,8 @@ def start_quiz(
     else:
         print("\n  ⚠️  访问码验证已关闭（--no-pin），任何人可直接访问\n")
 
+    if _debug:
+        print("  ⚠  调试模式已启用：/api/debug/exam-sessions 端点可访问（请勿在公网环境使用）")
     print("[INFO] Ctrl+C 退出")
 
     if not no_browser:

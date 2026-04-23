@@ -661,10 +661,11 @@ def edit(ctx, bank, password, port, host, no_browser, no_pin):
 @click.option("--asr-model", default="", help="ASR 模型名（默认 qwen3-asr-flash）")
 @click.option("--asr-base-url", default="", help="ASR WebSocket URL")
 @click.option("--cleanup-days", default=0, type=int, help="不活跃用户数据保留天数（0=默认 7 天）")
+@click.option("--debug", is_flag=True, default=False, help="启用调试端点（仅排障用，切勿在生产环境开启）")
 @click.pass_context
 def quiz(ctx, banks, password, port, host, no_browser, no_record, no_pin, pin,
          ai_provider, ai_model, ai_key, ai_base_url, ai_thinking, ai_max_tokens,
-         asr_key, asr_model, asr_base_url, cleanup_days):
+         asr_key, asr_model, asr_base_url, cleanup_days, debug):
     """启动医考练习 Web 应用（练习/考试/背题模式，支持多题库）
 
     \b
@@ -697,7 +698,7 @@ def quiz(ctx, banks, password, port, host, no_browser, no_record, no_pin, pin,
                ai_api_key=ai_key, ai_base_url=ai_base_url,
                ai_thinking=ai_thinking, ai_max_tokens=ai_max_tokens,
                asr_api_key=asr_key, asr_model=asr_model, asr_base_url=asr_base_url,
-               cleanup_days=cleanup_days)
+               cleanup_days=cleanup_days, debug=debug)
 
 
 def main():

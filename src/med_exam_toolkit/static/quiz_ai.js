@@ -312,85 +312,215 @@ function autoResizeTextarea(el) {
   el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
 }
 
-// ── Streaming renderer — paragraph-buffered, one-by-one fade-in ───
+// ── Streaming renderer — adaptive-buffer feeding smd, final pass through marked ──
 //
-// 规则：
-//   - 收到 chunk → 追加到 buf，不做任何 DOM 操作
-//   - buf 中出现 \n\n（段落分隔）→ 取出完整段落，用 marked() 渲染，
-//     以 ai-para-in 动画淡入追加到容器
-//   - 期间始终显示跳动三点动画，告知用户正在生成
-//   - 代码块 ``` 内不分段
-//   - flush() → 渲染剩余 buf，移除动画
+// 设计要点：
+//   · 流式阶段用 **smd (streaming-markdown)** 直接渲染到 DOM：用户可以边流出边看到
+//     已渲染的 markdown（加粗、标题、列表、代码块、链接都立即成形），不再看到原始
+//     `**xxx**` 这种 markdown 语法字面量。
+//   · 保留自适应缓冲：跟踪近 1.5s 的 token 到达速率，按输出速率把 fullText 喂给 smd
+//     的 parser，而不是把每个 token chunk 直接倾倒进 DOM。这样快写慢出 / 慢写慢出，
+//     不会因模型忽快忽慢导致视觉跳跃。
+//     - backlog < 8  字：下限 30 字/s
+//     - backlog 8~120:  匹配输入速率，并轻微向 24 字目标 backlog 靠拢
+//     - backlog > 120: 输入速率 × 1.35（或 0.8s 内耗尽）追赶
+//     - 全程 clamp 到 [30, 240] 字/s
+//   · 新块级元素 (p/li/h*/pre/blockquote/table) 由 CSS 自动淡入上浮（aiBlockIn），
+//     保留"丝滑"视觉但不需要逐字符 DOM 操作。
+//   · flush() → 把剩下的字符快速喂完，smd parser_end 收尾，然后用 markedRender 对
+//     fullText 整体重渲：这一步才会触发 LaTeX (KaTeX) 与 mermaid 的正确渲染，smd
+//     在流式阶段只会把它们显示为占位元素 (<equation-inline> 等)。
+//   · 尾部保留 .ai-typing-dots 三点动画作为"仍在生成"提示。
+//   · smd 未加载时自动降级：按原生文本追加到 <pre>，仍保证不丢内容。
 
-function makeStreamingRenderer(container, cursor, scrollTarget) {
-  let fullText    = '';   // 全量文本（flush 用）
-  let buf         = '';   // 当前未渲染的缓冲
-  let inFence     = false;
-  let dotsEl      = null;
+function makeStreamingRenderer(container, scrollTarget) {
+  // DOM 布局：
+  //   container  (.ai-stream-live 在流式阶段；flush 后换成 .ai-stream-final)
+  //     ├─ streamEl  (.ai-stream-body)  → smd 向此节点直接 append
+  //     └─ dotsEl    (.ai-typing-dots)  → 流式期间显示，flush 时移除
+  container.innerHTML = '';
+  container.classList.add('ai-stream-live');
+  container.classList.remove('ai-stream-final');
 
-  // ── 三点动画 ──────────────────────────────────────────────────────
-  function _showDots() {
-    if (dotsEl) return;
-    dotsEl = document.createElement('div');
-    dotsEl.className = 'ai-typing-dots';
-    dotsEl.innerHTML = '<span></span><span></span><span></span>';
-    container.appendChild(dotsEl);
-    if (scrollTarget) scrollMessages(scrollTarget);
+  const streamEl = document.createElement('div');
+  streamEl.className = 'ai-stream-body';
+  container.appendChild(streamEl);
+
+  const dotsEl = document.createElement('span');
+  dotsEl.className = 'ai-typing-dots';
+  dotsEl.innerHTML = '<span></span><span></span><span></span>';
+  container.appendChild(dotsEl);
+
+  // 构建 smd 解析器；若 smd 未加载（首次调用 AI 时可能还在下载），降级为 <pre>
+  //
+  // 逐字水流动画：包装 smd.default_renderer 的 add_text 回调，把原本的
+  //   document.createTextNode(c)
+  // 替换成逐字符 <span class="ai-ch">。smd 内部只保存 e.nodes[e.index]（当前
+  // 父块级元素），不关心子节点是 text node 还是 span，因此不会破坏解析树。
+  // 这样既保留了 smd 的实时 markdown 渲染（加粗/标题/列表立即成形），又拿回
+  // Session A 那种水流逐字动画；CJK 字符得到更长的动画时长，节奏更符合中文阅读。
+  function _isCJK(ch) {
+    const c = ch.charCodeAt(0);
+    return (c >= 0x3400 && c <= 0x9FFF) ||  // 统一汉字 + 扩展 A
+           (c >= 0xF900 && c <= 0xFAFF) ||  // 兼容汉字
+           (c >= 0x3040 && c <= 0x30FF) ||  // 日文假名
+           (c >= 0xAC00 && c <= 0xD7AF) ||  // 韩文
+           (c >= 0x3000 && c <= 0x303F) ||  // CJK 标点
+           (c >= 0xFF00 && c <= 0xFFEF);    // 全宽
   }
-  function _hideDots() {
-    if (dotsEl) { dotsEl.remove(); dotsEl = null; }
-  }
-
-  // ── 渲染一个完整段落，淡入追加 ────────────────────────────────────
-  function _renderPara(md) {
-    if (!md.trim()) return;
-    _hideDots();
-    const div = document.createElement('div');
-    div.className = 'ai-para-in';
-    try { div.innerHTML = markedRender(md); } catch(e) { div.textContent = md; }
-    container.appendChild(div);
-    if (scrollTarget) scrollMessages(scrollTarget);
-    // 每段渲染完立即重新显示动画，等待下一段
-    _showDots();
-  }
-
-  // ── 扫描 buf，提取所有已完成段落 ──────────────────────────────────
-  function _drain() {
-    let i = 0;
-    while (i < buf.length) {
-      if (buf.slice(i, i + 3) === '```') { inFence = !inFence; i += 3; continue; }
-      if (!inFence && buf[i] === '\n' && buf[i + 1] === '\n') {
-        _renderPara(buf.slice(0, i));
-        buf = buf.slice(i + 2);
-        i = 0;
-        continue;
+  function _makeFlowRenderer(root) {
+    const base = window.smd.default_renderer(root);
+    base.add_text = function (data, text) {
+      const parent = data.nodes[data.index];
+      if (!parent || !text) return;
+      const frag = document.createDocumentFragment();
+      for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        const span = document.createElement('span');
+        span.className = _isCJK(ch) ? 'ai-ch ai-ch-cjk' : 'ai-ch';
+        span.textContent = ch;
+        frag.appendChild(span);
       }
-      i++;
-    }
+      parent.appendChild(frag);
+    };
+    return base;
   }
 
-  // ── push：追加 chunk，扫描段落 ─────────────────────────────────────
-  function push(text) {
-    if (!text) return;
-    fullText += text;
-    buf      += text;
-    _drain();
+  let smdParser = null;
+  let plainPre  = null;
+  if (typeof window !== 'undefined' && window.smd &&
+      typeof window.smd.default_renderer === 'function') {
+    try {
+      const renderer = _makeFlowRenderer(streamEl);
+      smdParser = window.smd.parser(renderer);
+    } catch (e) { smdParser = null; }
+  }
+  if (!smdParser) {
+    plainPre = document.createElement('pre');
+    plainPre.className = 'ai-stream-fallback';
+    plainPre.style.whiteSpace = 'pre-wrap';
+    streamEl.appendChild(plainPre);
   }
 
-  // ── flush：渲染剩余内容，移除动画 ─────────────────────────────────
-  function flush() {
-    if (buf.trim()) _renderPara(buf);
-    buf = '';
-    _hideDots();
-    // 最终用 marked 整体重渲，确保 LaTeX/表格/mermaid 正确
-    if (fullText) {
-      try { container.innerHTML = markedRender(fullText); } catch(e) {}
+  // ── 状态 ──────────────────────────────────────────────────────────
+  let fullText   = '';  // 收到的全部原始 markdown
+  let fedLen     = 0;   // 已喂给 smd/plainPre 的前缀长度
+  const pushSamples = []; // [{t, n}] 最近 RATE_WINDOW_MS 到达样本
+  let finished = false, rafId = null, lastTickTs = 0, fracChars = 0;
+
+  const RATE_WINDOW_MS = 1500;
+  const TARGET_BACKLOG = 24;
+  const MIN_RATE = 30, MAX_RATE = 240;
+
+  function _computeRate(backlog) {
+    const cutoff = performance.now() - RATE_WINDOW_MS;
+    while (pushSamples.length && pushSamples[0].t < cutoff) pushSamples.shift();
+    let chars = 0;
+    for (const s of pushSamples) chars += s.n;
+    const inputRate = chars / (RATE_WINDOW_MS / 1000);
+    let target;
+    if (backlog < 8) {
+      target = MIN_RATE;
+    } else if (backlog <= 120) {
+      const bias = (backlog - TARGET_BACKLOG) / TARGET_BACKLOG;
+      target = (inputRate || MIN_RATE) * (1 + 0.25 * bias);
+    } else {
+      target = Math.max(inputRate * 1.35, backlog / 0.8);
     }
+    if (!isFinite(target) || target <= 0) target = MIN_RATE;
+    return Math.max(MIN_RATE, Math.min(MAX_RATE, target));
+  }
+
+  function _feedChars(n) {
+    if (n <= 0) return;
+    const target = Math.min(fedLen + n, fullText.length);
+    if (target === fedLen) return;
+    const chunk = fullText.slice(fedLen, target);
+    if (smdParser) {
+      try { window.smd.parser_write(smdParser, chunk); }
+      catch (e) {
+        // smd 解析异常：降级到 <pre> 追加剩余内容
+        if (!plainPre) {
+          plainPre = document.createElement('pre');
+          plainPre.className = 'ai-stream-fallback';
+          plainPre.style.whiteSpace = 'pre-wrap';
+          streamEl.appendChild(plainPre);
+        }
+        plainPre.textContent += chunk;
+        smdParser = null;
+      }
+    } else if (plainPre) {
+      plainPre.textContent += chunk;
+    }
+    fedLen = target;
+  }
+
+  function _tick(now) {
+    if (!lastTickTs) lastTickTs = now;
+    const dt = Math.min(0.1, (now - lastTickTs) / 1000);
+    lastTickTs = now;
+
+    const backlog = fullText.length - fedLen;
+    let rate;
+    if (finished) {
+      rate = Math.max(MAX_RATE, backlog / 1.0);
+    } else {
+      rate = _computeRate(backlog);
+    }
+    fracChars += rate * dt;
+    const toFeed = Math.floor(fracChars);
+    if (toFeed > 0) {
+      fracChars -= toFeed;
+      _feedChars(toFeed);
+    }
+
+    if (scrollTarget) scrollMessages(scrollTarget);
+
+    if (finished && fedLen >= fullText.length) {
+      _finalize();
+      return;
+    }
+    rafId = requestAnimationFrame(_tick);
+  }
+
+  function _finalize() {
+    rafId = null;
+    // 把剩余字符喂完
+    if (fedLen < fullText.length) _feedChars(fullText.length - fedLen);
+    // 关闭 smd
+    if (smdParser) {
+      try { window.smd.parser_end(smdParser); } catch (e) {}
+    }
+    // 切换到 final 状态（CSS 不再对新块做入场动画）
+    container.classList.remove('ai-stream-live');
+    container.classList.add('ai-stream-final');
+    // 整体用 marked 重渲一次：LaTeX (KaTeX) / 表格 / 任务列表 / mermaid code block
+    // 等 smd 流式阶段无法正确处理的元素，在这一步得到最终形态。
+    try { container.innerHTML = markedRender(fullText); }
+    catch (e) { /* 保留 smd 已渲染的结果 */ }
     renderMermaidBlocks(container).catch(() => {});
     if (scrollTarget) scrollMessages(scrollTarget);
   }
 
-  _showDots();  // 一开始就显示动画
+  function _start() {
+    if (rafId == null && !finished) {
+      lastTickTs = 0;
+      rafId = requestAnimationFrame(_tick);
+    }
+  }
+
+  function push(text) {
+    if (!text) return;
+    fullText += text;
+    pushSamples.push({ t: performance.now(), n: text.length });
+    _start();
+  }
+
+  function flush() {
+    finished = true;
+    if (rafId == null) _finalize();
+  }
+
   return { push, flush };
 }
 
@@ -739,8 +869,8 @@ function sendAIMessage(key) {
               try {
                 const obj = JSON.parse(data);
                 if (obj.truncated) truncated = true;
-                if (obj.content) { if (!contentRenderer) contentRenderer = makeStreamingRenderer(contentWrap, null, messages); contentRenderer.push(obj.content); fullRawText += obj.content; }
-                if (obj.reasoning) { if (!reasoningRenderer) reasoningRenderer = makeStreamingRenderer(thinkingBody, null, messages); reasoningRenderer.push(obj.reasoning); fullReasoning += obj.reasoning; }
+                if (obj.content) { if (!contentRenderer) contentRenderer = makeStreamingRenderer(contentWrap, messages); contentRenderer.push(obj.content); fullRawText += obj.content; }
+                if (obj.reasoning) { if (!reasoningRenderer) reasoningRenderer = makeStreamingRenderer(thinkingBody, messages); reasoningRenderer.push(obj.reasoning); fullReasoning += obj.reasoning; }
               } catch(e) {}
             }
           }
@@ -775,7 +905,7 @@ function sendAIMessage(key) {
                 hasReasoning = true;
                 thinkingWrap.style.display = '';
                 thinkingWrap.classList.add('ai-thinking-fadein');
-                reasoningRenderer = makeStreamingRenderer(thinkingBody, null, messages);
+                reasoningRenderer = makeStreamingRenderer(thinkingBody, messages);
               }
               reasoningRenderer.push(obj.reasoning);
               fullReasoning += obj.reasoning;
@@ -794,7 +924,7 @@ function sendAIMessage(key) {
               }
               // Lazily create streaming renderer on first content chunk
               if (!contentRenderer) {
-                contentRenderer = makeStreamingRenderer(contentWrap, null, messages);
+                contentRenderer = makeStreamingRenderer(contentWrap, messages);
               }
               contentRenderer.push(obj.content);
               fullRawText += obj.content;

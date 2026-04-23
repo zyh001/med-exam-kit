@@ -2069,10 +2069,20 @@ function _slideQ(dir, buildFn) {
   ghostStage.classList.add(exitCls);
   newStage.classList.add(enterCls);
 
+  // Issue 4（滑动偶尔卡顿）：动画期间给两个 stage 加上 CSS containment，
+  // 使浏览器把 layout / paint 范围限制在 stage 内部。新题图片加载、解析面板
+  // 延迟渲染等都不会触发整个滚动容器重排，滑动帧率更稳定。
+  // 动画结束后清除，避免影响后续正常排版。
+  newStage.style.contain   = 'layout paint';
+  newStage.style.willChange = 'transform';
+  ghostStage.style.contain = 'layout paint';
+
   const DUR = 230;
   _slideCleanTimer = setTimeout(() => {
     ghostStage.remove();
     newStage.classList.remove(enterCls);
+    newStage.style.contain    = '';
+    newStage.style.willChange = '';
     _slideCleanTimer = null;
   }, DUR);
 }
@@ -2292,6 +2302,17 @@ function _fillQ(wrap, q, isExam, isPractice) {
   }
 
   // Explanation
+  //
+  // Session K 回滚 Session D 的延迟逻辑：之前为了"让滑入动画的第一帧不被拖慢"
+  // 把 buildExplain 用 double-RAF 延后，先放一个 max-height:0 的空 placeholder，
+  // 滑动完成后再替换成真实面板。这导致了每次滑到已揭示答案的题时页面
+  // 在动画结束后"排版稍微变一下"—— placeholder 零高度 → 真实面板完整高度。
+  //
+  // 而且练习模式的 swipe 其实已经通过 _buildAdjStage 在 touchmove 阶段把相邻题
+  // 完整预渲染了（见 L6485 附近）；_fillQ 本身并不在滑动动画的关键帧路径上。
+  // 所以同步调用 buildExplain 既消除了 layout shift，也不会引入 swipe 卡顿。
+  // _slideQ 里的 `contain: layout paint` 仍保留，继续隔离题干内图片加载等
+  // 引起的局部重排。
   if (isPractice && isRevealed) {
     wrap.appendChild(buildExplain(q, curSel));
   } else if (isPractice) {
@@ -3217,42 +3238,72 @@ document.addEventListener('click', e => {
 
 // ── Submit ──────────────────────────────────
 async function submitExam() {
-  clearInterval(S.timerInterval);
-  S.timerInterval = null;
-  // 关闭暂停遮罩并隐藏暂停按钮，避免交卷后残留
-  const pauseOverlay = document.getElementById('pause-overlay');
-  if (pauseOverlay) pauseOverlay.style.display = 'none';
-  document.body.classList.remove('exam-paused');
-  S.examPaused = false;
-  document.removeEventListener('keydown', _pauseEscHandler);
-  // 清理计时器长按状态
-  const timerEl2 = document.getElementById('quiz-timer');
-  if (timerEl2) timerEl2.classList.remove('exam-pausable');
-  clearExamSession();   // 正常交卷，清除存档
-  S.examSubmitted = true; // 防止任何路径重新保存
-  const origMode = S.mode; // 保存原始模式用于 calculateResults
-  S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
-  // 在 await reveal 之前记录交卷时间，防止 reveal 异步耗时导致 timeSec 偏大
-  // 用 serverNow() 与 S.examStart 保持同一时钟（都是服务端视角的 ms），
-  // 否则会被本地/服务端时差污染出几秒到几十秒的误差
-  const submitAt = serverNow();
+  // 重入保护：定时自动交卷 + 用户手动点击提交 + 浏览器 beforeunload 等
+  // 多条路径可能同时触发 submitExam。如果不锁，两次 reveal 竞争、第二次拿到
+  // 404 → 全部题目 q.answer 为空 → calculateResults 把所有题判错 → 0 分。
+  if (S._submittingExam) return;
+  S._submittingExam = true;
 
-  // sealed 模式：从服务端获取答案后再评分
-  if (S.examId) {
-    try {
-      const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(S.examId) + '&' + bankQS());
-      if (res.ok) {
-        const { answers } = await res.json();
-        // 将答案填回题目
-        S.questions.forEach(q => {
-          const a = answers[q.fingerprint + ':' + q.si];
-          if (a) { q.answer = a.answer; q.discuss = a.discuss; }
-        });
-        S.examId = null;
-      } else {
-        // 离线或服务端异常：提示稍后获取
+  try {
+    clearInterval(S.timerInterval);
+    S.timerInterval = null;
+    // 关闭暂停遮罩并隐藏暂停按钮，避免交卷后残留
+    const pauseOverlay = document.getElementById('pause-overlay');
+    if (pauseOverlay) pauseOverlay.style.display = 'none';
+    document.body.classList.remove('exam-paused');
+    S.examPaused = false;
+    document.removeEventListener('keydown', _pauseEscHandler);
+    // 清理计时器长按状态
+    const timerEl2 = document.getElementById('quiz-timer');
+    if (timerEl2) timerEl2.classList.remove('exam-pausable');
+    clearExamSession();   // 正常交卷，清除存档
+    S.examSubmitted = true; // 防止任何路径重新保存
+    const origMode = S.mode; // 保存原始模式用于 calculateResults
+    S.mode = 'exam_done'; // 防止 beforeunload/setInterval 重新保存
+    // 在 await reveal 之前记录交卷时间，防止 reveal 异步耗时导致 timeSec 偏大
+    // 用 serverNow() 与 S.examStart 保持同一时钟（都是服务端视角的 ms），
+    // 否则会被本地/服务端时差污染出几秒到几十秒的误差
+    const submitAt = serverNow();
+
+    // sealed 模式：从服务端获取答案后再评分
+    if (S.examId) {
+      // 最多重试 3 次，指数退避；服务端的 180s 宽限窗口保证同一 eid 可以幂等领取。
+      // 只有 3 次全部失败才走"稍后联网补取"的降级分支。
+      let revealed = false;
+      let lastErr = null;
+      for (let attempt = 0; attempt < 3 && !revealed; attempt++) {
+        if (attempt > 0) {
+          await new Promise(r => setTimeout(r, 400 * attempt));
+        }
+        try {
+          const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(S.examId) + '&' + bankQS());
+          if (res.ok) {
+            const data = await res.json();
+            const answers = data && data.answers;
+            if (answers && typeof answers === 'object') {
+              // 将答案填回题目
+              S.questions.forEach(q => {
+                const a = answers[q.fingerprint + ':' + q.si];
+                if (a) { q.answer = a.answer; q.discuss = a.discuss; }
+              });
+              S.examId = null;
+              revealed = true;
+              break;
+            }
+          } else if (res.status === 404) {
+            // 会话确实不存在（过期或从未创建）——再试也无用
+            lastErr = new Error('session-not-found');
+            break;
+          }
+        } catch (e) {
+          lastErr = e;
+          // 网络异常 → 下一轮重试
+        }
+      }
+
+      if (!revealed) {
+        // 所有重试都失败：降级到"联网后自动补取"
         toast('⚠ 无法获取答案，请联网后重新打开应用自动补取', true);
-        // 存储 examId 到 localStorage，供后续联网获取
         try {
           const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
           pending.push({
@@ -3264,25 +3315,15 @@ async function submitExam() {
           localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
         } catch(e) {}
       }
-    } catch(e) {
-      toast('⚠ 网络异常，答案待联网后自动补取', true);
-      try {
-        const pending = JSON.parse(localStorage.getItem('pending_exam_reveals') || '[]');
-        pending.push({
-          examId:  S.examId,
-          bankID:  S.bankID,
-          ts:      Date.now(),
-          fps:     S.questions.map(q => q.fingerprint + ':' + q.si),
-        });
-        localStorage.setItem('pending_exam_reveals', JSON.stringify(pending.slice(-20)));
-      } catch(e2) {}
     }
-  }
 
-  // 再次确保清除（防止 await 期间被重新保存）
-  clearExamSession();
-  calculateResults(origMode, submitAt);
-  showScreen('s-results');
+    // 再次确保清除（防止 await 期间被重新保存）
+    clearExamSession();
+    calculateResults(origMode, submitAt);
+    showScreen('s-results');
+  } finally {
+    S._submittingExam = false;
+  }
 }
 function retryQuiz() {
   // 如果题目还在内存，直接重置状态重新做一遍
@@ -3290,6 +3331,7 @@ function retryQuiz() {
     // 恢复原始模式（submitExam 将 mode 设为 'exam_done'）
     if (S.mode === 'exam_done' && S.results) S.mode = S.results.mode || 'exam';
     S.examSubmitted = false; // 重置提交标记
+    S._submittingExam = false; // 重置重入锁（防御性：正常流程 finally 已清，但保险起见再 reset）
     S.examId = null;         // 清除密封 ID，重试不再走 reveal 流程（答案已填回）
     S.cur = 0;
     S.ans = {};
@@ -6573,7 +6615,7 @@ function _isTouchInHScrollable(el) {
             savePracticeSession && savePracticeSession();
           }, SNAP_DUR);
         } else {
-          // 考试模式：A3/A4/案例分析不允许回退的组，左滑前自动提交当前题答案
+          // 考试模式：A3/A4/案例分析不允许回退的组，左滑前需确保已作答
           s.style.transform=''; _removeAdjStage();
           if(S.mode==='exam'){
             const gIdx = getGroupIdxForQ(S.cur);
@@ -6581,22 +6623,23 @@ function _isTouchInHScrollable(el) {
             if(grp && !grp.allowBack){
               const sel = S.ans[S.cur];
               const isMulti = isMultiQ(S.questions[S.cur]);
-              if(isMulti){
-                // 多选：有选项就自动提交（相当于点了「确认选择」）
-                if(sel instanceof Set && sel.size > 0){
-                  // 标记已答，更新最远到达，保存
-                  const dot = document.querySelector(`.q-dot[data-idx="${S.cur}"]`);
-                  if(dot) dot.classList.add('answered');
-                  S.caseMaxReached[gIdx] = Math.max(S.caseMaxReached[gIdx] ?? (S.cur+1), S.cur+1);
-                  saveExamSession();
-                }
-              } else {
-                // 单选：已选的话记录最远到达，保存
-                if(sel !== undefined && sel !== null && sel !== ''){
-                  S.caseMaxReached[gIdx] = Math.max(S.caseMaxReached[gIdx] ?? (S.cur+1), S.cur+1);
-                  saveExamSession();
-                }
+              const answered = isMulti
+                ? (sel instanceof Set && sel.size > 0)
+                : (sel !== undefined && sel !== null && sel !== '');
+              // Issue 5：未作答不允许滑动到下一题（与底部「下一题」按钮行为一致）
+              if(!answered){
+                toast('请先回答本题再前进');
+                _cancelSwipe(dx);
+                vibrate([6,30,6]);
+                return;
               }
+              // 多选已选：自动标记 answered dot（等同于点了「确认选择」）
+              if(isMulti){
+                const dot = document.querySelector(`.q-dot[data-idx="${S.cur}"]`);
+                if(dot) dot.classList.add('answered');
+              }
+              S.caseMaxReached[gIdx] = Math.max(S.caseMaxReached[gIdx] ?? (S.cur+1), S.cur+1);
+              saveExamSession();
             }
             S.cur++; renderQ('forward'); updateGridDot();
           } else {
