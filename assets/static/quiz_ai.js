@@ -312,199 +312,137 @@ function autoResizeTextarea(el) {
   el.style.overflowY = el.scrollHeight > maxH ? 'auto' : 'hidden';
 }
 
-// ── Streaming renderer — adaptive-buffer with per-char water-flow (Chinese-optimized) ──
+// ── Streaming renderer — adaptive-buffer feeding smd, final pass through marked ──
 //
-// 设计：
-//   · 不使用光标，改用尾部三点 + 每个字符独立 CSS 淡入/上浮动画（"水流"效果）
-//   · 自适应缓冲：跟踪近 1.5s token 到达速率，输出速率随 backlog 动态调整
-//     - backlog < 8  字：以下限速率 (30 字/s) 走，避免抖动
+// 设计要点：
+//   · 流式阶段用 **smd (streaming-markdown)** 直接渲染到 DOM：用户可以边流出边看到
+//     已渲染的 markdown（加粗、标题、列表、代码块、链接都立即成形），不再看到原始
+//     `**xxx**` 这种 markdown 语法字面量。
+//   · 保留自适应缓冲：跟踪近 1.5s 的 token 到达速率，按输出速率把 fullText 喂给 smd
+//     的 parser，而不是把每个 token chunk 直接倾倒进 DOM。这样快写慢出 / 慢写慢出，
+//     不会因模型忽快忽慢导致视觉跳跃。
+//     - backlog < 8  字：下限 30 字/s
 //     - backlog 8~120:  匹配输入速率，并轻微向 24 字目标 backlog 靠拢
-//     - backlog > 120: 以输入速率 × 1.35（或不长于 0.8s 耗尽）追赶
-//     - 输出速率全程 clamp 到 [30, 240] 字/s
-//   · 段落到达 (\n\n 且不在代码块内) → 将稳定段落 markdown 渲染进 stableEl，
-//     并清空 liveTail 中对应部分；正在流出的尾部仍以原生字符渲染
-//   · 中文 CJK 字符使用更长的动画时长，配合 Apple 风格 easing，视觉上如同水滴上浮
-//   · flush() → 以 ~1s 追赶剩余字符，然后整体 markdown 重渲（修正 LaTeX/表格/mermaid）
+//     - backlog > 120: 输入速率 × 1.35（或 0.8s 内耗尽）追赶
+//     - 全程 clamp 到 [30, 240] 字/s
+//   · 新块级元素 (p/li/h*/pre/blockquote/table) 由 CSS 自动淡入上浮（aiBlockIn），
+//     保留"丝滑"视觉但不需要逐字符 DOM 操作。
+//   · flush() → 把剩下的字符快速喂完，smd parser_end 收尾，然后用 markedRender 对
+//     fullText 整体重渲：这一步才会触发 LaTeX (KaTeX) 与 mermaid 的正确渲染，smd
+//     在流式阶段只会把它们显示为占位元素 (<equation-inline> 等)。
+//   · 尾部保留 .ai-typing-dots 三点动画作为"仍在生成"提示。
+//   · smd 未加载时自动降级：按原生文本追加到 <pre>，仍保证不丢内容。
 
 function makeStreamingRenderer(container, cursor, scrollTarget) {
-  // DOM: container
-  //        ├─ stableEl   (已提交的段落 — 完整 markdown)
-  //        └─ liveWrap   (流式尾部)
-  //             ├─ liveTail  (每字符一个 span，带水流动画)
-  //             └─ dotsEl    (三点动画，inline 紧贴文本末尾)
+  // DOM 布局：
+  //   container  (.ai-stream-live 在流式阶段；flush 后换成 .ai-stream-final)
+  //     ├─ streamEl  (.ai-stream-body)  → smd 向此节点直接 append
+  //     └─ dotsEl    (.ai-typing-dots)  → 流式期间显示，flush 时移除
   container.innerHTML = '';
-  const stableEl = document.createElement('div');
-  stableEl.className = 'ai-stream-stable';
-  const liveWrap = document.createElement('div');
-  liveWrap.className = 'ai-stream-live';
-  const liveTail = document.createElement('span');
-  liveTail.className = 'ai-live-tail';
+  container.classList.add('ai-stream-live');
+  container.classList.remove('ai-stream-final');
+
+  const streamEl = document.createElement('div');
+  streamEl.className = 'ai-stream-body';
+  container.appendChild(streamEl);
+
   const dotsEl = document.createElement('span');
   dotsEl.className = 'ai-typing-dots';
   dotsEl.innerHTML = '<span></span><span></span><span></span>';
-  liveWrap.appendChild(liveTail);
-  liveWrap.appendChild(dotsEl);
-  container.appendChild(stableEl);
-  container.appendChild(liveWrap);
+  container.appendChild(dotsEl);
+
+  // 构建 smd 解析器；若 smd 未加载（首次调用 AI 时可能还在下载），降级为 <pre>
+  let smdParser = null;
+  let plainPre  = null;
+  if (typeof window !== 'undefined' && window.smd &&
+      typeof window.smd.default_renderer === 'function') {
+    try {
+      const renderer = window.smd.default_renderer(streamEl);
+      smdParser = window.smd.parser(renderer);
+    } catch (e) { smdParser = null; }
+  }
+  if (!smdParser) {
+    plainPre = document.createElement('pre');
+    plainPre.className = 'ai-stream-fallback';
+    plainPre.style.whiteSpace = 'pre-wrap';
+    streamEl.appendChild(plainPre);
+  }
 
   // ── 状态 ──────────────────────────────────────────────────────────
-  let fullText     = '';      // 已收到的全部文本
-  let committedLen = 0;       // 已 markdown 渲染进 stableEl 的前缀长度
-  let paintedLen   = 0;       // 已绘制到 DOM 的前缀长度（可能还在 liveTail 里）
-  let scannedTo    = 0;       // fence 扫描器当前位置
-  let inFence      = false;   // 扫描器状态：是否在代码块内
-  let lastSafeCommit = 0;     // 最新可安全 commit 的位置（\n\n 且不在 fence 中）
-  const pushSamples = [];     // [{t, n}] — 最近 RATE_WINDOW_MS 内到达样本
-  let finished = false;
-  let rafId     = null;
-  let lastTickTs = 0;
-  let fracChars  = 0;         // 浮点残余字符，跨帧累加
+  let fullText   = '';  // 收到的全部原始 markdown
+  let fedLen     = 0;   // 已喂给 smd/plainPre 的前缀长度
+  const pushSamples = []; // [{t, n}] 最近 RATE_WINDOW_MS 到达样本
+  let finished = false, rafId = null, lastTickTs = 0, fracChars = 0;
 
-  // ── 参数 ──────────────────────────────────────────────────────────
   const RATE_WINDOW_MS = 1500;
-  const TARGET_BACKLOG = 24;   // 字符：稳态目标 backlog
-  const MIN_RATE       = 30;   // 字符/秒：下限
-  const MAX_RATE       = 240;  // 字符/秒：上限
-  const MAX_LIVE_CHARS = 600;  // 若无 \n\n，超过该长度强制在标点处 commit
-
-  // ── 推进 fence 扫描器，并记录最新可 commit 点 ─────────────────────
-  function _advanceScanner(upTo) {
-    while (scannedTo < upTo) {
-      // 先判断是否在此位置之前进入/离开代码块（``` 行首）
-      if (fullText[scannedTo] === '`' &&
-          fullText[scannedTo+1] === '`' &&
-          fullText[scannedTo+2] === '`' &&
-          (scannedTo === 0 || fullText[scannedTo-1] === '\n')) {
-        inFence = !inFence;
-        scannedTo += 3;
-        continue;
-      }
-      // 在代码块外检测 \n\n（第一个 \n 在 scannedTo-1，第二个在 scannedTo）
-      if (!inFence && scannedTo >= 1 &&
-          fullText[scannedTo-1] === '\n' && fullText[scannedTo] === '\n') {
-        lastSafeCommit = scannedTo + 1; // 将跨过两个 \n
-      }
-      scannedTo++;
-    }
-  }
-
-  // ── 强制 commit 点：在合理标点/空白处切分（避免 live 尾部无限长） ─
-  function _forceCommitBoundary() {
-    if (inFence) return committedLen;
-    for (let i = paintedLen - 1; i > committedLen + 50; i--) {
-      const c = fullText[i];
-      if (c === '\n' || c === ' ' ||
-          c === '。' || c === '！' || c === '？' ||
-          c === '，' || c === '；' || c === '：') {
-        return i + 1;
-      }
-    }
-    return committedLen;
-  }
-
-  // ── 判断是否 CJK（含日韩汉字、全宽标点等） ───────────────────────
-  function _isCJK(ch) {
-    const c = ch.charCodeAt(0);
-    return (c >= 0x3400 && c <= 0x9FFF)  ||  // 统一汉字 + 扩展 A
-           (c >= 0xF900 && c <= 0xFAFF)  ||  // 兼容汉字
-           (c >= 0x3040 && c <= 0x30FF)  ||  // 日文假名
-           (c >= 0xAC00 && c <= 0xD7AF)  ||  // 韩文
-           (c >= 0x3000 && c <= 0x303F)  ||  // CJK 标点
-           (c >= 0xFF00 && c <= 0xFFEF);     // 全宽
-  }
-
-  function _appendChar(parent, ch, animate) {
-    if (ch === '\n') { parent.appendChild(document.createElement('br')); return; }
-    const span = document.createElement('span');
-    if (animate) span.className = _isCJK(ch) ? 'ai-ch ai-ch-cjk' : 'ai-ch';
-    span.textContent = ch;
-    parent.appendChild(span);
-  }
-
-  function _paintChars(n) {
-    if (n <= 0) return;
-    const target = Math.min(paintedLen + n, fullText.length);
-    if (target === paintedLen) return;
-    const frag = document.createDocumentFragment();
-    for (let i = paintedLen; i < target; i++) {
-      _appendChar(frag, fullText[i], true);
-    }
-    liveTail.appendChild(frag);
-    paintedLen = target;
-  }
-
-  function _commit(upTo) {
-    if (upTo <= committedLen) return;
-    committedLen = upTo;
-    // 更新 stableEl 的 markdown 渲染
-    try {
-      stableEl.innerHTML = markedRender(fullText.slice(0, committedLen));
-    } catch (e) {
-      stableEl.textContent = fullText.slice(0, committedLen);
-    }
-    // 清空 liveTail，重建 [committedLen..paintedLen] 那部分（这些字符之前已动画完成，无需再动画）
-    liveTail.innerHTML = '';
-    if (paintedLen > committedLen) {
-      const frag = document.createDocumentFragment();
-      for (let i = committedLen; i < paintedLen; i++) _appendChar(frag, fullText[i], false);
-      liveTail.appendChild(frag);
-    }
-  }
+  const TARGET_BACKLOG = 24;
+  const MIN_RATE = 30, MAX_RATE = 240;
 
   function _computeRate(backlog) {
-    // 清理过期样本
     const cutoff = performance.now() - RATE_WINDOW_MS;
     while (pushSamples.length && pushSamples[0].t < cutoff) pushSamples.shift();
     let chars = 0;
     for (const s of pushSamples) chars += s.n;
-    const inputRate = chars / (RATE_WINDOW_MS / 1000); // 字符/秒
+    const inputRate = chars / (RATE_WINDOW_MS / 1000);
     let target;
     if (backlog < 8) {
       target = MIN_RATE;
     } else if (backlog <= 120) {
-      // 匹配输入速率，并向 TARGET_BACKLOG 轻微调节
-      const bias = (backlog - TARGET_BACKLOG) / TARGET_BACKLOG; // -1 .. +4
+      const bias = (backlog - TARGET_BACKLOG) / TARGET_BACKLOG;
       target = (inputRate || MIN_RATE) * (1 + 0.25 * bias);
     } else {
-      // 追赶：至少按 1.35× 输入速率，且保证 0.8s 内耗尽
       target = Math.max(inputRate * 1.35, backlog / 0.8);
     }
     if (!isFinite(target) || target <= 0) target = MIN_RATE;
     return Math.max(MIN_RATE, Math.min(MAX_RATE, target));
   }
 
+  function _feedChars(n) {
+    if (n <= 0) return;
+    const target = Math.min(fedLen + n, fullText.length);
+    if (target === fedLen) return;
+    const chunk = fullText.slice(fedLen, target);
+    if (smdParser) {
+      try { window.smd.parser_write(smdParser, chunk); }
+      catch (e) {
+        // smd 解析异常：降级到 <pre> 追加剩余内容
+        if (!plainPre) {
+          plainPre = document.createElement('pre');
+          plainPre.className = 'ai-stream-fallback';
+          plainPre.style.whiteSpace = 'pre-wrap';
+          streamEl.appendChild(plainPre);
+        }
+        plainPre.textContent += chunk;
+        smdParser = null;
+      }
+    } else if (plainPre) {
+      plainPre.textContent += chunk;
+    }
+    fedLen = target;
+  }
+
   function _tick(now) {
     if (!lastTickTs) lastTickTs = now;
-    const dt = Math.min(0.1, (now - lastTickTs) / 1000); // 最大 100ms dt，防 tab 切换后爆发
+    const dt = Math.min(0.1, (now - lastTickTs) / 1000);
     lastTickTs = now;
 
-    const backlog = fullText.length - paintedLen;
+    const backlog = fullText.length - fedLen;
     let rate;
     if (finished) {
-      // flush 阶段：1s 内耗尽，至少 MAX_RATE
       rate = Math.max(MAX_RATE, backlog / 1.0);
     } else {
       rate = _computeRate(backlog);
     }
     fracChars += rate * dt;
-    const toPaint = Math.floor(fracChars);
-    if (toPaint > 0) {
-      fracChars -= toPaint;
-      _paintChars(toPaint);
-    }
-
-    // 尝试 commit
-    _advanceScanner(paintedLen);
-    if (lastSafeCommit > committedLen) {
-      _commit(lastSafeCommit);
-    } else if (paintedLen - committedLen > MAX_LIVE_CHARS) {
-      const safe = _forceCommitBoundary();
-      if (safe > committedLen) _commit(safe);
+    const toFeed = Math.floor(fracChars);
+    if (toFeed > 0) {
+      fracChars -= toFeed;
+      _feedChars(toFeed);
     }
 
     if (scrollTarget) scrollMessages(scrollTarget);
 
-    if (finished && paintedLen >= fullText.length) {
+    if (finished && fedLen >= fullText.length) {
       _finalize();
       return;
     }
@@ -513,9 +451,19 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
 
   function _finalize() {
     rafId = null;
-    if (paintedLen < fullText.length) _paintChars(fullText.length - paintedLen);
-    // 整体 markdown 重渲：LaTeX / 表格 / mermaid 需要完整语法树
-    try { container.innerHTML = markedRender(fullText); } catch (e) {}
+    // 把剩余字符喂完
+    if (fedLen < fullText.length) _feedChars(fullText.length - fedLen);
+    // 关闭 smd
+    if (smdParser) {
+      try { window.smd.parser_end(smdParser); } catch (e) {}
+    }
+    // 切换到 final 状态（CSS 不再对新块做入场动画）
+    container.classList.remove('ai-stream-live');
+    container.classList.add('ai-stream-final');
+    // 整体用 marked 重渲一次：LaTeX (KaTeX) / 表格 / 任务列表 / mermaid code block
+    // 等 smd 流式阶段无法正确处理的元素，在这一步得到最终形态。
+    try { container.innerHTML = markedRender(fullText); }
+    catch (e) { /* 保留 smd 已渲染的结果 */ }
     renderMermaidBlocks(container).catch(() => {});
     if (scrollTarget) scrollMessages(scrollTarget);
   }
@@ -536,11 +484,7 @@ function makeStreamingRenderer(container, cursor, scrollTarget) {
 
   function flush() {
     finished = true;
-    if (rafId == null) {
-      // 未启动过（空响应 / 极短）：立即 finalize
-      _finalize();
-    }
-    // 否则 _tick 会在 paintedLen 追上 fullText.length 时调用 _finalize
+    if (rafId == null) _finalize();
   }
 
   return { push, flush };
