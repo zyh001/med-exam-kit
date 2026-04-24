@@ -161,27 +161,36 @@ def _get_lan_ip() -> str:
 
 
 def _get_real_ip() -> str:
-    """优先读取反代传递的真实客户端 IP（仅当直连源地址可信时）。
+    """返回真实客户端 IP，防御 header 伪造。
     
-    安全加固（Session J 同步）：只有当 TCP 直连地址是 loopback（127.x / ::1）
-    时才信任 X-Real-IP / X-Forwarded-For header。否则直接返回 remote_addr，
-    防止任意客户端通过伪造 header 绕过速率限制 / IP 封禁 / 访问码暴破检测。
+    ProxyFix 已经把 request.remote_addr 改写为 X-Forwarded-For 的值，
+    所以不能用 request.remote_addr 来判断是否可信代理 —— 必须用
+    werkzeug 保留的**原始** REMOTE_ADDR（未被 ProxyFix 修改的直连地址）。
+    
+    安全策略：只有当原始直连地址是 loopback (127.x / ::1) 时，
+    才信任 ProxyFix 处理后的 IP（来自 X-Real-IP / X-Forwarded-For）。
+    否则直接返回直连地址，防止任意客户端通过伪造 header 绕过
+    速率限制 / IP 封禁 / 访问码暴破检测。
     
     nginx 配置示例：
       proxy_set_header X-Real-IP       $remote_addr;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     """
-    direct = request.remote_addr or "unknown"
+    # 拿到 ProxyFix 保存的原始直连地址（未被 header 污染）
+    orig = request.environ.get("werkzeug.proxy_fix.orig", {})
+    orig_remote = orig.get("REMOTE_ADDR") or request.remote_addr or "unknown"
     
-    # 只有直连地址是 loopback 时才信任反代 header（单机 nginx 典型场景）
-    # 若需信任其他代理，管理员应在 nginx 层做 IP 白名单而非在这里扩展
-    if not (direct.startswith("127.") or direct == "::1"):
-        return direct
+    # 原始直连不是 loopback → 忽略所有 header，直接返回真实 TCP 源地址
+    if not (orig_remote.startswith("127.") or orig_remote == "::1"):
+        return orig_remote
     
-    # 可信代理：读 header
-    ip = (request.headers.get("X-Real-IP")
-          or request.headers.get("X-Forwarded-For", ""))
-    return ip.split(",")[0].strip() or direct
+    # 可信代理（loopback）转发：ProxyFix 已处理好，用 request.remote_addr
+    # 或显式读 X-Real-IP（nginx 单机反代的典型场景）
+    ip = request.headers.get("X-Real-IP", "").strip()
+    if ip:
+        return ip.split(",")[0].strip()
+    # ProxyFix 已把 X-Forwarded-For 写入 REMOTE_ADDR
+    return request.remote_addr or orig_remote
 
 
 def _get_user_id() -> str:
@@ -912,15 +921,17 @@ def api_exam_join():
 def _is_loopback() -> bool:
     """检查请求的**直连** TCP 源地址是否为 loopback (127.x / ::1)。
     
-    调试端点等敏感路径用此函数防御：只看 request.remote_addr（直连地址），
-    完全忽略任何 X-Real-IP / X-Forwarded-For header。防止在可信代理场景下
-    被 header 伪造绕过——调试端点只应被本机访问（SSH 隧道、反代 allow 
+    调试端点等敏感路径用此函数防御：只看**原始** REMOTE_ADDR
+    （werkzeug.proxy_fix.orig 保存的未被 header 修改的值），
+    完全忽略任何 X-Real-IP / X-Forwarded-For。防止在可信代理场景下
+    被 header 伪造绕过 —— 调试端点只应被本机访问（SSH 隧道、反代 allow 
     127.0.0.1 转发等），绝不应通过可信代理链暴露。
     
     同步 golang-version 的 isLoopbackRemote() 逻辑。
     """
-    direct = request.remote_addr or ""
-    return direct.startswith("127.") or direct == "::1"
+    orig = request.environ.get("werkzeug.proxy_fix.orig", {})
+    orig_remote = orig.get("REMOTE_ADDR") or request.remote_addr or ""
+    return orig_remote.startswith("127.") or orig_remote == "::1"
 
 @app.get("/api/debug/exam-sessions")
 def api_debug_exam_sessions():
