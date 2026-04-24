@@ -360,13 +360,14 @@ function makeStreamingRenderer(container, scrollTarget) {
   // 这样既保留了 smd 的实时 markdown 渲染（加粗/标题/列表立即成形），又拿回
   // Session A 那种水流逐字动画；CJK 字符得到更长的动画时长，节奏更符合中文阅读。
   function _isCJK(ch) {
-    const c = ch.charCodeAt(0);
+    const c = ch.codePointAt(0);
     return (c >= 0x3400 && c <= 0x9FFF) ||  // 统一汉字 + 扩展 A
            (c >= 0xF900 && c <= 0xFAFF) ||  // 兼容汉字
            (c >= 0x3040 && c <= 0x30FF) ||  // 日文假名
            (c >= 0xAC00 && c <= 0xD7AF) ||  // 韩文
            (c >= 0x3000 && c <= 0x303F) ||  // CJK 标点
-           (c >= 0xFF00 && c <= 0xFFEF);    // 全宽
+           (c >= 0xFF00 && c <= 0xFFEF) ||  // 全宽
+           (c >= 0x20000 && c <= 0x2FA1F);  // CJK 扩展 B~F + 兼容补充
   }
   function _makeFlowRenderer(root) {
     const base = window.smd.default_renderer(root);
@@ -374,8 +375,8 @@ function makeStreamingRenderer(container, scrollTarget) {
       const parent = data.nodes[data.index];
       if (!parent || !text) return;
       const frag = document.createDocumentFragment();
-      for (let i = 0; i < text.length; i++) {
-        const ch = text[i];
+      // for...of 按 Unicode 码点迭代，正确处理代理对（BMP 外字符）
+      for (const ch of text) {
         const span = document.createElement('span');
         span.className = _isCJK(ch) ? 'ai-ch ai-ch-cjk' : 'ai-ch';
         span.textContent = ch;

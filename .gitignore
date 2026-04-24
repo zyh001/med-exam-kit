@@ -26,3 +26,4 @@ med-exam-kit
 /med-exam-kit-*
 *.pyc
 __pycache__/
+*.egg-info/
