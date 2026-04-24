@@ -3290,9 +3290,10 @@ async function submitExam() {
               revealed = true;
               break;
             }
-          } else if (res.status === 404) {
-            // 会话确实不存在（过期或从未创建）——再试也无用
-            lastErr = new Error('session-not-found');
+          } else if (res.status === 404 || res.status === 410) {
+            // 404 = 会话不存在；410 = 宽限期已过
+            // 两种情况都是再试无用 —— 服务端会持续返回相同状态
+            lastErr = new Error(res.status === 410 ? 'reveal-window-expired' : 'session-not-found');
             break;
           }
         } catch (e) {
