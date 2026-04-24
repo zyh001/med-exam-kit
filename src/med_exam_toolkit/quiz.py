@@ -705,6 +705,9 @@ def api_exam_reveal():
     第一次调用时记录 revealed_at，之后 _REVEAL_GRACE_WINDOW 秒内
     再次调用返回同样的答案。这样手动交卷和定时自动交卷的竞态、响应中
     断导致的重试、前端 submitExam 被意外双触发等情况都不会丢答案。
+
+    宽限期过后拒绝 reveal，但不删除 session（让 /api/exam/time 仍可用）—
+    session 由创建时的 cleanup 逻辑统一清理。
     """
     eid = request.args.get("id", "")
     if not eid:
@@ -713,12 +716,12 @@ def api_exam_reveal():
     with _exam_lock:
         sess = _exam_sessions.get(eid)
         if sess is not None:
-            if sess.get("revealed_at", 0) == 0:
+            revealed_at = sess.get("revealed_at", 0)
+            if revealed_at == 0:
                 sess["revealed_at"] = now_s
-            elif now_s - sess["revealed_at"] > _REVEAL_GRACE_WINDOW:
-                # 宽限期已过，视同过期
-                del _exam_sessions[eid]
-                sess = None
+            elif now_s - revealed_at > _REVEAL_GRACE_WINDOW:
+                # 宽限期已过，拒绝领取（但不删除 session）
+                return jsonify({"error": "答案领取窗口已过期"}), 410
     if sess is None:
         return jsonify({"error": "考试会话已过期或不存在"}), 404
     return jsonify({"answers": sess["answers"]})
