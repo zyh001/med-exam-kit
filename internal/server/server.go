@@ -3,6 +3,7 @@ package server
 import (
 	"github.com/zyh001/med-exam-kit/internal/logger"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -182,6 +183,9 @@ type Server struct {
 	// 试卷分享
 	shareMu     sync.Mutex
 	shareTokens map[string]*shareConfig
+	// 分享码暴破防护：key="ip:token"
+	shareBruteMu sync.Mutex
+	shareBrute   map[string][]time.Time
 }
 
 type examAnswer struct {
@@ -212,9 +216,18 @@ type shareConfig struct {
 	Scoring        bool               `json:"scoring"`          // 是否启用计分
 	ScorePerMode   map[string]float64 `json:"score_per_mode"`   // 各题型每小题分值
 	MultiScoreMode string             `json:"multi_score_mode"` // strict|loose
+	SharePin       string             `json:"share_pin"`        // 6 位分享码（下发给接收方）
 	Ts             int64              `json:"ts"`
 	ExpiresAt      int64              `json:"expires_at"`
 }
+
+const (
+	sharePinLen      = 6
+	sharePinCharset  = "ABCDEFGHJKMNPQRTUVWXY346789"
+	shareCookieName  = "med_exam_share"
+	shareBruteWindow = 600 * time.Second
+	shareBruteMax    = 5
+)
 
 const (
 	rateLimit  = 120
@@ -253,6 +266,7 @@ func New(cfg Config) *Server {
 		imgProxyBuckets: map[string][]time.Time{},
 		aiChatBuckets:   map[string][]time.Time{},
 		scanBans:        map[string]time.Time{},
+		shareBrute:      map[string][]time.Time{},
 	}
 	// 初始化 Web Push
 	pushStores := map[string]*pushStore{}
@@ -499,8 +513,26 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		r.URL.Path == "/static/icon-192.png" ||
 		r.URL.Path == "/static/icon-512.png" ||
 		r.URL.Path == "/api/push/vapid-key"
-	if s.cfg.AccessCode != "" && !pwaPublic && !auth.IsAuthenticated(r, s.cfg.CookieSecret, s.cfg.AccessCode) {
-		if (r.URL.Path == "/" || r.URL.Path == "") && r.Method == http.MethodGet {
+
+	// 仅分享用户（有合法 share cookie、无主 auth）：
+	// 允许访问有限的路径白名单，其他一律 403
+	isShareUser := s.isShareUser(r)
+	if isShareUser {
+		if !isShareAllowedPath(r.URL.Path) {
+			jsonError(wrapped, "Forbidden", http.StatusForbidden)
+			return
+		}
+		// 放行：跳过主 auth 检查，但仍要校验 Session Token（下方会检）
+	}
+
+	if s.cfg.AccessCode != "" && !pwaPublic && !auth.IsAuthenticated(r, s.cfg.CookieSecret, s.cfg.AccessCode) && !isShareUser {
+		// 带 ?share= 的 GET / 放行：让前端 JS 弹出分享码/管理员登录框
+		// 哈希 #share= 不会到服务端，所以分享链接同时在 query 里带 token
+		hasShareQuery := (r.URL.Path == "/" || r.URL.Path == "") && r.Method == http.MethodGet &&
+			r.URL.Query().Get("share") != ""
+		if hasShareQuery {
+			// 放行至 index 渲染
+		} else if (r.URL.Path == "/" || r.URL.Path == "") && r.Method == http.MethodGet {
 			wrapped.Header().Set("Content-Type", "text/html; charset=utf-8")
 			var tok, svg string
 			if auth.NeedsCaptcha(ip) {
@@ -508,9 +540,14 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			}
 			io.WriteString(wrapped, auth.RenderPINPage("医考练习", "", s.cfg.PinLen, tok, svg))
 			return
+		} else if r.URL.Path == "/api/exam/share/auth" ||
+			r.URL.Path == "/api/exam/share/status" ||
+			r.URL.Path == "/api/auth" {
+			// 未登录时可访问：分享码输入、状态查询、JSON 主访问码登录
+		} else {
+			jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
+			return
 		}
-		jsonError(wrapped, "Unauthorized", http.StatusUnauthorized)
-		return
 	}
 	// /api/debug 只需访问码，无需 Session Token（调试用，不含敏感操作）
 	// /api/img/proxy 由 <img> 标签直接请求，无法携带自定义 Header，豁免 Token 校验
@@ -629,6 +666,9 @@ func (s *Server) registerRoutes() {
 	m.HandleFunc("GET /api/exam/reveal", s.handleExamReveal)
 	m.HandleFunc("GET /api/exam/time", s.handleExamTime)
 	m.HandleFunc("POST /api/exam/share", s.handleExamShare)
+	m.HandleFunc("POST /api/exam/share/auth",   s.handleExamShareAuth)
+	m.HandleFunc("GET /api/exam/share/status",  s.handleExamShareStatus)
+	m.HandleFunc("POST /api/auth", s.handleAPIAuth)
 	m.HandleFunc("GET /api/exam/join", s.handleExamJoin)
 	// Favorites sync (PG mode only; SQLite falls back gracefully)
 	m.HandleFunc("POST /api/favorites/sync", s.handleFavSync)
@@ -1816,6 +1856,7 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 	tok := make([]byte, 16)
 	rand.Read(tok)
 	token := hex.EncodeToString(tok)
+	sharePin := genSharePin()
 
 	now := time.Now().Unix()
 	expiresAt := now + int64(7*24*3600)
@@ -1829,6 +1870,7 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 		Scoring:        body.Scoring,
 		ScorePerMode:   body.ScorePerMode,
 		MultiScoreMode: body.MultiScoreMode,
+		SharePin:       sharePin,
 		Ts:             now,
 		ExpiresAt:      expiresAt,
 	}
@@ -1868,7 +1910,222 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 	}
 	s.shareMu.Unlock()
 
-	jsonOK(w, map[string]any{"ok": true, "token": token})
+	jsonOK(w, map[string]any{"ok": true, "token": token, "share_pin": sharePin})
+}
+
+// genSharePin 生成分享码（6 位无歧义字符集）
+func genSharePin() string {
+	b := make([]byte, sharePinLen)
+	for i := range b {
+		n := make([]byte, 1)
+		rand.Read(n)
+		b[i] = sharePinCharset[int(n[0])%len(sharePinCharset)]
+	}
+	return string(b)
+}
+
+// signShareCookie 用 cookie_secret 对 token 做 HMAC 签名
+func (s *Server) signShareCookie(token string) string {
+	h := hmac.New(sha256.New, []byte(s.cfg.CookieSecret))
+	h.Write([]byte("share:" + token))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// verifyShareCookie 返回 cookie 里包含的合法 token，否则返回空串
+func (s *Server) verifyShareCookie(r *http.Request) string {
+	c, err := r.Cookie(shareCookieName)
+	if err != nil || c.Value == "" {
+		return ""
+	}
+	parts := strings.SplitN(c.Value, ":", 2)
+	if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+		return ""
+	}
+	token, sig := parts[0], parts[1]
+	expected := s.signShareCookie(token)
+	if subtle.ConstantTimeCompare([]byte(sig), []byte(expected)) != 1 {
+		return ""
+	}
+	// 检查 token 是否仍然存在/未过期
+	s.shareMu.Lock()
+	cfg, ok := s.shareTokens[token]
+	s.shareMu.Unlock()
+	if !ok || time.Now().Unix() > cfg.ExpiresAt {
+		return ""
+	}
+	return token
+}
+
+// isShareUser：有合法 share cookie + 无主 auth 的用户（"仅分享用户"）
+func (s *Server) isShareUser(r *http.Request) bool {
+	if s.cfg.AccessCode == "" {
+		return false
+	}
+	if auth.IsAuthenticated(r, s.cfg.CookieSecret, s.cfg.AccessCode) {
+		return false
+	}
+	return s.verifyShareCookie(r) != ""
+}
+
+// shareBruteCheck 检查分享码尝试是否超限
+func (s *Server) shareBruteCheck(ip, token string) (bool, int) {
+	key := ip + ":" + token
+	now := time.Now()
+	s.shareBruteMu.Lock()
+	defer s.shareBruteMu.Unlock()
+	attempts := s.shareBrute[key]
+	kept := attempts[:0]
+	for _, t := range attempts {
+		if now.Sub(t) < shareBruteWindow {
+			kept = append(kept, t)
+		}
+	}
+	s.shareBrute[key] = kept
+	if len(kept) >= shareBruteMax {
+		retry := int(shareBruteWindow.Seconds() - now.Sub(kept[0]).Seconds()) + 1
+		if retry < 1 {
+			retry = 1
+		}
+		return false, retry
+	}
+	return true, 0
+}
+
+func (s *Server) shareBruteFail(ip, token string) {
+	key := ip + ":" + token
+	s.shareBruteMu.Lock()
+	s.shareBrute[key] = append(s.shareBrute[key], time.Now())
+	s.shareBruteMu.Unlock()
+}
+
+func (s *Server) shareBruteClear(ip, token string) {
+	key := ip + ":" + token
+	s.shareBruteMu.Lock()
+	delete(s.shareBrute, key)
+	s.shareBruteMu.Unlock()
+}
+
+// handleExamShareAuth 接收方提交 {token, pin}，验证后下发 share cookie
+func (s *Server) handleExamShareAuth(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Token string `json:"token"`
+		Pin   string `json:"pin"`
+	}
+	if err := decodeJSONBody(w, r, &body); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	body.Token = strings.TrimSpace(body.Token)
+	body.Pin = strings.ToUpper(strings.TrimSpace(body.Pin))
+	if body.Token == "" || body.Pin == "" {
+		jsonError(w, "缺少 token 或 pin", http.StatusBadRequest)
+		return
+	}
+
+	ip := s.remoteIP(r)
+	allowed, retry := s.shareBruteCheck(ip, body.Token)
+	if !allowed {
+		jsonError(w, fmt.Sprintf("尝试次数过多，请 %d 分钟后重试", (retry+59)/60), http.StatusTooManyRequests)
+		return
+	}
+
+	s.shareMu.Lock()
+	cfg, ok := s.shareTokens[body.Token]
+	s.shareMu.Unlock()
+	if !ok || time.Now().Unix() > cfg.ExpiresAt {
+		jsonError(w, "分享链接已过期或无效", http.StatusNotFound)
+		return
+	}
+	expected := strings.ToUpper(cfg.SharePin)
+	if expected == "" || subtle.ConstantTimeCompare([]byte(body.Pin), []byte(expected)) != 1 {
+		s.shareBruteFail(ip, body.Token)
+		jsonError(w, "分享码错误", http.StatusUnauthorized)
+		return
+	}
+	s.shareBruteClear(ip, body.Token)
+
+	// 下发 share cookie
+	sig := s.signShareCookie(body.Token)
+	secure := r.URL.Scheme == "https" || strings.EqualFold(r.Header.Get("X-Forwarded-Proto"), "https")
+	http.SetCookie(w, &http.Cookie{
+		Name:     shareCookieName,
+		Value:    body.Token + ":" + sig,
+		Path:     "/",
+		MaxAge:   7 * 24 * 3600,
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+	})
+	jsonOK(w, map[string]any{"ok": true})
+}
+
+// handleExamShareStatus 查询当前用户的 auth 状态
+func (s *Server) handleExamShareStatus(w http.ResponseWriter, r *http.Request) {
+	hasMain := true
+	if s.cfg.AccessCode != "" {
+		hasMain = auth.IsAuthenticated(r, s.cfg.CookieSecret, s.cfg.AccessCode)
+	}
+	shareToken := s.verifyShareCookie(r)
+	jsonOK(w, map[string]any{
+		"main_auth":   hasMain,
+		"share_token": shareToken,
+		"share_only":  shareToken != "" && !hasMain,
+	})
+}
+
+// handleAPIAuth JSON 版主访问码验证
+func (s *Server) handleAPIAuth(w http.ResponseWriter, r *http.Request) {
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := decodeJSONBody(w, r, &body); err != nil {
+		jsonError(w, "invalid request", http.StatusBadRequest)
+		return
+	}
+	code := strings.ToUpper(strings.TrimSpace(body.Code))
+	if code == "" {
+		jsonError(w, "缺少 code", http.StatusBadRequest)
+		return
+	}
+	if s.cfg.AccessCode == "" {
+		jsonOK(w, map[string]any{"ok": true})
+		return
+	}
+	ip := s.remoteIP(r)
+	if auth.NeedsCaptcha(ip) {
+		jsonOK(w, map[string]any{"error": "需要验证码，请在登录页输入", "need_captcha": true})
+		w.WriteHeader(http.StatusTooManyRequests)
+		return
+	}
+	if subtle.ConstantTimeCompare([]byte(code), []byte(s.cfg.AccessCode)) == 1 {
+		auth.RecordSuccess(ip)
+		auth.SetAuthCookie(w, r, s.cfg.CookieSecret, s.cfg.AccessCode)
+		jsonOK(w, map[string]any{"ok": true})
+		return
+	}
+	auth.RecordFailure(ip)
+	jsonError(w, "访问码不正确", http.StatusUnauthorized)
+}
+
+// isShareAllowedPath: 仅分享用户（有 share cookie 无主 auth）可访问的路径白名单
+func isShareAllowedPath(path string) bool {
+	switch path {
+	case "/",
+		"/sw.js", "/manifest.json",
+		"/auth",
+		"/static/icon.svg", "/static/icon-192.png", "/static/icon-512.png",
+		"/api/info",
+		"/api/exam/join", "/api/exam/reveal", "/api/exam/time",
+		"/api/exam/share/auth", "/api/exam/share/status",
+		"/api/ai/chat", "/api/ai/report",
+		"/api/img/proxy",
+		"/api/push/vapid-key":
+		return true
+	}
+	if strings.HasPrefix(path, "/static/") || strings.HasPrefix(path, "/api/img/local/") {
+		return true
+	}
+	return false
 }
 
 // handleExamJoin 加入分享试卷
