@@ -907,14 +907,17 @@ def api_exam_join():
 # ════════════════════════════════════════════
 
 def _is_loopback() -> bool:
-    """检查请求是否来自 loopback 地址（127.x / ::1）。
+    """检查请求的**直连** TCP 源地址是否为 loopback (127.x / ::1)。
     
-    调试端点等敏感路径用此函数防御：即使在可信反代后也只看**真实客户端 IP**，
-    不看 r.RemoteAddr（后者可能是 nginx 的 127.0.0.1），避免任何人都可以
-    通过反代访问调试接口。
+    调试端点等敏感路径用此函数防御：只看 request.remote_addr（直连地址），
+    完全忽略任何 X-Real-IP / X-Forwarded-For header。防止在可信代理场景下
+    被 header 伪造绕过——调试端点只应被本机访问（SSH 隧道、反代 allow 
+    127.0.0.1 转发等），绝不应通过可信代理链暴露。
+    
+    同步 golang-version 的 isLoopbackRemote() 逻辑。
     """
-    ip = _get_real_ip()
-    return ip.startswith("127.") or ip == "::1"
+    direct = request.remote_addr or ""
+    return direct.startswith("127.") or direct == "::1"
 
 @app.get("/api/debug/exam-sessions")
 def api_debug_exam_sessions():
