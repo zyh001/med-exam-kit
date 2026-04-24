@@ -1,4 +1,6 @@
 from __future__ import annotations
+import hashlib
+import hmac
 import json as _json
 import math
 import random
@@ -134,9 +136,101 @@ _exam_lock = threading.Lock()
 _REVEAL_GRACE_WINDOW = 180  # 秒 — 交卷答案可重复领取的宽限窗口
 
 # ── 试卷分享令牌（内存存储，7天有效，服务重启后失效）──
-_share_tokens: dict[str, dict] = {}    # token -> {fingerprints, mode, bank_idx, time_limit, ts, expires_at}
+_share_tokens: dict[str, dict] = {}    # token -> {fingerprints, mode, bank_idx, time_limit, share_pin, ts, expires_at}
 _share_lock = threading.Lock()
 _SHARE_TTL = 7 * 24 * 3600             # 7 天有效期（秒）
+_SHARE_COOKIE = "med_exam_share"       # 分享用户会话 cookie
+_SHARE_PIN_LEN = 6                     # 分享码长度
+_SHARE_PIN_CHARSET = "ABCDEFGHJKMNPQRTUVWXY346789"  # 无歧义字符集（与访问码一致）
+
+# 分享码暴破防护：每 IP+token 10 分钟内 5 次失败锁定
+_share_brute: dict[str, list[float]] = {}
+_share_brute_lock = threading.Lock()
+_SHARE_BRUTE_WINDOW = 600
+_SHARE_BRUTE_MAX = 5
+
+# ── 仅分享用户可访问的路径白名单 ──────────────────
+# 有效 share cookie + 无主 auth 的用户（"仅分享用户"）只允许访问这些路径。
+# 其他 API 一律 403。目的：分享接收方只能完成"做题 → 查看解析"闭环，
+# 不能访问题库列表/统计/设置/历史等管理员能力。
+_SHARE_ALLOWED_PATHS = frozenset({
+    "/",
+    "/sw.js",
+    "/manifest.json",
+    "/auth",
+    "/static/icon.svg",
+    "/static/icon-192.png",
+    "/static/icon-512.png",
+    "/api/info",
+    "/api/exam/join",
+    "/api/exam/reveal",
+    "/api/exam/time",
+    "/api/exam/share/auth",
+    "/api/exam/share/status",
+    "/api/ai/chat",
+    "/api/ai/report",
+    "/api/img/proxy",
+    "/api/push/vapid-key",
+})
+# 前缀白名单（变长路径）
+_SHARE_ALLOWED_PREFIXES = ("/static/", "/api/img/local/")
+
+
+def _gen_share_pin() -> str:
+    return "".join(secrets.choice(_SHARE_PIN_CHARSET) for _ in range(_SHARE_PIN_LEN))
+
+
+def _sign_share_cookie(token: str) -> str:
+    """用 cookie_secret 对 token 做 HMAC 签名，作为分享会话 cookie 值。"""
+    return hmac.new(
+        _cookie_secret.encode(),
+        f"share:{token}".encode(),
+        hashlib.sha256,
+    ).hexdigest()
+
+
+def _verify_share_cookie() -> str:
+    """若请求带有合法 share cookie，返回对应 token；否则返回空串。"""
+    raw = request.cookies.get(_SHARE_COOKIE, "")
+    if not raw or ":" not in raw:
+        return ""
+    token, sig = raw.split(":", 1)
+    if not token or not sig:
+        return ""
+    expected = _sign_share_cookie(token)
+    if not hmac.compare_digest(sig, expected):
+        return ""
+    with _share_lock:
+        cfg = _share_tokens.get(token)
+        if cfg is None or int(time.time()) > cfg.get("expires_at", 0):
+            return ""
+    return token
+
+
+def _share_brute_check(ip: str, token: str) -> tuple[bool, int]:
+    key = f"{ip}:{token}"
+    now = time.monotonic()
+    with _share_brute_lock:
+        attempts = _share_brute.get(key, [])
+        attempts = [t for t in attempts if now - t < _SHARE_BRUTE_WINDOW]
+        _share_brute[key] = attempts
+        if len(attempts) >= _SHARE_BRUTE_MAX:
+            oldest = attempts[0]
+            retry = int(_SHARE_BRUTE_WINDOW - (now - oldest)) + 1
+            return False, max(retry, 1)
+    return True, 0
+
+
+def _share_brute_record_fail(ip: str, token: str) -> None:
+    key = f"{ip}:{token}"
+    with _share_brute_lock:
+        _share_brute.setdefault(key, []).append(time.monotonic())
+
+
+def _share_brute_clear(ip: str, token: str) -> None:
+    key = f"{ip}:{token}"
+    with _share_brute_lock:
+        _share_brute.pop(key, None)
 
 
 def _check_rate_limit(ip: str) -> bool:
@@ -315,14 +409,37 @@ def _create_app():
             "/static/icon.svg", "/static/icon-192.png", "/static/icon-512.png",
             "/api/push/vapid-key",
         )
-        if _pin_enabled and not _pwa_public and not is_authenticated(_cookie_secret, _access_code):
-            if request.path == "/" and request.method == "GET":
+
+        # 仅分享用户（有合法 share cookie、无主 auth）：
+        # 允许访问 _SHARE_ALLOWED_PATHS + 静态资源，其他一律 403
+        is_share_user = _pin_enabled and not is_authenticated(_cookie_secret, _access_code) \
+                        and bool(_verify_share_cookie())
+        if is_share_user:
+            allowed = (request.path in _SHARE_ALLOWED_PATHS
+                       or any(request.path.startswith(p) for p in _SHARE_ALLOWED_PREFIXES))
+            if not allowed:
+                return jsonify({"error": "Forbidden"}), 403
+            # 放行：跳过下面的主 auth 检查，但仍要校验 Session Token（下方会检）
+
+        if _pin_enabled and not _pwa_public and not is_authenticated(_cookie_secret, _access_code) \
+                and not is_share_user:
+            # 带 ?share= 的 GET / 放行：让前端 JS 弹出分享码/管理员登录框
+            # 哈希 #share= 不会到服务端，所以分享链接同时在 query 里带 token
+            _has_share_query = request.path == "/" and request.method == "GET" \
+                                and request.args.get("share", "")
+            if _has_share_query:
+                pass  # 放行至 index 渲染
+            elif request.path == "/" and request.method == "GET":
                 from med_exam_toolkit.auth import needs_captcha, new_captcha
                 tok, svg = (new_captcha() if needs_captcha(ip) else ("", ""))
                 return Response(render_pin_page("医考练习", pin_len=_pin_len,
                                                captcha_token=tok, captcha_svg=svg),
                                 mimetype="text/html")
-            return jsonify({"error": "Unauthorized", "auth": False}), 401
+            # 未登录时可访问的 API：分享码输入、状态查询、JSON 主访问码登录
+            elif request.path in ("/api/exam/share/auth", "/api/exam/share/status", "/api/auth"):
+                pass  # 放行，下面仍会校验 Session Token
+            else:
+                return jsonify({"error": "Unauthorized", "auth": False}), 401
 
         # /api/img/proxy 由 <img> 标签直接请求，无法携带自定义 Header，豁免 Token 校验
         # /api/img/local/ 同理：编辑器/做题页 <img> 加载私有 S3 图片，安全靠 Cookie + UUID
@@ -798,6 +915,7 @@ def api_exam_share():
         return jsonify({"error": "bank not found"}), 404
 
     token      = secrets.token_hex(8)
+    share_pin  = _gen_share_pin()
     now        = int(time.time())
     expires_at = now + _SHARE_TTL
 
@@ -810,18 +928,76 @@ def api_exam_share():
         "scoring":          scoring,
         "score_per_mode":   score_per_mode,
         "multi_score_mode": multi_score_mode,
+        "share_pin":        share_pin,
         "ts":               now,
         "expires_at":       expires_at,
     }
 
     with _share_lock:
-        # 清理已过期 token
         expired = [k for k, v in _share_tokens.items() if now > v.get("expires_at", 0)]
         for k in expired:
             del _share_tokens[k]
         _share_tokens[token] = cfg
 
-    return jsonify({"ok": True, "token": token})
+    return jsonify({"ok": True, "token": token, "share_pin": share_pin})
+
+
+@app.post("/api/exam/share/auth")
+def api_exam_share_auth():
+    """分享接收方输入分享码，验证通过后下发 share cookie。
+    主访问码用户无需经此端点 —— 他们已有主 auth cookie，权限更高。
+    """
+    try:
+        body = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid request"}), 400
+    token = (body.get("token") or "").strip()
+    pin   = (body.get("pin") or "").strip().upper()
+    if not token or not pin:
+        return jsonify({"error": "缺少 token 或 pin"}), 400
+
+    ip = _get_real_ip()
+    allowed, retry = _share_brute_check(ip, token)
+    if not allowed:
+        return jsonify({"error": f"尝试次数过多，请 {(retry+59)//60} 分钟后重试"}), 429
+
+    with _share_lock:
+        cfg = _share_tokens.get(token)
+    if cfg is None or int(time.time()) > cfg.get("expires_at", 0):
+        return jsonify({"error": "分享链接已过期或无效"}), 404
+
+    expected = (cfg.get("share_pin") or "").upper()
+    if not expected or not hmac.compare_digest(pin, expected):
+        _share_brute_record_fail(ip, token)
+        return jsonify({"error": "分享码错误"}), 401
+
+    _share_brute_clear(ip, token)
+    sig = _sign_share_cookie(token)
+    resp = jsonify({"ok": True})
+    forwarded_proto = request.headers.get("X-Forwarded-Proto", "")
+    secure = forwarded_proto.lower() == "https" if forwarded_proto else request.scheme == "https"
+    resp.set_cookie(
+        _SHARE_COOKIE,
+        f"{token}:{sig}",
+        max_age=_SHARE_TTL,
+        httponly=True,
+        samesite="Lax",
+        secure=secure,
+    )
+    return resp
+
+
+@app.get("/api/exam/share/status")
+def api_exam_share_status():
+    """查询当前用户是否已通过分享码验证，以及是否是主访问码用户。"""
+    from med_exam_toolkit.auth import is_authenticated
+    has_main = is_authenticated(_cookie_secret, _access_code) if _pin_enabled else True
+    share_token = _verify_share_cookie()
+    return jsonify({
+        "main_auth":   has_main,
+        "share_token": share_token,
+        "share_only":  bool(share_token) and not has_main,
+    })
 
 
 @app.get("/api/exam/join")
@@ -1175,6 +1351,10 @@ def index():
         "quiz.html",
         session_token=_session_token,
         asset_ver=_asset_ver,
+        # 模板里用的是 {{SESSION_TOKEN}} / {{ASSET_VER}}（保留与 golang-version
+        # 一致的命名），这里同时传大写版本以兼容 Jinja2 的大小写敏感查找
+        SESSION_TOKEN=_session_token,
+        ASSET_VER=_asset_ver,
     ))
     if not request.cookies.get("med_exam_uid"):
         resp.set_cookie(
@@ -1772,6 +1952,39 @@ def auth():
             mimetype="text/html", status=200,
         )
     return Response("", 302, headers={"Location": "/"})
+
+
+@app.post("/api/auth")
+def api_auth():
+    """JSON 版主访问码验证 —— 分享模态框"管理员登录"入口用。
+
+    与 POST /auth 不同：接受 JSON body {code}，返回 JSON 响应（非重定向）。
+    成功时设置 med_exam_auth cookie，前端自行 reload 或继续下一步。
+    """
+    from med_exam_toolkit.auth import (
+        set_auth_cookie, needs_captcha, record_success, record_failure,
+    )
+    ip = _get_real_ip()
+    try:
+        body = request.get_json(force=True) or {}
+    except Exception:
+        return jsonify({"error": "invalid request"}), 400
+    code = (body.get("code") or "").strip().upper()
+    if not code:
+        return jsonify({"error": "缺少 code"}), 400
+    if not _pin_enabled:
+        return jsonify({"ok": True})
+    if needs_captcha(ip):
+        return jsonify({"error": "需要验证码，请在登录页输入", "need_captcha": True}), 429
+    if secrets.compare_digest(code, _access_code):
+        record_success(ip)
+        resp = jsonify({"ok": True})
+        set_auth_cookie(resp, _cookie_secret, _access_code)
+        return resp
+    record_failure(ip)
+    return jsonify({"error": "访问码不正确"}), 401
+
+
 
 
 # ════════════════════════════════════════════

@@ -924,10 +924,16 @@ async function selectBankAndEnter(idx) {
 
   try {
     // 分享链接进入：未验证用户需要锁定在考试页面
-    // 逻辑：任何不含 #share= 的正常访问都视为"已验证"
-    // 首次通过分享链接进入的用户会被锁定；已经访问过（已验证）的用户正常
-    const isShareEntry = /share=[a-f0-9]+/.test(location.hash);
-    if (!isShareEntry) {
+    // 服务端权威判断：share_only=true（有 share cookie 无主 auth）→ 锁定
+    const isShareEntry = /share=[a-f0-9]+/.test(location.hash + location.search);
+    let shareOnly = false;
+    try {
+      const s = await apiFetch('/api/exam/share/status').then(r => r.ok ? r.json() : null);
+      shareOnly = !!(s && s.share_only);
+    } catch(_) {}
+    if (shareOnly) {
+      S.sharedLocked = true;
+    } else if (!isShareEntry) {
       try { localStorage.setItem('med_exam_verified', '1'); } catch(_) {}
       S.sharedLocked = false;
     } else {
@@ -938,13 +944,10 @@ async function selectBankAndEnter(idx) {
 
     await loadBankAndRenderHome();
     showScreen('s-home');
-    _favLoadFromServer();  // 静默拉取服务端收藏，合并到本地（不阻塞主流程）
-
-    // 检查此题库是否有未完成的考试（弹窗覆盖在主页上方）
-    // 锁定模式下跳过：防止分享接收者看到与他无关的历史存档
+    // 仅分享用户：跳过管理员功能
+    if (!S.sharedLocked) _favLoadFromServer();
     if (!S.sharedLocked) checkResumeSession();
 
-    // 检查 URL hash 是否包含分享试卷令牌
     _checkShareToken();
 
     // 尝试补取上次网络异常时未能取回的密封答案
@@ -4840,32 +4843,101 @@ async function _doShareExam(qs, opts) {
     });
     const d = await res.json();
     if (!d.token) { toast('分享失败', true); return; }
-    const url = location.origin + location.pathname + '#share=' + d.token;
-    if (navigator.share) {
-      navigator.share({ title: '医考练习 - 试卷分享', text: `共 ${qs.length} 题`, url }).catch(()=>{});
-    } else if (navigator.clipboard) {
-      await navigator.clipboard.writeText(url);
-      toast('链接已复制到剪贴板');
-    } else {
-      prompt('分享链接：', url);
-    }
+    // 同时放在 query（让服务端在未登录时也能识别为分享访问，跳过主 PIN 页）
+    // 和 hash（保持前端既有逻辑）
+    const url = location.origin + location.pathname + '?share=' + d.token + '#share=' + d.token;
+    const pin = d.share_pin || '';
+    _showShareDialog(url, pin, qs.length);
   } catch(e) { toast('分享失败: ' + e.message, true); }
 }
 
-/** 检查 URL hash 是否包含分享令牌，自动加入 */
+/** 分享成功对话框：同时展示链接和分享码 */
+function _showShareDialog(url, pin, qCount) {
+  const old = document.getElementById('share-result-overlay');
+  if (old) old.remove();
+  const overlay = document.createElement('div');
+  overlay.id = 'share-result-overlay';
+  overlay.className = 'ai-overlay';
+  overlay.innerHTML = `
+    <div class="ai-sheet" style="max-width:440px;padding:24px;">
+      <div style="font-size:18px;font-weight:600;margin-bottom:16px;">📋 分享试卷（共 ${qCount} 题）</div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:6px;">分享链接（7 天有效）</div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;">
+        <input type="text" id="share-url-input" readonly value="${url}"
+               style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);font-size:13px;">
+        <button id="share-copy-url-btn" class="btn btn-primary" style="padding:8px 14px;">复制</button>
+      </div>
+      <div style="font-size:13px;color:var(--muted);margin-bottom:6px;">
+        分享码 <span style="color:var(--danger);">（接收方需输入此码才能做题）</span>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;">
+        <div id="share-pin-display" style="flex:1;padding:12px 16px;border:2px solid var(--primary);border-radius:6px;background:var(--bg);font-size:22px;font-weight:700;font-family:ui-monospace,monospace;letter-spacing:4px;text-align:center;color:var(--primary);">${pin}</div>
+        <button id="share-copy-pin-btn" class="btn" style="padding:8px 14px;">复制</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);line-height:1.6;padding:10px;background:var(--bg);border-radius:6px;margin-bottom:16px;">
+        💡 将<b>链接</b>和<b>分享码</b>分别发给接收方。分享码限制他们只能做这一套题，
+        不能访问其他功能。管理员（知道主访问码的用户）无需输入分享码即可使用。
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button id="share-copy-all-btn" class="btn btn-primary" style="flex:1;">复制链接+分享码</button>
+        <button id="share-close-btn" class="btn" style="flex:1;">关闭</button>
+      </div>
+    </div>`;
+  document.body.appendChild(overlay);
+  const close = () => overlay.remove();
+  document.getElementById('share-close-btn').onclick = close;
+  overlay.onclick = (e) => { if (e.target === overlay) close(); };
+  const _copy = async (text, btn, orig) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      btn.textContent = '✓ 已复制';
+      setTimeout(() => { btn.textContent = orig; }, 1500);
+    } catch(_) {
+      prompt('手动复制：', text);
+    }
+  };
+  document.getElementById('share-copy-url-btn').onclick = (e) => _copy(url, e.target, '复制');
+  document.getElementById('share-copy-pin-btn').onclick = (e) => _copy(pin, e.target, '复制');
+  document.getElementById('share-copy-all-btn').onclick = (e) => _copy(
+    `医考练习 - 试卷分享（${qCount} 题）\n链接：${url}\n分享码：${pin}`,
+    e.target, '复制链接+分享码'
+  );
+}
+
+/** 检查 URL hash 或 query 是否包含分享令牌，自动加入 */
 async function _checkShareToken() {
-  const m = location.hash.match(/share=([a-f0-9]+)/);
-  if (!m) return;
-  const token = m[1];
-  location.hash = ''; // 清除 hash 防止重复触发
+  const mHash  = location.hash.match(/share=([a-f0-9]+)/);
+  const mQuery = location.search.match(/[?&]share=([a-f0-9]+)/);
+  const token = (mHash && mHash[1]) || (mQuery && mQuery[1]);
+  if (!token) return;
+  // 清除 hash 和 query 防止重复触发/泄露
+  location.hash = '';
+  if (mQuery) {
+    try {
+      const url = new URL(location.href);
+      url.searchParams.delete('share');
+      history.replaceState(null, '', url.pathname + (url.search || '') + url.hash);
+    } catch(_) {}
+  }
   try {
-    // 注意：join 接口从 token 内部读取 bankIdx，客户端不需要传 ?bank=N
+    // 查当前权限：主 auth 用户直接通过；仅分享用户需对应 token；新访客需输入分享码
+    let status = { main_auth: false, share_token: '', share_only: false };
+    try {
+      const sres = await apiFetch('/api/exam/share/status');
+      if (sres.ok) status = await sres.json();
+    } catch(_) {}
+
+    // 未登录且没有该 token 的 share cookie → 弹分享码/管理员登录框
+    if (!status.main_auth && status.share_token !== token) {
+      const ok = await _promptSharePin(token);
+      if (!ok) return;
+    }
+
     const res = await apiFetch('/api/exam/join?token=' + token);
     const d   = await res.json();
     if (d.error) { toast('分享链接已过期或无效（' + d.error + '）', true); return; }
     if (!d.items || !d.items.length) { toast('分享试卷为空或已过期', true); return; }
 
-    // 若服务端返回了 bank_idx（与当前题库不同），先静默切换
     if (typeof d.bank_idx === 'number' && d.bank_idx !== S.bankID && d.bank_idx < S.banksInfo.length) {
       S.bankID = d.bank_idx;
       localStorage.setItem(SELECTED_BANK_KEY, String(d.bank_idx));
@@ -4902,6 +4974,108 @@ async function _checkShareToken() {
     // 锁定模式：隐藏返回/退出相关控件，一次性 token
     if (S.sharedLocked) _applySharedLockUI();
   } catch(e) { toast('加载分享试卷失败', true); }
+}
+
+/** 弹出分享码/管理员访问码输入框。返回 true=验证通过，false=用户取消 */
+async function _promptSharePin(token) {
+  return new Promise((resolve) => {
+    const old = document.getElementById('share-pin-overlay');
+    if (old) old.remove();
+    const overlay = document.createElement('div');
+    overlay.id = 'share-pin-overlay';
+    overlay.className = 'ai-overlay';
+    overlay.innerHTML = `
+      <div class="ai-sheet" style="max-width:380px;padding:24px;">
+        <div style="font-size:18px;font-weight:600;margin-bottom:8px;" id="sp-title">🔐 输入分享码</div>
+        <div style="font-size:13px;color:var(--muted);margin-bottom:16px;line-height:1.6;" id="sp-desc">
+          分享者发给你的 6 位分享码。做完题可以查看成绩和解析。
+        </div>
+        <input type="text" id="share-pin-input" maxlength="8" autocomplete="off" autocapitalize="characters"
+               placeholder="例如 AB34CD"
+               style="width:100%;padding:14px 16px;border:2px solid var(--border);border-radius:8px;background:var(--bg);font-size:22px;font-weight:600;font-family:ui-monospace,monospace;letter-spacing:6px;text-align:center;text-transform:uppercase;box-sizing:border-box;margin-bottom:8px;">
+        <div id="share-pin-err" style="color:var(--danger);font-size:13px;margin-bottom:8px;min-height:18px;"></div>
+        <div style="text-align:center;margin-bottom:12px;">
+          <a href="javascript:void(0)" id="sp-toggle" style="font-size:13px;color:var(--primary);text-decoration:none;">
+            我是管理员，用主访问码登录 →
+          </a>
+        </div>
+        <div style="display:flex;gap:10px;">
+          <button id="share-pin-cancel" class="btn" style="flex:1;">取消</button>
+          <button id="share-pin-ok" class="btn btn-primary" style="flex:1;">验证</button>
+        </div>
+      </div>`;
+    document.body.appendChild(overlay);
+    const input = document.getElementById('share-pin-input');
+    const err   = document.getElementById('share-pin-err');
+    const btnOk = document.getElementById('share-pin-ok');
+    const title = document.getElementById('sp-title');
+    const desc  = document.getElementById('sp-desc');
+    const toggle = document.getElementById('sp-toggle');
+
+    let mode = 'share';
+    const setMode = (m) => {
+      mode = m;
+      if (m === 'admin') {
+        title.textContent = '🔑 管理员登录';
+        desc.textContent = '输入服务启动时打印在终端的 8 位主访问码。登录后可访问所有功能。';
+        input.placeholder = '例如 ABCD1234';
+        toggle.textContent = '← 使用分享码登录';
+      } else {
+        title.textContent = '🔐 输入分享码';
+        desc.textContent = '分享者发给你的 6 位分享码。做完题可以查看成绩和解析。';
+        input.placeholder = '例如 AB34CD';
+        toggle.textContent = '我是管理员，用主访问码登录 →';
+      }
+      input.value = '';
+      err.textContent = '';
+      input.focus();
+    };
+    toggle.onclick = () => setMode(mode === 'share' ? 'admin' : 'share');
+
+    setTimeout(() => input.focus(), 50);
+    const close = (val) => { overlay.remove(); resolve(val); };
+    document.getElementById('share-pin-cancel').onclick = () => close(false);
+    overlay.onclick = (e) => { if (e.target === overlay) close(false); };
+    input.oninput = () => { input.value = input.value.toUpperCase().replace(/[^A-Z0-9]/g, ''); err.textContent = ''; };
+    input.onkeydown = (e) => { if (e.key === 'Enter') btnOk.click(); };
+    btnOk.onclick = async () => {
+      const code = input.value.trim();
+      if (code.length < 4) { err.textContent = '长度不足'; return; }
+      btnOk.disabled = true;
+      btnOk.textContent = '验证中...';
+      try {
+        let res, d;
+        if (mode === 'admin') {
+          res = await apiFetch('/api/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code }),
+          });
+          d = await res.json();
+          if (res.ok && d.ok) { close(true); return; }
+          err.textContent = d.need_captcha
+            ? '需要验证码，请到登录页（去掉链接里的 share 参数）登录'
+            : (d.error || '验证失败');
+        } else {
+          res = await apiFetch('/api/exam/share/auth', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token, pin: code }),
+          });
+          d = await res.json();
+          if (res.ok && d.ok) { close(true); return; }
+          err.textContent = d.error || '验证失败';
+        }
+        btnOk.disabled = false;
+        btnOk.textContent = '验证';
+        input.select();
+      } catch(e) {
+        err.textContent = '网络错误：' + e.message;
+        btnOk.disabled = false;
+        btnOk.textContent = '验证';
+      }
+    };
+  });
 }
 
 /** 未验证的分享接收者：锁定在考试页面，屏蔽所有退出入口 */
