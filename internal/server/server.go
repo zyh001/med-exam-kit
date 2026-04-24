@@ -1712,16 +1712,18 @@ func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
 		// 幂等领取：第一次调用时记录 revealedAt，之后 revealGraceWindow 秒内
 		// 再次调用返回同样的答案。这样手动交卷和定时自动交卷的竞态、响应中
 		// 断导致的重试、前端 submitExam 被意外双触发等情况都不会丢答案。
+		//
+		// 宽限期过后拒绝 reveal，但不删除 session（让 handleExamTime 仍可用）—
+		// session 由 cleanExamSessions 统一清理。
 		if sess.revealedAt == 0 {
 			sess.revealedAt = nowS
 		} else if nowS-sess.revealedAt > int64(revealGraceWindow) {
-			// 宽限期已过，视同过期
-			delete(s.examSessions, eid)
-			ok = false
+			// 宽限期已过，拒绝领取（但不删除 session）
+			s.examMu.Unlock()
+			jsonError(w, "答案领取窗口已过期", http.StatusGone)
+			return
 		}
-		if ok {
-			answers = sess.answers
-		}
+		answers = sess.answers
 	}
 	s.examMu.Unlock()
 	if !ok {
