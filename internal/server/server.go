@@ -443,7 +443,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	wrapped := &responseWriterWrapper{ResponseWriter: w, statusCode: 200}
 	defer func() {
-		logRequest(r, wrapped.statusCode, time.Since(start))
+		logRequest(s, r, wrapped.statusCode, time.Since(start))
 	}()
 
 	auth.ApplySecurityHeaders(wrapped)
@@ -3428,13 +3428,9 @@ func (w *responseWriterWrapper) Flush() {
 	}
 }
 
-func logRequest(r *http.Request, status int, duration time.Duration) {
-	// 日志里的 IP 只作展示用，不参与任何安全决策，所以直接用 RemoteAddr 即可
-	// （安全相关路径已改为 s.remoteIP(r)，对 header 做可信代理校验）。
-	ip, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		ip = r.RemoteAddr
-	}
+func logRequest(s *Server, r *http.Request, status int, duration time.Duration) {
+	// 使用 s.remoteIP(r) 获取真实客户端 IP（nginx 反代时从 X-Real-IP 读取）
+	ip := s.remoteIP(r)
 	method := r.Method
 	path := r.URL.Path
 	if path == "" {
