@@ -161,14 +161,27 @@ def _get_lan_ip() -> str:
 
 
 def _get_real_ip() -> str:
-    """优先读取反代传递的真实客户端 IP。
+    """优先读取反代传递的真实客户端 IP（仅当直连源地址可信时）。
+    
+    安全加固（Session J 同步）：只有当 TCP 直连地址是 loopback（127.x / ::1）
+    时才信任 X-Real-IP / X-Forwarded-For header。否则直接返回 remote_addr，
+    防止任意客户端通过伪造 header 绕过速率限制 / IP 封禁 / 访问码暴破检测。
+    
     nginx 配置示例：
       proxy_set_header X-Real-IP       $remote_addr;
       proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     """
+    direct = request.remote_addr or "unknown"
+    
+    # 只有直连地址是 loopback 时才信任反代 header（单机 nginx 典型场景）
+    # 若需信任其他代理，管理员应在 nginx 层做 IP 白名单而非在这里扩展
+    if not (direct.startswith("127.") or direct == "::1"):
+        return direct
+    
+    # 可信代理：读 header
     ip = (request.headers.get("X-Real-IP")
           or request.headers.get("X-Forwarded-For", ""))
-    return ip.split(",")[0].strip() or request.remote_addr or "unknown"
+    return ip.split(",")[0].strip() or direct
 
 
 def _get_user_id() -> str:
@@ -894,9 +907,14 @@ def api_exam_join():
 # ════════════════════════════════════════════
 
 def _is_loopback() -> bool:
-    """检查请求是否来自 loopback 地址（127.x / ::1）。"""
-    remote = request.remote_addr or ""
-    return remote.startswith("127.") or remote == "::1"
+    """检查请求是否来自 loopback 地址（127.x / ::1）。
+    
+    调试端点等敏感路径用此函数防御：即使在可信反代后也只看**真实客户端 IP**，
+    不看 r.RemoteAddr（后者可能是 nginx 的 127.0.0.1），避免任何人都可以
+    通过反代访问调试接口。
+    """
+    ip = _get_real_ip()
+    return ip.startswith("127.") or ip == "::1"
 
 @app.get("/api/debug/exam-sessions")
 def api_debug_exam_sessions():
@@ -2098,6 +2116,7 @@ def start_quiz(
     # 让 Werkzeug 内置日志也显示真实 IP（nginx 反代场景）
     from werkzeug.middleware.proxy_fix import ProxyFix
     app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+    print("[INFO] ProxyFix 已启用 (x_for=1)，nginx 需配置: proxy_set_header X-Real-IP $remote_addr;")
 
     global _banks, _session_token, _asset_ver, \
            _server_port, _server_host, \
