@@ -56,6 +56,8 @@ _HYBRID_THINKING_KEYWORDS = (
     "minimax",
     # GLM-5 系列（智谱 AI，通过 thinking 参数控制）
     "glm-5", "glm-4.7",
+    # DeepSeek chat/v3/v4：API 默认 thinking=enabled，需显式关闭
+    "deepseek-chat", "deepseek-v3", "deepseek-v4",
 )
 
 
@@ -239,12 +241,13 @@ def build_chat_params(
         else:
             params["max_completion_tokens"] = max_tokens
     elif hybrid and use_thinking:
-        # 混合模型开启思考时：temperature 须为 1
-        params["temperature"] = 1
+        # 混合模型开启思考时：temperature 须为 1（DeepSeek thinking 模式不支持 temperature，省略）
+        if provider != "deepseek":
+            params["temperature"] = 1
         params["max_tokens"]  = max_tokens
         # 根据 provider 使用不同的思考参数格式
-        if provider in ("kimi", "zhipu"):
-            # 月之暗面 Kimi / 智谱 GLM：{"thinking": {"type": "enabled"}}
+        if provider in ("kimi", "zhipu", "deepseek"):
+            # 月之暗面 Kimi / 智谱 GLM / DeepSeek：{"thinking": {"type": "enabled"}}
             params["extra_body"] = {"thinking": {"type": "enabled"}}
         elif provider == "minimax":
             # MiniMax：{"reasoning_split": True}
@@ -259,8 +262,8 @@ def build_chat_params(
         if hybrid:
             # 混合模型显式关闭，避免 API 端默认开启
             # 根据 provider 使用不同的思考参数格式
-            if provider in ("kimi", "zhipu"):
-                # 月之暗面 Kimi / 智谱 GLM：{"thinking": {"type": "disabled"}}
+            if provider in ("kimi", "zhipu", "deepseek"):
+                # 月之暗面 Kimi / 智谱 GLM / DeepSeek：{"thinking": {"type": "disabled"}}
                 params["extra_body"] = {"thinking": {"type": "disabled"}}
             elif provider == "minimax":
                 # MiniMax：{"reasoning_split": False}
