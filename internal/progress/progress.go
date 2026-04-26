@@ -90,7 +90,16 @@ CREATE TABLE IF NOT EXISTS ai_chat_logs (
     provider    TEXT    DEFAULT '',
     created_at  INTEGER NOT NULL
 );
-CREATE INDEX IF NOT EXISTS idx_acl_created ON ai_chat_logs(created_at);`
+CREATE INDEX IF NOT EXISTS idx_acl_created ON ai_chat_logs(created_at);
+
+CREATE TABLE IF NOT EXISTS exam_sessions (
+    id           TEXT    PRIMARY KEY,
+    answers_json TEXT    NOT NULL DEFAULT '{}',
+    ts           INTEGER NOT NULL,
+    started_at   INTEGER NOT NULL DEFAULT 0,
+    time_limit   INTEGER NOT NULL DEFAULT 0,
+    revealed_at  INTEGER NOT NULL DEFAULT 0
+);`
 
 	if _, err = db.Exec(ddl); err != nil {
 		return nil, fmt.Errorf("progress: init schema: %w", err)

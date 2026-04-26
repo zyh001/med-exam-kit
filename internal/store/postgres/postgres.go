@@ -1155,3 +1155,47 @@ func (s *Store) CleanupAIChatLogs(ctx context.Context, retentionDays int) (int64
 	}
 	return tag.RowsAffected(), nil
 }
+
+// ── Exam Sessions ───────────────────────────────────────────────────────────
+
+// SaveExamSession upserts an exam session row (used by server/exam_persist.go).
+func (s *Store) SaveExamSession(ctx context.Context, id string, answersJSON []byte, ts, startedAt int64, timeLimit int, revealedAt int64) error {
+	_, err := s.pool.Exec(ctx, `
+		INSERT INTO exam_sessions(id, answers_json, ts, started_at, time_limit, revealed_at)
+		VALUES ($1, $2, $3, $4, $5, $6)
+		ON CONFLICT(id) DO UPDATE SET
+			answers_json = EXCLUDED.answers_json,
+			ts           = EXCLUDED.ts,
+			started_at   = EXCLUDED.started_at,
+			time_limit   = EXCLUDED.time_limit,
+			revealed_at  = EXCLUDED.revealed_at`,
+		id, answersJSON, ts, startedAt, timeLimit, revealedAt)
+	return err
+}
+
+// LoadExamSessions returns all persisted exam session rows.
+// Stale-entry pruning is done by the caller (server/exam_persist.go).
+func (s *Store) LoadExamSessions(ctx context.Context) ([]store.ExamSessionRow, error) {
+	rows, err := s.pool.Query(ctx, `
+		SELECT id, answers_json, ts, started_at, time_limit, revealed_at
+		FROM exam_sessions`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []store.ExamSessionRow
+	for rows.Next() {
+		var r store.ExamSessionRow
+		if err := rows.Scan(&r.ID, &r.AnswersJSON, &r.Ts, &r.StartedAt, &r.TimeLimit, &r.RevealedAt); err != nil {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DeleteExamSession removes a single exam session (cleanup after grace window).
+func (s *Store) DeleteExamSession(ctx context.Context, id string) error {
+	_, err := s.pool.Exec(ctx, `DELETE FROM exam_sessions WHERE id = $1`, id)
+	return err
+}
