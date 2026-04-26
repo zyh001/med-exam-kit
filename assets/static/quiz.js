@@ -1832,10 +1832,31 @@ function examCanGoBack(fromIdx) {
   return true;
 }
 
-/** 弹出题型切换确认框，cb 为用户点「确认」后的回调 */
-function showGroupTransitionDialog(targetMode, cb) {
+/** 统计某题型组内未作答题目数（考试模式用） */
+function _countGroupUnanswered(gIdx) {
+  const g = S.modeGroups[gIdx];
+  if (!g) return 0;
+  let count = 0;
+  for (let i = g.startIdx; i <= g.endIdx; i++) {
+    const sel = S.ans[i];
+    if (sel === undefined || (sel instanceof Set && sel.size === 0)) count++;
+  }
+  return count;
+}
+
+/** 弹出题型切换确认框，unanswered=当前题型未答题数，cb 为用户点「确认」后的回调 */
+function showGroupTransitionDialog(targetMode, unanswered, cb) {
   S._groupModalCb = cb;
   document.getElementById('gtm-mode').textContent = targetMode || '下一题型';
+  const warnEl = document.getElementById('gtm-unanswered');
+  if (warnEl) {
+    if (unanswered > 0) {
+      warnEl.textContent = `当前题型还有 ${unanswered} 道题未作答`;
+      warnEl.style.display = '';
+    } else {
+      warnEl.style.display = 'none';
+    }
+  }
   document.getElementById('group-transition-modal').style.display = 'flex';
 }
 function confirmGroupModal() {
@@ -2021,7 +2042,7 @@ function startQuiz(remainingSeconds) {
     fill.className = 'progress-fill';
     document.getElementById('q-grid-panel').classList.remove('open');
     buildGrid();
-    _showCalcBtn(false);
+    _showCalcBtn(true);  // 练习模式也提供计算器
   }
 
   showScreen('s-quiz');
@@ -2393,7 +2414,7 @@ function selectOpt(letter, btn) {
           }
           if (nextGIdx !== curGIdx) {
             const nextGroup = S.modeGroups[nextGIdx];
-            showGroupTransitionDialog(nextGroup.mode, () => {
+            showGroupTransitionDialog(nextGroup.mode, _countGroupUnanswered(curGIdx), () => {
               S.currentGroupIdx = nextGIdx;
               if (!nextGroup.allowBack) S.caseMaxReached[nextGIdx] = S.caseMaxReached[nextGIdx] ?? nextIdx;
               S.cur = nextIdx; renderQ('forward'); updateGridDot();
@@ -2486,7 +2507,7 @@ function submitMulti() {
         }
         if (nextGIdx !== curGIdx) {
           const nextGroup = S.modeGroups[nextGIdx];
-          showGroupTransitionDialog(nextGroup.mode, () => {
+          showGroupTransitionDialog(nextGroup.mode, _countGroupUnanswered(curGIdx), () => {
             S.currentGroupIdx = nextGIdx;
             if (!nextGroup.allowBack) S.caseMaxReached[nextGIdx] = S.caseMaxReached[nextGIdx] ?? nextIdx;
             S.cur = nextIdx; renderQ('forward'); updateGridDot();
@@ -2545,15 +2566,103 @@ function buildExplain(q, selected) {
     <span class="result-title ${isCorrect ? 'ok' : 'err'}">${isCorrect ? '回答正确！' : (isMulti ? '答案不完整或有误' : '回答错误')}</span>`;
   inner.appendChild(resultRow);
 
-  if (!isCorrect || _zenMode) {
-    const corrRow = document.createElement('div');
-    corrRow.className = 'explain-correct-row';
-    if (isMulti) {
-      corrRow.innerHTML = `正确答案：<span class="multi-ans">${q.answer.split('').join(' ')}</span>`;
-    } else {
-      corrRow.innerHTML = `正确答案：<span>${q.answer}</span>`;
+  // ── 答案对比行 ────────────────────────────────────────────────────
+  // 多选题：始终显示（帮助识别少选/多选）；单选题：答错时显示
+  {
+    const selSet = isMulti
+      ? (selected instanceof Set ? selected : new Set())
+      : new Set(selected ? [selected] : []);
+
+    const showCmp = isMulti || !isCorrect || _zenMode;
+    if (showCmp) {
+      const cmpWrap = document.createElement('div');
+      cmpWrap.className = 'explain-ans-cmp';
+
+      if (isMulti) {
+        // 多选：两行对比 + 字母徽章着色
+        // 收集所有出现过的字母（用户选 + 正确），按字母序排列
+        const allLetters = [...new Set([...correctSet, ...selSet])].sort();
+
+        // — 你的答案行 —
+        const yourRow = document.createElement('div');
+        yourRow.className = 'explain-ans-row';
+        const yourLabel = document.createElement('span');
+        yourLabel.className = 'ans-row-label';
+        yourLabel.textContent = '你的答案';
+        yourRow.appendChild(yourLabel);
+        const yourBadges = document.createElement('span');
+        yourBadges.className = 'ans-badges';
+        if (selSet.size === 0) {
+          const dash = document.createElement('span');
+          dash.className = 'ans-badge ans-badge-miss';
+          dash.textContent = '未作答';
+          yourBadges.appendChild(dash);
+        } else {
+          // 只展示用户选的字母
+          [...selSet].sort().forEach(l => {
+            const b = document.createElement('span');
+            b.className = 'ans-badge ' + (correctSet.has(l) ? 'ans-badge-ok' : 'ans-badge-bad');
+            b.textContent = l;
+            yourBadges.appendChild(b);
+          });
+          // 漏选的字母补一个 miss 提示
+          [...correctSet].filter(l => !selSet.has(l)).sort().forEach(l => {
+            const b = document.createElement('span');
+            b.className = 'ans-badge ans-badge-miss';
+            b.textContent = l + ' 漏';
+            yourBadges.appendChild(b);
+          });
+        }
+        yourRow.appendChild(yourBadges);
+        cmpWrap.appendChild(yourRow);
+
+        // — 正确答案行 —
+        const corrRow2 = document.createElement('div');
+        corrRow2.className = 'explain-ans-row';
+        const corrLabel = document.createElement('span');
+        corrLabel.className = 'ans-row-label';
+        corrLabel.textContent = '正确答案';
+        corrRow2.appendChild(corrLabel);
+        const corrBadges = document.createElement('span');
+        corrBadges.className = 'ans-badges';
+        [...correctSet].sort().forEach(l => {
+          const b = document.createElement('span');
+          b.className = 'ans-badge ans-badge-ok';
+          b.textContent = l;
+          corrBadges.appendChild(b);
+        });
+        corrRow2.appendChild(corrBadges);
+        cmpWrap.appendChild(corrRow2);
+
+      } else {
+        // 单选：单行对比
+        const row = document.createElement('div');
+        row.className = 'explain-ans-row';
+        const lbl1 = document.createElement('span');
+        lbl1.className = 'ans-row-label';
+        lbl1.textContent = '你的答案';
+        row.appendChild(lbl1);
+        const yourB = document.createElement('span');
+        yourB.className = 'ans-badge ' + (!selected ? 'ans-badge-miss' : (!isCorrect ? 'ans-badge-bad' : 'ans-badge-ok'));
+        yourB.textContent = selected || '—';
+        row.appendChild(yourB);
+        const arrow = document.createElement('span');
+        arrow.className = 'ans-arrow';
+        arrow.textContent = '→';
+        row.appendChild(arrow);
+        const lbl2 = document.createElement('span');
+        lbl2.className = 'ans-row-label';
+        lbl2.textContent = '正确答案';
+        row.appendChild(lbl2);
+        const corrB = document.createElement('span');
+        corrB.className = 'ans-badge ans-badge-ok';
+        corrB.textContent = q.answer;
+        row.appendChild(corrB);
+        cmpWrap.appendChild(row);
+      }
+
+      inner.appendChild(cmpWrap);
     }
-    inner.appendChild(corrRow);
   }
 
   // B型题：在解析前展示共享选项，高亮正确答案
@@ -2645,7 +2754,7 @@ function nextOrSubmit() {
     if (nextGIdx !== curGIdx) {
       // 跨题型组——弹窗提示
       const nextGroup = S.modeGroups[nextGIdx];
-      showGroupTransitionDialog(nextGroup.mode, () => {
+      showGroupTransitionDialog(nextGroup.mode, _countGroupUnanswered(curGIdx), () => {
         S.currentGroupIdx = nextGIdx;
         // 案例分析组：记录最远到达位置
         if (!nextGroup.allowBack) {
@@ -3171,7 +3280,7 @@ function buildGrid() {
         if (!targetG.allowBack && i > (S.caseMaxReached[targetGIdx] ?? targetG.startIdx)) { toast('请按顺序作答案例分析题'); return; }
         if (targetGIdx > curGIdx) {
           const captured = i;
-          showGroupTransitionDialog(targetG.mode, () => {
+          showGroupTransitionDialog(targetG.mode, _countGroupUnanswered(curGIdx), () => {
             S.currentGroupIdx = targetGIdx;
             if (!targetG.allowBack) S.caseMaxReached[targetGIdx] = S.caseMaxReached[targetGIdx] ?? captured;
             S.cur = captured; renderQ('forward'); updateGridDot();

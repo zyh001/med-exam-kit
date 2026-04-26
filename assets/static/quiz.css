@@ -440,7 +440,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
   position:relative;
 }
-.quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.quiz-progress-wrap{flex:1;min-width:72px;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;-webkit-tap-highlight-color:transparent}
 
 /* ── 极简刷题模式 ────────────────────────────────────────────── */
 /* 隐藏非必要控件 */
@@ -594,6 +594,12 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   animation:lp-charge var(--lp-dur,600ms) linear forwards;
 }
 .quiz-timer.urgent{color:var(--danger);border-color:var(--danger);animation:pulse-timer 1s infinite}
+/* 小屏适配：计时器和按钮缩小，防止题号（如 120/230）被遮挡 */
+@media (max-width:400px){
+  .quiz-timer{padding:4px 6px;font-size:12px;gap:2px}
+  .quiz-timer>svg:first-child{display:none}
+  .flag-btn{width:30px;height:30px;font-size:14px}
+}
 .flag-btn{
   width:34px;height:34px;border-radius:9px;background:var(--card);
   border:1px solid var(--border);color:var(--muted);font-size:16px;
@@ -838,6 +844,27 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   padding:8px 16px;border-bottom:1px solid var(--border);background:var(--card);
 }
 .explain-correct-row span{color:var(--success);font-weight:600}
+/* ── 答案对比块 ── */
+.explain-ans-cmp{
+  padding:10px 16px;border-bottom:1px solid var(--border);
+  background:var(--card);display:flex;flex-direction:column;gap:7px;
+}
+.explain-ans-row{
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.ans-row-label{
+  font-size:12px;color:var(--muted);white-space:nowrap;min-width:52px;
+}
+.ans-badges{display:flex;gap:5px;flex-wrap:wrap;align-items:center}
+.ans-arrow{font-size:12px;color:var(--muted);margin:0 2px}
+.ans-badge{
+  display:inline-flex;align-items:center;justify-content:center;
+  min-width:26px;height:26px;padding:0 6px;border-radius:7px;
+  font-size:13px;font-weight:700;line-height:1;
+}
+.ans-badge-ok  {background:var(--success-bg);color:var(--success);border:1.5px solid var(--success)}
+.ans-badge-bad {background:var(--danger-bg);color:var(--danger);border:1.5px solid var(--danger)}
+.ans-badge-miss{background:var(--warn-bg);color:var(--warning);border:1.5px solid var(--warning);font-size:11px;min-width:auto}
 .explain-body{padding:14px 16px;font-size:var(--qfs-explain);line-height:1.85;color:var(--text)}
 .explain-point{
   margin-top:12px;padding:10px 14px;
@@ -1554,6 +1581,13 @@ button,a,[role=button],label{touch-action:manipulation}
   color:#fff;box-shadow:0 3px 10px rgba(210,153,34,.4);
 }
 .gtm-btn.confirm:hover{opacity:.9}
+.gtm-unanswered{
+  width:100%;padding:10px 14px;border-radius:10px;
+  background:rgba(220,53,69,.12);border:1px solid rgba(220,53,69,.35);
+  color:var(--danger);font-size:13px;font-weight:600;text-align:center;
+  display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.gtm-unanswered::before{content:'⚠';font-size:15px}
 
 /* ── 练习模式题目网格：对错颜色 ── */
 .q-dot.correct  {background:var(--success-bg);border-color:var(--success);color:var(--success)}

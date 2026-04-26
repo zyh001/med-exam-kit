@@ -51,6 +51,8 @@ var hybridThinkingKeywords = []string{
 	"kimi-k2.5",
 	"minimax",
 	"glm-5", "glm-4.7",
+	// DeepSeek chat/v3/v4 系列支持 thinking toggle（默认开启，需明确控制）
+	"deepseek-chat", "deepseek-v3", "deepseek-v4",
 }
 
 // IsReasoningModel returns true for pure reasoning models (o1/o3/R1 etc).
@@ -164,13 +166,16 @@ func (c *Client) ChatCompletion(messages []ChatMessage, temperature float64, max
 	if pureR {
 		useThinking = true
 	} else if hybrid {
-		// Priority: c.EnableThinking (config) > enableThinking (param) > auto (true for hybrid)
+		// Priority: c.EnableThinking (config) > enableThinking (param) > auto-detect
 		if c.EnableThinking != nil {
 			useThinking = *c.EnableThinking
 		} else if enableThinking != nil {
 			useThinking = *enableThinking
 		} else {
-			useThinking = true
+			// DeepSeek chat/v3/v4: API 默认开启 thinking，但业务上默认关闭（用户需主动开启）
+			// 其余 hybrid 模型默认开启
+			isDeepSeekHybrid := (c.Provider == "deepseek" || strings.Contains(m, "deepseek")) && !pureR
+			useThinking = !isDeepSeekHybrid
 		}
 	}
 
@@ -194,10 +199,13 @@ func (c *Client) ChatCompletion(messages []ChatMessage, temperature float64, max
 			body["max_completion_tokens"] = maxTokens
 		}
 	} else if hybrid && useThinking {
-		body["temperature"] = 1
+		// thinking 模式下 DeepSeek 不支持 temperature，其余 provider 发 1
+		if c.Provider != "deepseek" {
+			body["temperature"] = 1
+		}
 		body["max_tokens"] = maxTokens
 		switch c.Provider {
-		case "kimi", "zhipu":
+		case "kimi", "zhipu", "deepseek":
 			body["thinking"] = map[string]string{"type": "enabled"}
 		case "minimax":
 			body["reasoning_split"] = true
@@ -209,7 +217,7 @@ func (c *Client) ChatCompletion(messages []ChatMessage, temperature float64, max
 		body["max_tokens"] = maxTokens
 		if hybrid {
 			switch c.Provider {
-			case "kimi", "zhipu":
+			case "kimi", "zhipu", "deepseek":
 				body["thinking"] = map[string]string{"type": "disabled"}
 			case "minimax":
 				body["reasoning_split"] = false
@@ -317,17 +325,22 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []ChatMessag
 		if c.EnableThinking != nil {
 			useThinking = *c.EnableThinking
 		} else {
-			useThinking = true
+			// DeepSeek chat/v3/v4: API 默认开启 thinking，但业务上默认关闭
+			isDeepSeekHybrid := (c.Provider == "deepseek" || strings.Contains(strings.ToLower(c.Model), "deepseek")) && !pureR
+			useThinking = !isDeepSeekHybrid
 		}
 	}
 
 	if pureR {
 		body["max_tokens"] = maxTokens
 	} else if hybrid && useThinking {
-		body["temperature"] = 1
+		// thinking 模式下 DeepSeek 不支持 temperature，其余 provider 发 1
+		if c.Provider != "deepseek" {
+			body["temperature"] = 1
+		}
 		body["max_tokens"] = maxTokens
 		switch c.Provider {
-		case "kimi", "zhipu":
+		case "kimi", "zhipu", "deepseek":
 			body["thinking"] = map[string]string{"type": "enabled"}
 		case "minimax":
 			body["reasoning_split"] = true
@@ -339,7 +352,7 @@ func (c *Client) ChatCompletionStream(ctx context.Context, messages []ChatMessag
 		body["max_tokens"] = maxTokens
 		if hybrid {
 			switch c.Provider {
-			case "kimi", "zhipu":
+			case "kimi", "zhipu", "deepseek":
 				body["thinking"] = map[string]string{"type": "disabled"}
 			case "minimax":
 				body["reasoning_split"] = false
