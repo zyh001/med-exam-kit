@@ -64,6 +64,15 @@ CREATE TABLE IF NOT EXISTS sm2 (
     updated_at  INTEGER NOT NULL,
     PRIMARY KEY (user_id, fingerprint)
 );
+
+CREATE TABLE IF NOT EXISTS exam_sessions (
+    id           TEXT    PRIMARY KEY,
+    answers_json TEXT    NOT NULL DEFAULT '{}',
+    ts           INTEGER NOT NULL,
+    started_at   INTEGER NOT NULL DEFAULT 0,
+    time_limit   INTEGER NOT NULL DEFAULT 0,
+    revealed_at  INTEGER NOT NULL DEFAULT 0
+);
 """
 
 
@@ -504,3 +513,55 @@ def cleanup_stale_users(db_path: Path, max_age_days: int = 7) -> tuple[int, int]
         rows += total
         users += 1
     return users, rows
+
+
+# ── 考试会话持久化 ─────────────────────────────────────────────────────────
+
+def save_exam_session(
+    db_path: Path,
+    exam_id: str,
+    answers: dict,
+    ts: int,
+    started_at: int,
+    time_limit: int,
+    revealed_at: int,
+) -> None:
+    """Upsert a single exam session into the database."""
+    answers_json = json.dumps(answers, ensure_ascii=False)
+    with _open(db_path) as c:
+        c.execute(
+            """
+            INSERT INTO exam_sessions(id, answers_json, ts, started_at, time_limit, revealed_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                answers_json = excluded.answers_json,
+                ts           = excluded.ts,
+                started_at   = excluded.started_at,
+                time_limit   = excluded.time_limit,
+                revealed_at  = excluded.revealed_at
+            """,
+            (exam_id, answers_json, ts, started_at, time_limit, revealed_at),
+        )
+
+
+def load_exam_sessions(db_path: Path) -> list[dict]:
+    """Return all persisted exam session rows. Stale pruning is done by caller."""
+    with _open(db_path) as c:
+        rows = c.execute(
+            "SELECT id, answers_json, ts, started_at, time_limit, revealed_at FROM exam_sessions"
+        ).fetchall()
+    result = []
+    for r in rows:
+        try:
+            answers = json.loads(r["answers_json"])
+        except Exception:
+            answers = {}
+        result.append({
+            "id":          r["id"],
+            "answers":     answers,
+            "ts":          r["ts"],
+            "started_at":  r["started_at"],
+            "time_limit":  r["time_limit"],
+            "revealed_at": r["revealed_at"],
+        })
+    return result

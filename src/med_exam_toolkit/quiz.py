@@ -135,6 +135,69 @@ _exam_sessions: dict[str, dict] = {}   # exam_id -> {"fingerprint:si": {answer, 
 _exam_lock = threading.Lock()
 _REVEAL_GRACE_WINDOW = 180  # 秒 — 交卷答案可重复领取的宽限窗口
 
+
+def _first_db_path() -> "Path | None":
+    """返回第一个可用 bank 的 progress.db 路径（用于考试会话持久化）。"""
+    for b in _banks:
+        if b.get("db_path"):
+            return Path(b["db_path"])
+    return None
+
+
+def _persist_exam_sessions() -> None:
+    """将所有考试会话快照写入数据库（best-effort，不抛异常）。"""
+    db = _first_db_path()
+    if db is None:
+        return
+    with _exam_lock:
+        snap = dict(_exam_sessions)
+    now_s = int(time.time())
+    for eid, sess in snap.items():
+        try:
+            progress.save_exam_session(
+                db,
+                eid,
+                sess.get("answers", {}),
+                sess.get("ts", now_s),
+                sess.get("started_at", 0),
+                sess.get("time_limit", 0),
+                sess.get("revealed_at", 0),
+            )
+        except Exception as e:
+            print(f"[exam-persist] 写入 session {eid} 失败: {e}")
+
+
+def _load_exam_sessions() -> None:
+    """从数据库恢复未过期的考试会话（服务启动时调用）。"""
+    db = _first_db_path()
+    if db is None:
+        return
+    try:
+        # 确保表存在（进行一次幂等 migration）
+        progress.init_db(db)
+        rows = progress.load_exam_sessions(db)
+    except Exception as e:
+        print(f"[exam-persist] 读取失败: {e}")
+        return
+    now_s = int(time.time())
+    loaded = 0
+    with _exam_lock:
+        for r in rows:
+            if now_s - r["ts"] > 86400:
+                continue
+            if r["revealed_at"] != 0 and now_s - r["revealed_at"] > _REVEAL_GRACE_WINDOW:
+                continue
+            _exam_sessions[r["id"]] = {
+                "answers":    r["answers"],
+                "ts":         r["ts"],
+                "started_at": r["started_at"],
+                "time_limit": r["time_limit"],
+                "revealed_at": r["revealed_at"],
+            }
+            loaded += 1
+    if loaded:
+        print(f"[exam-persist] 从数据库恢复 {loaded} 个考试会话")
+
 # ── 试卷分享令牌（内存存储，7天有效，服务重启后失效）──
 _share_tokens: dict[str, dict] = {}    # token -> {fingerprints, mode, bank_idx, time_limit, share_pin, ts, expires_at}
 _share_lock = threading.Lock()
@@ -845,6 +908,7 @@ def api_exam_reveal():
             revealed_at = sess.get("revealed_at", 0)
             if revealed_at == 0:
                 sess["revealed_at"] = now_s
+                threading.Thread(target=_persist_exam_sessions, daemon=True).start()
             elif now_s - revealed_at > _REVEAL_GRACE_WINDOW:
                 # 宽限期已过，拒绝领取（但不删除 session）
                 return jsonify({"error": "答案领取窗口已过期"}), 410
@@ -1069,7 +1133,9 @@ def api_exam_join():
                 "ts":         now,
                 "started_at": started_at_ms,
                 "time_limit": time_limit_sec,
+                "revealed_at": 0,
             }
+            threading.Thread(target=_persist_exam_sessions, daemon=True).start()
 
     out_mode   = "exam" if is_exam_mode else cfg["mode"]
     time_limit = cfg.get("time_limit", 90 * 60)
@@ -2499,6 +2565,33 @@ def start_quiz(
                         pass
             _t.sleep(86400)  # 每 24 小时
     threading.Thread(target=_cleanup_loop, daemon=True).start()
+
+    # 恢复未完成的考试会话
+    _load_exam_sessions()
+
+    # SIGINT/SIGTERM 保护：有进行中考试时第一次信号只警告，第二次才退出
+    import signal as _signal
+    _warned_active = False
+
+    def _shutdown_handler(sig, frame):
+        nonlocal _warned_active
+        active = sum(1 for v in _exam_sessions.values() if not v.get("revealed_at"))
+        if active > 0 and not _warned_active:
+            _persist_exam_sessions()
+            _warned_active = True
+            print(
+                f"\n⚠  [med-exam] 收到信号，但有 {active} 场考试正在进行中。"
+                "\n   答案已写入数据库，重启后可恢复。"
+                "\n   再次按 Ctrl+C 强制退出。\n",
+                flush=True,
+            )
+            return
+        # 第二次信号或无活跃考试：持久化后退出
+        _persist_exam_sessions()
+        import os as _os
+        _os.kill(_os.getpid(), _signal.SIGTERM)
+
+    _signal.signal(_signal.SIGINT, _shutdown_handler)
 
     app.run(host=host, port=port, debug=False, use_reloader=False, threaded=True)
 
