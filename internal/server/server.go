@@ -277,6 +277,7 @@ func New(cfg Config) *Server {
 	s.pushStores = pushStores
 	s.pushTestBuckets = pushTestBuckets
 	s.examSessions = map[string]*examSession{}
+	s.loadExamSessions() // 从磁盘恢复未完成的考试会话
 	s.shareTokens = map[string]*shareConfig{}
 	if keys, err := generateVAPIDKeys(); err == nil {
 		s.vapidKeys = keys
@@ -350,20 +351,36 @@ func (s *Server) ListenAndServe() error {
 		}
 	}()
 
-	select {
-	case err := <-errCh:
-		return err
-	case sig := <-stop:
-		logger.Infof("Received signal %v, shutting down...", sig)
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer cancel()
-		if err := s.httpServer.Shutdown(ctx); err != nil {
-			logger.Errorf("Shutdown error: %v", err)
+	var warnedActive bool // 已经提示过有考试正在进行
+	for {
+		select {
+		case err := <-errCh:
+			return err
+		case sig := <-stop:
+			if active := s.activeExamCount(); active > 0 && !warnedActive {
+				// 第一次收到信号且有进行中考试：持久化后警告，不立即退出
+				s.persistExamSessions()
+				warnedActive = true
+				fmt.Fprintf(os.Stderr,
+					"\n⚠  [med-exam] 收到 %v，但 %s。\n"+
+						"   答案已写入磁盘，重启后可恢复。\n"+
+						"   再次按 Ctrl+C 强制退出。\n\n",
+					sig, s.examSessionsSummary())
+				continue // 等待第二次信号
+			}
+			// 无活跃考试，或已警告过（第二次信号）：正常关闭
+			logger.Infof("Received signal %v, shutting down...", sig)
+			s.persistExamSessions() // 关闭前最后一次持久化
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if err := s.httpServer.Shutdown(ctx); err != nil {
+				logger.Errorf("Shutdown error: %v", err)
+			}
+			s.Close()
+			logger.Infof("Server stopped")
+			return nil
 		}
-		s.Close()
-		logger.Infof("Server stopped")
 	}
-	return nil
 }
 
 // SetReloadFunc registers the function used for hot-reload.
@@ -980,6 +997,7 @@ func (s *Server) handleQuestions(w http.ResponseWriter, r *http.Request) {
 			timeLimit: timeLimitSec,
 		}
 		s.examMu.Unlock()
+		go s.persistExamSessions() // 新建会话后立即持久化到磁盘
 		jsonOK(w, map[string]any{
 			"total":      len(rows),
 			"items":      rows,
@@ -1757,6 +1775,7 @@ func (s *Server) handleExamReveal(w http.ResponseWriter, r *http.Request) {
 		// session 由 cleanExamSessions 统一清理。
 		if sess.revealedAt == 0 {
 			sess.revealedAt = nowS
+			go s.persistExamSessions() // 记录 revealedAt，防止重启后重复交卷
 		} else if nowS-sess.revealedAt > int64(revealGraceWindow) {
 			// 宽限期已过，拒绝领取（但不删除 session）
 			s.examMu.Unlock()
@@ -2241,6 +2260,7 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 			timeLimit: tl,
 		}
 		s.examMu.Unlock()
+		go s.persistExamSessions() // 新建会话后立即持久化到磁盘
 	}
 
 	timeLimit := cfg.TimeLimit
