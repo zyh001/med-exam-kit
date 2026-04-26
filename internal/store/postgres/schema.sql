@@ -187,3 +187,18 @@ CREATE TABLE IF NOT EXISTS ai_chat_logs (
 CREATE INDEX IF NOT EXISTS idx_acl_created  ON ai_chat_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_acl_uid_bank ON ai_chat_logs(user_id, bank_id);
 
+-- ── Exam Sessions（考试会话持久化）────────────────────────────────────
+-- 存储进行中的考试（服务端持有的答案映射），确保服务重启后仍可交卷。
+-- 一个 exam_id 对应唯一一行；reveal 后 revealed_at 更新为 unix 秒；
+-- 超过 24h（ts + 86400）或宽限窗口后由后台清理。
+CREATE TABLE IF NOT EXISTS exam_sessions (
+    id           TEXT        PRIMARY KEY,
+    answers_json JSONB       NOT NULL DEFAULT '{}',
+    ts           BIGINT      NOT NULL,
+    started_at   BIGINT      NOT NULL DEFAULT 0,
+    time_limit   INTEGER     NOT NULL DEFAULT 0,
+    revealed_at  BIGINT      NOT NULL DEFAULT 0,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_exam_sessions_ts ON exam_sessions(ts);
+

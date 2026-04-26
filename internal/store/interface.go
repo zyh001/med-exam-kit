@@ -135,3 +135,13 @@ type FavItem struct {
 	SI          int    `json:"si"`
 	AddedAt     int64  `json:"added_at"` // unix ms
 }
+
+// ExamSessionRow is the DTO used by the exam-session persistence layer.
+type ExamSessionRow struct {
+	ID          string
+	AnswersJSON []byte
+	Ts          int64
+	StartedAt   int64
+	TimeLimit   int
+	RevealedAt  int64
+}
