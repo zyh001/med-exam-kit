@@ -1832,10 +1832,31 @@ function examCanGoBack(fromIdx) {
   return true;
 }
 
-/** 弹出题型切换确认框，cb 为用户点「确认」后的回调 */
-function showGroupTransitionDialog(targetMode, cb) {
+/** 统计某题型组内未作答题目数（考试模式用） */
+function _countGroupUnanswered(gIdx) {
+  const g = S.modeGroups[gIdx];
+  if (!g) return 0;
+  let count = 0;
+  for (let i = g.startIdx; i <= g.endIdx; i++) {
+    const sel = S.ans[i];
+    if (sel === undefined || (sel instanceof Set && sel.size === 0)) count++;
+  }
+  return count;
+}
+
+/** 弹出题型切换确认框，unanswered=当前题型未答题数，cb 为用户点「确认」后的回调 */
+function showGroupTransitionDialog(targetMode, unanswered, cb) {
   S._groupModalCb = cb;
   document.getElementById('gtm-mode').textContent = targetMode || '下一题型';
+  const warnEl = document.getElementById('gtm-unanswered');
+  if (warnEl) {
+    if (unanswered > 0) {
+      warnEl.textContent = `当前题型还有 ${unanswered} 道题未作答`;
+      warnEl.style.display = '';
+    } else {
+      warnEl.style.display = 'none';
+    }
+  }
   document.getElementById('group-transition-modal').style.display = 'flex';
 }
 function confirmGroupModal() {
@@ -2021,7 +2042,7 @@ function startQuiz(remainingSeconds) {
     fill.className = 'progress-fill';
     document.getElementById('q-grid-panel').classList.remove('open');
     buildGrid();
-    _showCalcBtn(false);
+    _showCalcBtn(true);  // 练习模式也提供计算器
   }
 
   showScreen('s-quiz');
@@ -2393,7 +2414,7 @@ function selectOpt(letter, btn) {
           }
           if (nextGIdx !== curGIdx) {
             const nextGroup = S.modeGroups[nextGIdx];
-            showGroupTransitionDialog(nextGroup.mode, () => {
+            showGroupTransitionDialog(nextGroup.mode, _countGroupUnanswered(curGIdx), () => {
               S.currentGroupIdx = nextGIdx;
               if (!nextGroup.allowBack) S.caseMaxReached[nextGIdx] = S.caseMaxReached[nextGIdx] ?? nextIdx;
               S.cur = nextIdx; renderQ('forward'); updateGridDot();
@@ -2486,7 +2507,7 @@ function submitMulti() {
         }
         if (nextGIdx !== curGIdx) {
           const nextGroup = S.modeGroups[nextGIdx];
-          showGroupTransitionDialog(nextGroup.mode, () => {
+          showGroupTransitionDialog(nextGroup.mode, _countGroupUnanswered(curGIdx), () => {
             S.currentGroupIdx = nextGIdx;
             if (!nextGroup.allowBack) S.caseMaxReached[nextGIdx] = S.caseMaxReached[nextGIdx] ?? nextIdx;
             S.cur = nextIdx; renderQ('forward'); updateGridDot();
@@ -2645,7 +2666,7 @@ function nextOrSubmit() {
     if (nextGIdx !== curGIdx) {
       // 跨题型组——弹窗提示
       const nextGroup = S.modeGroups[nextGIdx];
-      showGroupTransitionDialog(nextGroup.mode, () => {
+      showGroupTransitionDialog(nextGroup.mode, _countGroupUnanswered(curGIdx), () => {
         S.currentGroupIdx = nextGIdx;
         // 案例分析组：记录最远到达位置
         if (!nextGroup.allowBack) {
@@ -3171,7 +3192,7 @@ function buildGrid() {
         if (!targetG.allowBack && i > (S.caseMaxReached[targetGIdx] ?? targetG.startIdx)) { toast('请按顺序作答案例分析题'); return; }
         if (targetGIdx > curGIdx) {
           const captured = i;
-          showGroupTransitionDialog(targetG.mode, () => {
+          showGroupTransitionDialog(targetG.mode, _countGroupUnanswered(curGIdx), () => {
             S.currentGroupIdx = targetGIdx;
             if (!targetG.allowBack) S.caseMaxReached[targetGIdx] = S.caseMaxReached[targetGIdx] ?? captured;
             S.cur = captured; renderQ('forward'); updateGridDot();
