@@ -499,6 +499,8 @@ function makeStreamingRenderer(container, scrollTarget) {
     // 等 smd 流式阶段无法正确处理的元素，在这一步得到最终形态。
     try { container.innerHTML = markedRender(fullText); }
     catch (e) { /* 保留 smd 已渲染的结果 */ }
+    // 补充渲染 \[...\] / \(...\) 格式的 LaTeX（AI 可能输出此类定界符）
+    _renderMathInContainer(container);
     renderMermaidBlocks(container).catch(() => {});
     if (scrollTarget) scrollMessages(scrollTarget);
   }
@@ -831,7 +833,6 @@ function sendAIMessage(key) {
 
   let fullReasoning = '';
   let hasReasoning = false;
-  let thinkingCollapsed = false;
   let aborted = false;
   let truncated = false; // true when server signals finish_reason=length
   let contentRenderer = null; // streaming renderer for content
@@ -871,7 +872,7 @@ function sendAIMessage(key) {
                 const obj = JSON.parse(data);
                 if (obj.truncated) truncated = true;
                 if (obj.content) { if (!contentRenderer) contentRenderer = makeStreamingRenderer(contentWrap, messages); contentRenderer.push(obj.content); fullRawText += obj.content; }
-                if (obj.reasoning) { if (!reasoningRenderer) reasoningRenderer = makeStreamingRenderer(thinkingBody, messages); reasoningRenderer.push(obj.reasoning); fullReasoning += obj.reasoning; }
+                if (obj.reasoning) { if (!reasoningRenderer) reasoningRenderer = makeStreamingRenderer(thinkingBody, messages); reasoningRenderer.push(obj.reasoning); fullReasoning += obj.reasoning; hasReasoning = true; }
               } catch(e) {}
             }
           }
@@ -906,7 +907,18 @@ function sendAIMessage(key) {
                 hasReasoning = true;
                 thinkingWrap.style.display = '';
                 thinkingWrap.classList.add('ai-thinking-fadein');
+                // 默认折叠：header 可见、body 隐藏，用户点击展开
+                thinkingHeader.classList.add('ai-thinking-collapsed');
+                thinkingBody.style.display = 'none';
                 reasoningRenderer = makeStreamingRenderer(thinkingBody, messages);
+                thinkingHeader.onclick = () => {
+                  const hidden = thinkingBody.style.display === 'none';
+                  thinkingBody.style.display = hidden ? '' : 'none';
+                  thinkingHeader.classList.toggle('ai-thinking-collapsed', !hidden);
+                  thinkingHeader.classList.toggle('ai-thinking-expanded', hidden);
+                  // 展开时重置暂停状态，让输出继续跟随滚动
+                  if (hidden) _resetScrollPause();
+                };
               }
               reasoningRenderer.push(obj.reasoning);
               fullReasoning += obj.reasoning;
@@ -918,11 +930,6 @@ function sendAIMessage(key) {
 
             // Handle main content — stream it paragraph by paragraph
             if (obj.content) {
-              // If we had reasoning and now content starts, collapse thinking
-              if (hasReasoning && !thinkingCollapsed) {
-                thinkingCollapsed = true;
-                collapseThinking(thinkingHeader, thinkingBody);
-              }
               // Lazily create streaming renderer on first content chunk
               if (!contentRenderer) {
                 contentRenderer = makeStreamingRenderer(contentWrap, messages);
@@ -954,7 +961,6 @@ function sendAIMessage(key) {
     state.streaming = false;
     msgEl.classList.remove('ai-typing');
 
-    // If reasoning was never collapsed (no content came after), collapse it now
     // Final flush of streaming renderers
     if (reasoningRenderer) {
       reasoningRenderer.flush();
@@ -964,10 +970,10 @@ function sendAIMessage(key) {
       contentRenderer.flush();
       contentRenderer = null;
     }
-    // Collapse thinking after content is rendered
-    if (hasReasoning && !thinkingCollapsed) {
-      thinkingCollapsed = true;
-      setTimeout(() => collapseThinking(thinkingHeader, thinkingBody), 50);
+    // 思考完成：将 header 标签从“思考中…”改为“思考过程”
+    if (hasReasoning) {
+      const lbl = thinkingHeader.querySelector('.ai-thinking-label');
+      if (lbl) lbl.textContent = '思考过程';
     }
 
     // Save assistant response to history
@@ -1013,10 +1019,31 @@ function sendAIMessage(key) {
 }
 
 /**
+ * 在容器内补充渲染 \[...\] / \(...\) 格式的 LaTeX。
+ * marked 的自定义扩展只处理 $...$ / $$...$$，AI 有时输出 LaTeX 命令式定界符。
+ */
+function _renderMathInContainer(container) {
+  if (typeof renderMathInElement !== 'function') return;
+  try {
+    renderMathInElement(container, {
+      delimiters: [
+        { left: '$$',   right: '$$',   display: true  },
+        { left: '$',    right: '$',    display: false },
+        { left: '\\[',  right: '\\]',  display: true  },
+        { left: '\\(',  right: '\\)',  display: false },
+      ],
+      ignoredTags: ['script','noscript','style','textarea','pre','code'],
+      throwOnError: false,
+    });
+  } catch(e) {}
+}
+
+/**
  * Render markdown content into a container, optionally appending a cursor element.
  */
 function renderContent(container, text, cursor) {
   container.innerHTML = markedRender(text);
+  _renderMathInContainer(container);
   // Post-render: replace mermaid code blocks with SVG diagrams
   renderMermaidBlocks(container).catch(() => {});
   if (cursor) container.appendChild(cursor);

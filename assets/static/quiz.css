@@ -440,7 +440,7 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   background:var(--surface);border-bottom:1px solid var(--border);flex-shrink:0;
   position:relative;
 }
-.quiz-progress-wrap{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;-webkit-tap-highlight-color:transparent}
+.quiz-progress-wrap{flex:1;min-width:72px;display:flex;flex-direction:column;gap:2px;overflow:hidden;cursor:pointer;-webkit-tap-highlight-color:transparent}
 
 /* ── 极简刷题模式 ────────────────────────────────────────────── */
 /* 隐藏非必要控件 */
@@ -594,6 +594,12 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   animation:lp-charge var(--lp-dur,600ms) linear forwards;
 }
 .quiz-timer.urgent{color:var(--danger);border-color:var(--danger);animation:pulse-timer 1s infinite}
+/* 小屏适配：计时器和按钮缩小，防止题号（如 120/230）被遮挡 */
+@media (max-width:400px){
+  .quiz-timer{padding:4px 6px;font-size:12px;gap:2px}
+  .quiz-timer>svg:first-child{display:none}
+  .flag-btn{width:30px;height:30px;font-size:14px}
+}
 .flag-btn{
   width:34px;height:34px;border-radius:9px;background:var(--card);
   border:1px solid var(--border);color:var(--muted);font-size:16px;
