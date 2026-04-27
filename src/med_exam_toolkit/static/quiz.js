@@ -4953,7 +4953,20 @@ async function _doShareExam(qs, opts) {
     // 和 hash（保持前端既有逻辑）
     const url = location.origin + location.pathname + '?share=' + d.token + '#share=' + d.token;
     const pin = d.share_pin || '';
-    _showShareDialog(url, pin, qs.length);
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: '医考练习 - 试卷分享',
+          text: pin ? `分享码：${pin}（共 ${qs.length} 题）` : `共 ${qs.length} 题`,
+          url,
+        });
+        if (pin) _showShareDialog(url, pin, qs.length);
+      } catch(shareErr) {
+        if (shareErr.name !== 'AbortError') _showShareDialog(url, pin, qs.length);
+      }
+    } else {
+      _showShareDialog(url, pin, qs.length);
+    }
   } catch(e) { toast('分享失败: ' + e.message, true); }
 }
 
