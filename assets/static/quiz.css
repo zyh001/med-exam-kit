@@ -2600,6 +2600,19 @@ button,a,[role=button],label{touch-action:manipulation}
 .cadv-help-desc{color:var(--muted)}
 
 
+/* ── AI 答疑 / 分享对话框通用遮罩样式 ─────────────────────────── */
+.ai-overlay{
+  position:fixed;inset:0;z-index:10500;
+  background:rgba(0,0,0,.6);backdrop-filter:blur(6px);
+  display:flex;align-items:center;justify-content:center;
+  padding:20px;animation:fadeIn .15s ease;
+}
+.ai-sheet{
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:18px;width:100%;max-height:90vh;overflow-y:auto;
+  box-shadow:0 20px 60px rgba(0,0,0,.5);
+}
+
 /* ════════════════════════════════════════════
    AI 答疑面板
 ════════════════════════════════════════════ */
