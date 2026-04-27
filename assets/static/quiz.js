@@ -4956,7 +4956,24 @@ async function _doShareExam(qs, opts) {
     // 和 hash（保持前端既有逻辑）
     const url = location.origin + location.pathname + '?share=' + d.token + '#share=' + d.token;
     const pin = d.share_pin || '';
-    _showShareDialog(url, pin, qs.length);
+    // 优先调用系统原生分享（手机端弹系统菜单）
+    // 同时弹 toast 显示分享码，因为系统分享弹窗无法包含 PIN
+    if (navigator.share) {
+      try {
+        await navigator.share({
+          title: '医考练习 - 试卷分享',
+          text: pin ? `分享码：${pin}（共 ${qs.length} 题）` : `共 ${qs.length} 题`,
+          url,
+        });
+        // 系统分享后额外展示分享码弹窗，确保用户记得发给接收方
+        if (pin) _showShareDialog(url, pin, qs.length);
+      } catch(shareErr) {
+        // 用户取消（AbortError）不弹窗；其他错误降级到自定义弹窗
+        if (shareErr.name !== 'AbortError') _showShareDialog(url, pin, qs.length);
+      }
+    } else {
+      _showShareDialog(url, pin, qs.length);
+    }
   } catch(e) { toast('分享失败: ' + e.message, true); }
 }
 
