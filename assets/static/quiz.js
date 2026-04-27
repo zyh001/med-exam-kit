@@ -673,19 +673,84 @@ function checkResumeSession() {
     clearExamSession(); return false;
   }
 
-  // 若剩余时间已耗尽（超时超过 10 秒缓冲），丢弃
-  const elapsed = Math.floor((Date.now() - s.savedAt) / 1000);
+  // 计算真实剩余时间
+  const elapsed   = Math.floor((Date.now() - s.savedAt) / 1000);
   const remaining = s.remaining - elapsed;
-  if (remaining <= -10) { clearExamSession(); return false; }
+  const timedOut  = remaining <= 0;
 
-  // 填充弹窗数据
+  // 超时超过 24h → 无意义，直接丢弃
+  if (Date.now() - s.savedAt > 24 * 3600 * 1000) {
+    clearExamSession(); return false;
+  }
+
+  // 填充弹窗数据（超时和未超时共用同一个 modal，只改标题/按钮文字）
   const answered = Object.keys(s.ans).length;
+  const titleEl  = document.querySelector('#resume-modal .resume-title');
+  const descEl   = document.querySelector('#resume-modal .resume-desc');
+  const restoreBtn = document.querySelector('#resume-modal .resume-btn.restore');
+  if (timedOut) {
+    if (titleEl)   titleEl.textContent  = '考试时间已到';
+    if (descEl)    descEl.innerHTML     = `考试时间已到，已作答 <strong>${answered}/${s.questions.length}</strong> 题，可提交查看成绩。`;
+    if (restoreBtn) { restoreBtn.textContent = '提交查看成绩 →'; restoreBtn.onclick = submitTimedOutSession; }
+  } else {
+    if (titleEl)   titleEl.textContent  = '发现未完成的考试';
+    if (descEl)    descEl.innerHTML     = '检测到上次考试未提交，是否继续作答？';
+    if (restoreBtn) { restoreBtn.textContent = '继续作答 →'; restoreBtn.onclick = restoreSession; }
+  }
   document.getElementById('rm-answered').textContent = answered;
   document.getElementById('rm-total').textContent    = s.questions.length;
-  document.getElementById('rm-time').textContent     = remaining > 0 ? _fmtSec(remaining) : '已超时';
+  document.getElementById('rm-time').textContent     = timedOut ? '已超时' : _fmtSec(remaining);
   document.getElementById('rm-saved').textContent    = _fmtSavedAt(s.savedAt);
   document.getElementById('resume-modal').style.display = 'flex';
   return true;
+}
+
+/** 用户选择「提交」（考试已超时，恢复会话后立即交卷） */
+async function submitTimedOutSession() {
+  const s = _loadRawSession();
+  document.getElementById('resume-modal').style.display = 'none';
+  if (!s) return;
+
+  // 恢复最小状态（不需要 startQuiz，直接提交）
+  S.mode       = 'exam';
+  S.questions  = s.questions;
+  S.ans        = _deserializeAns(s.ans);
+  S.marked     = new Set(s.marked || []);
+  S.modeGroups = s.modeGroups || buildModeGroups(s.questions);
+  S.examLimit  = s.examLimit;
+  S.examId     = s.exam_id || null;
+  S.examStart  = Date.now() - s.examLimit * 1000; // 已超时：把 examStart 推到 examLimit 秒之前
+  S._serverOffset = 0;
+  S.examSubmitted = false;
+  S._submittingExam = false;
+  if (s.scoring != null)  CFG.scoring        = !!s.scoring;
+  if (s.scorePerMode)     CFG.scorePerMode   = s.scorePerMode;
+  if (s.multiScoreMode)   CFG.multiScoreMode = s.multiScoreMode;
+  if (S.examLimit)        CFG.examTime       = Math.round(S.examLimit / 60);
+
+  clearExamSession();
+  // 直接进入结果计算，跳过计时器
+  const submitAt = Date.now();
+  S.mode = 'exam_done';
+  // 若有 exam_id，从服务端取回密封答案后再算分
+  if (S.examId) {
+    toast('正在获取答案...');
+    try {
+      const res = await apiFetch('/api/exam/reveal?id=' + encodeURIComponent(S.examId) + '&' + bankQS());
+      if (res.ok) {
+        const data = await res.json();
+        if (data && data.answers) {
+          S.questions.forEach(q => {
+            const a = data.answers[q.fingerprint + ':' + q.si];
+            if (a) { q.answer = a.answer; q.discuss = a.discuss; }
+          });
+          S.examId = null;
+        }
+      }
+    } catch(e) { /* 取不到答案只是少显示解析，不影响提交 */ }
+  }
+  calculateResults('exam', submitAt);
+  showScreen('s-results');
 }
 
 /** 用户选择「放弃」 */
