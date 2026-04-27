@@ -729,6 +729,7 @@ async function submitTimedOutSession() {
   if (S.examLimit)        CFG.examTime       = Math.round(S.examLimit / 60);
 
   clearExamSession();
+  S.examSubmitted = true; // 防止任何路径重新保存
   // 直接进入结果计算，跳过计时器
   const submitAt = Date.now();
   S.mode = 'exam_done';
@@ -2055,8 +2056,8 @@ async function startSession() {
   if (S.mode === 'memo') startMemo();
   else {
     startQuiz();
-    // 考试模式：进入后立即保存初始快照，确保题目有记录
-    if (S.mode === 'exam') saveExamSession();
+    // 不在进入考试时立即保存——等用户实际作答后再写入
+    // 避免用户进入配置页出题、但还没答题就退出时弹出恢复提示
   }
 
   } catch (e) {
@@ -3524,7 +3525,8 @@ function retryQuiz() {
     if (S.mode === 'memo') startMemo();
     else {
       startQuiz();
-      if (S.mode === 'exam') saveExamSession();
+      // 不在重试开始时立即保存——等用户实际作答后（第一次 saveExamSession 调用时）再写入
+      // 避免用户点了「再次作答」又退出时，下次回来弹出不必要的恢复提示
     }
   } else {
     // 题目已被清理，回到配置页重新出题
@@ -3947,6 +3949,9 @@ function calculateResults(origMode, submitAt) {
     .filter(x => x.sec >= 5)
     .sort((a, b) => b.sec - a.sec)
     .slice(0, 5);
+
+  // 防御性清除：确保考试会话在计算完成后一定被清理
+  clearExamSession();
 
   S.results = {
     mode: effectiveMode,
