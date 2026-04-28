@@ -2601,6 +2601,25 @@ button,a,[role=button],label{touch-action:manipulation}
 
 
 /* ── AI 答疑 / 分享对话框通用遮罩样式 ─────────────────────────── */
+/* ════════════════════════════════════════════
+   通用按钮
+════════════════════════════════════════════ */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:10px 18px;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:var(--surface);color:var(--text);font-size:14px;font-weight:500;
+  font-family:inherit;cursor:pointer;transition:all .15s;
+  line-height:1.4;white-space:nowrap;user-select:none;-webkit-user-select:none;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.45;pointer-events:none}
+.btn-primary{
+  background:var(--accent);color:#fff;border-color:var(--accent);
+}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:#fff}
+.btn-primary:active{transform:scale(.97)}
+
 .ai-overlay{
   position:fixed;inset:0;z-index:10500;
   background:rgba(0,0,0,.6);backdrop-filter:blur(6px);

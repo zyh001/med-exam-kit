@@ -523,12 +523,10 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		jsonError(wrapped, "Forbidden", http.StatusForbidden)
 		return
 	}
-	// PWA 必需资源不要求认证：SW、manifest、图标若被拦截会导致 PWA 完全失效
+	// 公共资源不要求认证：SW、manifest、静态文件（CSS/JS/字体等不含敏感数据）
 	pwaPublic := r.URL.Path == "/sw.js" ||
 		r.URL.Path == "/manifest.json" ||
-		r.URL.Path == "/static/icon.svg" ||
-		r.URL.Path == "/static/icon-192.png" ||
-		r.URL.Path == "/static/icon-512.png" ||
+		strings.HasPrefix(r.URL.Path, "/static/") ||
 		r.URL.Path == "/api/push/vapid-key"
 
 	// 仅分享用户（有合法 share cookie、无主 auth）：

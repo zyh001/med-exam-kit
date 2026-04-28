@@ -5035,8 +5035,8 @@ async function _doShareExam(qs, opts) {
           text: pin ? `分享码：${pin}（共 ${qs.length} 题）` : `共 ${qs.length} 题`,
           url,
         });
-        // 系统分享后额外展示分享码弹窗，确保用户记得发给接收方
-        if (pin) _showShareDialog(url, pin, qs.length);
+        // 系统分享成功后用 toast 提醒分享码，不再弹完整弹窗
+        if (pin) toast(`✅ 分享成功！分享码：${pin}`, false, 4000);
       } catch(shareErr) {
         // 用户取消（AbortError）不弹窗；其他错误降级到自定义弹窗
         if (shareErr.name !== 'AbortError') _showShareDialog(url, pin, qs.length);
@@ -5067,7 +5067,7 @@ function _showShareDialog(url, pin, qCount) {
         分享码 <span style="color:var(--danger);">（接收方需输入此码才能做题）</span>
       </div>
       <div style="display:flex;gap:8px;margin-bottom:16px;align-items:center;">
-        <div id="share-pin-display" style="flex:1;padding:12px 16px;border:2px solid var(--primary);border-radius:6px;background:var(--bg);font-size:22px;font-weight:700;font-family:ui-monospace,monospace;letter-spacing:4px;text-align:center;color:var(--primary);">${pin}</div>
+        <div id="share-pin-display" style="flex:1;padding:12px 16px;border:2px solid var(--accent);border-radius:6px;background:var(--bg);font-size:22px;font-weight:700;font-family:ui-monospace,monospace;letter-spacing:4px;text-align:center;color:var(--accent);">${pin}</div>
         <button id="share-copy-pin-btn" class="btn" style="padding:8px 14px;">复制</button>
       </div>
       <div style="font-size:12px;color:var(--muted);line-height:1.6;padding:10px;background:var(--bg);border-radius:6px;margin-bottom:16px;">
@@ -5191,7 +5191,7 @@ async function _promptSharePin(token) {
                style="width:100%;padding:14px 16px;border:2px solid var(--border);border-radius:8px;background:var(--bg);font-size:22px;font-weight:600;font-family:ui-monospace,monospace;letter-spacing:6px;text-align:center;text-transform:uppercase;box-sizing:border-box;margin-bottom:8px;">
         <div id="share-pin-err" style="color:var(--danger);font-size:13px;margin-bottom:8px;min-height:18px;"></div>
         <div style="text-align:center;margin-bottom:12px;">
-          <a href="javascript:void(0)" id="sp-toggle" style="font-size:13px;color:var(--primary);text-decoration:none;">
+          <a href="javascript:void(0)" id="sp-toggle" style="font-size:13px;color:var(--accent);text-decoration:none;">
             我是管理员，用主访问码登录 →
           </a>
         </div>
