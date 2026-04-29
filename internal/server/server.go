@@ -3035,6 +3035,24 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 	// 按医学考试标准题型顺序排列：A1 → A2 → A3/A4 → B → 案例分析 → 其他
 	sortModeOrder(modeOrder)
 
+	// ── 难度筛选：按正确率区间加权，重建 modeMap ─────────────────────────
+	if len(opts.difficulty) > 0 {
+		groups = difficultyFilterGroups(groups, opts.difficulty, opts.limit, opts.rng)
+		// 从过滤后的 groups 重建 modeMap（可能有空 mode，需剔除）
+		modeMap = map[string][]group{}
+		for _, grp := range groups {
+			mk := grp[0].Mode
+			modeMap[mk] = append(modeMap[mk], grp)
+		}
+		var newOrder []string
+		for _, mk := range modeOrder {
+			if len(modeMap[mk]) > 0 {
+				newOrder = append(newOrder, mk)
+			}
+		}
+		modeOrder = newOrder
+	}
+
 	var resultGroups []group
 	switch {
 	case opts.perUnit != nil:
@@ -3214,6 +3232,163 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 		rows = append(rows, grp...)
 	}
 	return rows, len(rows)
+}
+
+// ── 难度筛选辅助函数 ─────────────────────────────────────────────────────────
+
+// parseRate 解析题目正确率字符串（支持 "75%"、"75"、"75.0"）。
+// 返回 [0,100] 范围内的浮点数；若无效或 ≤0 则返回 (0, false)。
+func parseRate(s string) (float64, bool) {
+	s = strings.TrimSpace(strings.TrimSuffix(strings.TrimSpace(s), "%"))
+	if s == "" {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(s, 64)
+	if err != nil || v <= 0 {
+		return 0, false
+	}
+	return v, true
+}
+
+// groupDifficultyBucket 根据题组内各小题的平均正确率返回难度桶名。
+// 正确率 ≥80% → easy；60–80% → medium；40–60% → hard；<40% → extreme；无数据 → ""。
+func groupDifficultyBucket(grp group) string {
+	sum, cnt := 0.0, 0
+	for _, sq := range grp {
+		if r, ok := parseRate(sq.Rate); ok {
+			sum += r
+			cnt++
+		}
+	}
+	if cnt == 0 {
+		return "" // 无正确率数据
+	}
+	avg := sum / float64(cnt)
+	switch {
+	case avg >= 80:
+		return "easy"
+	case avg >= 60:
+		return "medium"
+	case avg >= 40:
+		return "hard"
+	default:
+		return "extreme"
+	}
+}
+
+// difficultyFilterGroups 按难度权重从 groups 中采样，返回满足近似比例的子集。
+//
+// difficulty 是各桶权重（非负，不需要归一化），例如 {"easy":25,"medium":45,"hard":20,"extreme":10}。
+// targetTotal：期望最终使用的数量（即 limit），用于计算各桶目标数；若 ≤0 则以总量为准。
+//
+// 算法：
+//  1. 将 groups 按正确率分入四个桶及一个无数据桶。
+//  2. 根据权重比例和 targetTotal 计算各桶目标数。
+//  3. 各桶内随机采样；若某桶数量不足，产生 shortfall。
+//  4. shortfall 优先由"无正确率"题组补充，再由其他有余量的桶补充。
+func difficultyFilterGroups(groups []group, difficulty map[string]float64, targetTotal int, rng *lcgRNG) []group {
+	knownBuckets := []string{"easy", "medium", "hard", "extreme"}
+
+	totalW := 0.0
+	for _, b := range knownBuckets {
+		if w := difficulty[b]; w > 0 {
+			totalW += w
+		}
+	}
+	if totalW == 0 {
+		return groups
+	}
+
+	// 分桶
+	buckets := map[string][]group{}
+	for _, grp := range groups {
+		b := groupDifficultyBucket(grp)
+		buckets[b] = append(buckets[b], grp)
+	}
+
+	// 洗牌各桶
+	for k := range buckets {
+		pool := append([]group(nil), buckets[k]...)
+		rng.shuffle(pool)
+		buckets[k] = pool
+	}
+
+	if targetTotal <= 0 || targetTotal > len(groups) {
+		targetTotal = len(groups)
+	}
+
+	// 各桶目标数
+	targets := map[string]int{}
+	for _, b := range knownBuckets {
+		w := difficulty[b]
+		if w <= 0 {
+			continue
+		}
+		targets[b] = int(math.Round(float64(targetTotal) * w / totalW))
+	}
+
+	// 从各桶采样，记录 shortfall
+	// 用题组在原 groups 切片中的下标做去重
+	type grpKey struct{ qi, si int }
+	key := func(grp group) grpKey { return grpKey{grp[0].QI, grp[0].SI} }
+	selected := map[grpKey]bool{}
+	result := make([]group, 0, targetTotal)
+	shortfall := 0
+
+	for _, b := range knownBuckets {
+		need := targets[b]
+		if need <= 0 {
+			continue
+		}
+		pool := buckets[b]
+		take := need
+		if take > len(pool) {
+			shortfall += need - len(pool)
+			take = len(pool)
+		}
+		for i := 0; i < take; i++ {
+			k := key(pool[i])
+			if !selected[k] {
+				result = append(result, pool[i])
+				selected[k] = true
+			}
+		}
+	}
+
+	// shortfall 优先由无正确率数据题组补充
+	for _, grp := range buckets[""] {
+		if shortfall <= 0 {
+			break
+		}
+		k := key(grp)
+		if !selected[k] {
+			result = append(result, grp)
+			selected[k] = true
+			shortfall--
+		}
+	}
+
+	// 仍有 shortfall 则从各桶余量中补
+	if shortfall > 0 {
+		for _, b := range knownBuckets {
+			if shortfall <= 0 {
+				break
+			}
+			for _, grp := range buckets[b] {
+				if shortfall <= 0 {
+					break
+				}
+				k := key(grp)
+				if !selected[k] {
+					result = append(result, grp)
+					selected[k] = true
+					shortfall--
+				}
+			}
+		}
+	}
+
+	return result
 }
 
 func greedyFill(pool []group, target int) []group {
