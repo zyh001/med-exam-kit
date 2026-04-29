@@ -471,16 +471,20 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 /* 选中：仅字母圈变色 */
 .s-quiz-zen .opt.selected{background:transparent}
 .s-quiz-zen .opt.selected .opt-label{background:var(--accent);color:#fff}
-/* 答对：整行淡绿底色 + 字母圈深绿 */
+/* 答对：左边框绿线 + 字母圈深绿 + 文字绿，不加背景（保持极简透明风格） */
 .s-quiz-zen .opt.correct{
-  background:var(--success-bg);border-radius:8px;animation:none;
+  background:transparent;border-radius:8px;animation:none;
+  border-left:3px solid var(--success);padding-left:6px;
 }
 .s-quiz-zen .opt.correct .opt-label{background:var(--success);color:#fff;box-shadow:none}
-/* 答错：整行淡红底色 + 字母圈深红 */
+.s-quiz-zen .opt.correct .opt-text{color:var(--success)}
+/* 答错：左边框红线 + 字母圈深红 + 文字红，不加背景 */
 .s-quiz-zen .opt.wrong{
-  background:var(--danger-bg);border-radius:8px;animation:none;
+  background:transparent;border-radius:8px;animation:none;
+  border-left:3px solid var(--danger);padding-left:6px;
 }
 .s-quiz-zen .opt.wrong .opt-label{background:var(--danger);color:#fff;box-shadow:none}
+.s-quiz-zen .opt.wrong .opt-text{color:var(--danger)}
 /* 多选选中 */
 .s-quiz-zen .opt.multi-selected{background:transparent}
 .s-quiz-zen .opt.multi-selected .opt-label{background:var(--accent);color:#fff}
