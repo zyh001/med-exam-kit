@@ -466,11 +466,10 @@ def _create_app():
             if host_port is not None and host_port != _server_port:
                 return jsonify({"error": "Forbidden"}), 403
 
-        # PWA 必需资源不要求认证：被拦截会导致 PWA 完全失效
-        _pwa_public = request.path in (
-            "/sw.js", "/manifest.json",
-            "/static/icon.svg", "/static/icon-192.png", "/static/icon-512.png",
-            "/api/push/vapid-key",
+        # 公共资源不要求认证：SW、manifest、所有静态文件（CSS/JS/字体等不含敏感数据）
+        _pwa_public = (
+            request.path in ("/sw.js", "/manifest.json", "/api/push/vapid-key")
+            or request.path.startswith("/static/")
         )
 
         # 仅分享用户（有合法 share cookie、无主 auth）：
@@ -1311,7 +1310,11 @@ def api_questions():
                 continue
             pool = list(unit_map[uk])
             rng.shuffle(pool)
-            for grp in _greedy_fill(pool, need):
+            if difficulty:
+                picked = _sample_with_difficulty(pool, need, difficulty, rng)
+            else:
+                picked = _greedy_fill(pool, need)
+            for grp in picked:
                 mk = grp[0]["mode"]
                 reorder.setdefault(mk, []).append(grp)
         for mk in mode_order:
@@ -1340,8 +1343,11 @@ def api_questions():
             total_need_pm += need
             pool = list(mode_map[mk])
             rng.shuffle(pool)
-            result_groups.extend(_greedy_fill(pool, need))
-        # shortfall recovery
+            if difficulty:
+                result_groups.extend(_sample_with_difficulty(pool, need, difficulty, rng))
+            else:
+                result_groups.extend(_greedy_fill(pool, need))
+        # shortfall recovery (per_mode)
         actual_pm = sum(len(g) for g in result_groups)
         if (shortfall := total_need_pm - actual_pm) > 0:
             picked_ids = {id(g) for g in result_groups}
