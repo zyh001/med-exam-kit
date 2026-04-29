@@ -471,16 +471,20 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 /* 选中：仅字母圈变色 */
 .s-quiz-zen .opt.selected{background:transparent}
 .s-quiz-zen .opt.selected .opt-label{background:var(--accent);color:#fff}
-/* 答对：整行淡绿底色 + 字母圈深绿 */
+/* 答对：左边框绿线 + 字母圈深绿 + 文字绿，不加背景（保持极简透明风格） */
 .s-quiz-zen .opt.correct{
-  background:var(--success-bg);border-radius:8px;animation:none;
+  background:transparent;border-radius:8px;animation:none;
+  border-left:3px solid var(--success);padding-left:6px;
 }
 .s-quiz-zen .opt.correct .opt-label{background:var(--success);color:#fff;box-shadow:none}
-/* 答错：整行淡红底色 + 字母圈深红 */
+.s-quiz-zen .opt.correct .opt-text{color:var(--success)}
+/* 答错：左边框红线 + 字母圈深红 + 文字红，不加背景 */
 .s-quiz-zen .opt.wrong{
-  background:var(--danger-bg);border-radius:8px;animation:none;
+  background:transparent;border-radius:8px;animation:none;
+  border-left:3px solid var(--danger);padding-left:6px;
 }
 .s-quiz-zen .opt.wrong .opt-label{background:var(--danger);color:#fff;box-shadow:none}
+.s-quiz-zen .opt.wrong .opt-text{color:var(--danger)}
 /* 多选选中 */
 .s-quiz-zen .opt.multi-selected{background:transparent}
 .s-quiz-zen .opt.multi-selected .opt-label{background:var(--accent);color:#fff}
@@ -2601,6 +2605,25 @@ button,a,[role=button],label{touch-action:manipulation}
 
 
 /* ── AI 答疑 / 分享对话框通用遮罩样式 ─────────────────────────── */
+/* ════════════════════════════════════════════
+   通用按钮
+════════════════════════════════════════════ */
+.btn{
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:10px 18px;border:1px solid var(--border);border-radius:var(--r-sm);
+  background:var(--surface);color:var(--text);font-size:14px;font-weight:500;
+  font-family:inherit;cursor:pointer;transition:all .15s;
+  line-height:1.4;white-space:nowrap;user-select:none;-webkit-user-select:none;
+}
+.btn:hover{border-color:var(--accent);color:var(--accent)}
+.btn:active{transform:scale(.97)}
+.btn:disabled{opacity:.45;pointer-events:none}
+.btn-primary{
+  background:var(--accent);color:#fff;border-color:var(--accent);
+}
+.btn-primary:hover{background:var(--accent-hover);border-color:var(--accent-hover);color:#fff}
+.btn-primary:active{transform:scale(.97)}
+
 .ai-overlay{
   position:fixed;inset:0;z-index:10500;
   background:rgba(0,0,0,.6);backdrop-filter:blur(6px);
