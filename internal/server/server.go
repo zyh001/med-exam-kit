@@ -1895,8 +1895,9 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 	// Try to persist to PostgreSQL if available (golang-version + PG mode).
 	// Falls back to in-memory storage otherwise.
 	pgPersisted := false
+	banksMu.RLock()
 	if bankIdx < len(s.cfg.Banks) {
-		if b := &s.cfg.Banks[bankIdx]; b.PgStore != nil {
+		if b := s.cfg.Banks[bankIdx]; b.PgStore != nil {
 			if ps, ok2 := b.PgStore.(shareStorer); ok2 {
 				if data, err := json.Marshal(cfg); err == nil {
 					if err2 := ps.SaveShareTokenJSON(r.Context(), token, data); err2 == nil {
@@ -1906,6 +1907,7 @@ func (s *Server) handleExamShare(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+	banksMu.RUnlock()
 	_ = pgPersisted
 
 	s.shareMu.Lock()
@@ -2187,11 +2189,14 @@ func (s *Server) handleExamJoin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	banksMu.RLock()
 	if cfg.BankIdx < 0 || cfg.BankIdx >= len(s.cfg.Banks) {
+		banksMu.RUnlock()
 		jsonError(w, "题库不存在", http.StatusNotFound)
 		return
 	}
-	b := &s.cfg.Banks[cfg.BankIdx]
+	b := s.cfg.Banks[cfg.BankIdx] // copy
+	banksMu.RUnlock()
 	fpSet := map[string]struct{}{}
 	for _, fp := range cfg.Fingerprints {
 		fpSet[fp] = struct{}{}
@@ -2519,7 +2524,13 @@ func (s *Server) saveAIChatLogAsync(r *http.Request, bankIdx int,
 	if bankIdx < 0 || bankIdx >= len(s.cfg.Banks) {
 		bankIdx = 0
 	}
-	b := &s.cfg.Banks[bankIdx]
+	banksMu.RLock()
+	if bankIdx >= len(s.cfg.Banks) {
+		banksMu.RUnlock()
+		return
+	}
+	b := s.cfg.Banks[bankIdx] // copy
+	banksMu.RUnlock()
 	uid := getUserID(r)
 	ctx := r.Context()
 
@@ -2823,8 +2834,11 @@ func fmtDuration(sec int) string {
 	return fmt.Sprintf("%d:%02d", m, s)
 }
 func (s *Server) loadShareFromPG(ctx context.Context, token string) *shareConfig {
-	for i := range s.cfg.Banks {
-		if b := &s.cfg.Banks[i]; b.PgStore != nil {
+	banksMu.RLock()
+	banks := append([]BankEntry(nil), s.cfg.Banks...) // snapshot
+	banksMu.RUnlock()
+	for _, b := range banks {
+		if b.PgStore != nil {
 			if ps, ok := b.PgStore.(shareStorer); ok {
 				data := ps.LoadShareTokenJSON(ctx, token)
 				if data == nil {
@@ -2844,8 +2858,11 @@ func (s *Server) loadShareFromPG(ctx context.Context, token string) *shareConfig
 
 // deleteShareFromPG 从 PostgreSQL 删除已过期的 share token。
 func (s *Server) deleteShareFromPG(ctx context.Context, token string) {
-	for i := range s.cfg.Banks {
-		if b := &s.cfg.Banks[i]; b.PgStore != nil {
+	banksMu.RLock()
+	banks := append([]BankEntry(nil), s.cfg.Banks...) // snapshot
+	banksMu.RUnlock()
+	for _, b := range banks {
+		if b.PgStore != nil {
 			if ps, ok := b.PgStore.(shareStorer); ok {
 				ps.DeleteShareToken(ctx, token)
 			}

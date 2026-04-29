@@ -237,25 +237,82 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	srv := server.New(cfg)
 
 	// 注入热重载函数（SIGHUP / POST /api/admin/reload 使用）
-	srv.SetReloadFunc(func(bankOverride []string, passwordOverride string) ([]server.BankEntry, error) {
+	srv.SetReloadFunc(func(bankOverride []string, passwordOverride string) ([]server.BankEntry, *server.ReloadedConfig, error) {
 		// 若未指定 override，重读配置文件
 		paths := bankOverride
 		pwd := passwordOverride
-		if len(paths) == 0 && cfgFile != "" {
-			reloaded, err := loadConfig(cfgFile)
+		var fileCfgNew AppConfig
+		if cfgFile != "" {
+			var err error
+			fileCfgNew, err = loadConfig(cfgFile)
 			if err != nil {
-				return nil, fmt.Errorf("重读配置文件失败: %w", err)
+				return nil, nil, fmt.Errorf("重读配置文件失败: %w", err)
 			}
-			paths = reloaded.Banks
+			if len(paths) == 0 {
+				paths = fileCfgNew.Banks
+			}
 			if pwd == "" {
-				pwd = reloaded.Password
+				pwd = fileCfgNew.Password
 			}
 		}
 		if len(paths) == 0 {
-			return nil, fmt.Errorf("配置文件中未找到 banks 列表")
+			return nil, nil, fmt.Errorf("配置文件中未找到 banks 列表")
 		}
 		noRec := noRecord
-		return loadBankEntries(ctx, paths, pwd, pg, noRec)
+		entries, err := loadBankEntries(ctx, paths, pwd, pg, noRec)
+		if err != nil {
+			return nil, nil, err
+		}
+		// PG bank_ids（追加）
+		if pg != nil && len(fileCfgNew.BankIDs) > 0 {
+			for _, bid := range fileCfgNew.BankIDs {
+				bp := fmt.Sprintf("pg:bank:%d", bid)
+				extra, err2 := loadBankEntries(ctx, []string{bp}, pwd, pg, noRec)
+				if err2 != nil {
+					logger.Warnf("[reload] 跳过 pg:bank:%d: %v", bid, err2)
+					continue
+				}
+				entries = append(entries, extra...)
+			}
+		}
+
+		// 构建完整配置更新
+		rc := &server.ReloadedConfig{
+			AIProvider:       fileCfgNew.AIProvider,
+			AIModel:          fileCfgNew.AIModel,
+			AIAPIKey:         fileCfgNew.AIAPIKey,
+			AIBaseURL:        fileCfgNew.AIBaseURL,
+			AIEnableThinking: fileCfgNew.AIEnableThinking,
+			AIMaxTokens:      fileCfgNew.AIMaxTokens,
+			ASRAPIKey:        fileCfgNew.ASRAPIKey,
+			ASRModel:         fileCfgNew.ASRModel,
+			ASRBaseURL:       fileCfgNew.ASRBaseURL,
+			S3Endpoint:       fileCfgNew.S3Endpoint,
+			S3Bucket:         fileCfgNew.S3Bucket,
+			S3AccessKey:      fileCfgNew.S3AccessKey,
+			S3SecretKey:      fileCfgNew.S3SecretKey,
+			S3PublicBase:     fileCfgNew.S3PublicBase,
+			CleanupDays:            fileCfgNew.CleanupDays,
+			AIChatLogRetentionDays: fileCfgNew.AIChatLogRetentionDays,
+			Debug:                  fileCfgNew.Debug,
+			TrustedProxies:         fileCfgNew.TrustedProxies,
+		}
+		// 访问码：配置文件中 pin 变更时更新，否则保留当前值
+		if fileCfgNew.NoPin {
+			rc.AccessCode = ""
+			rc.CookieSecret = ""
+			rc.PinLen = 0
+		} else if fileCfgNew.Pin != "" {
+			rc.AccessCode = strings.ToUpper(strings.TrimSpace(fileCfgNew.Pin))
+			rc.CookieSecret = auth.DeriveSecret(rc.AccessCode)
+			rc.PinLen = 0
+		} else {
+			// pin 未设置且非 no_pin：保留当前运行时的访问码不变
+			rc.AccessCode = accessCode
+			rc.CookieSecret = cookieSecret
+			rc.PinLen = pinLen
+		}
+		return entries, rc, nil
 	})
 	srv.SetConfigPath(cfgFile)
 
