@@ -82,26 +82,30 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 	srv := server.New(cfg)
 
 	// 注入热重载函数（nopg：只支持 .mqb 文件）
-	srv.SetReloadFunc(func(bankOverride []string, passwordOverride string) ([]server.BankEntry, error) {
+	srv.SetReloadFunc(func(bankOverride []string, passwordOverride string) ([]server.BankEntry, *server.ReloadedConfig, error) {
 		paths := bankOverride
 		pwd := passwordOverride
-		if len(paths) == 0 {
-			if cfgFile == "" {
-				return nil, fmt.Errorf("未找到配置文件")
-			}
-			reloaded, err := loadConfig(cfgFile)
+		var fileCfgNew AppConfig
+		if cfgFile != "" {
+			var err error
+			fileCfgNew, err = loadConfig(cfgFile)
 			if err != nil {
-				return nil, fmt.Errorf("重读配置失败: %w", err)
+				return nil, nil, fmt.Errorf("重读配置失败: %w", err)
 			}
-			paths = reloaded.Banks
-			if pwd == "" { pwd = reloaded.Password }
+			if len(paths) == 0 {
+				paths = fileCfgNew.Banks
+			}
+			if pwd == "" { pwd = fileCfgNew.Password }
+		}
+		if len(paths) == 0 {
+			return nil, nil, fmt.Errorf("未找到题库列表")
 		}
 		var entries []server.BankEntry
 		for _, bp := range paths {
 			fmt.Printf("📂 重载题库：%s\n", bp)
 			qs, err := bank.LoadBank(bp, pwd)
 			if err != nil {
-				return nil, fmt.Errorf("加载 %s 失败: %w", bp, err)
+				return nil, nil, fmt.Errorf("加载 %s 失败: %w", bp, err)
 			}
 			var db *sql.DB
 			dbPath := progress.DBPathForBank(bp)
@@ -111,7 +115,39 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 				DB: db, RecordEnabled: db != nil,
 			})
 		}
-		return entries, nil
+		// 构建配置更新
+		rc := &server.ReloadedConfig{
+			AIProvider:       fileCfgNew.AIProvider,
+			AIModel:          fileCfgNew.AIModel,
+			AIAPIKey:         fileCfgNew.AIAPIKey,
+			AIBaseURL:        fileCfgNew.AIBaseURL,
+			AIEnableThinking: fileCfgNew.AIEnableThinking,
+			AIMaxTokens:      fileCfgNew.AIMaxTokens,
+			ASRAPIKey:        fileCfgNew.ASRAPIKey,
+			ASRModel:         fileCfgNew.ASRModel,
+			ASRBaseURL:       fileCfgNew.ASRBaseURL,
+			S3Endpoint:       fileCfgNew.S3Endpoint,
+			S3Bucket:         fileCfgNew.S3Bucket,
+			S3AccessKey:      fileCfgNew.S3AccessKey,
+			S3SecretKey:      fileCfgNew.S3SecretKey,
+			S3PublicBase:     fileCfgNew.S3PublicBase,
+			CleanupDays:      fileCfgNew.CleanupDays,
+			AIChatLogRetentionDays: fileCfgNew.AIChatLogRetentionDays,
+			Debug:            fileCfgNew.Debug,
+			TrustedProxies:   fileCfgNew.TrustedProxies,
+		}
+		if fileCfgNew.NoPin {
+			rc.AccessCode = ""
+			rc.CookieSecret = ""
+		} else if fileCfgNew.Pin != "" {
+			rc.AccessCode = strings.ToUpper(strings.TrimSpace(fileCfgNew.Pin))
+			rc.CookieSecret = auth.DeriveSecret(rc.AccessCode)
+		} else {
+			rc.AccessCode = accessCode
+			rc.CookieSecret = cookieSecret
+			rc.PinLen = pinLen
+		}
+		return entries, rc, nil
 	})
 	srv.SetConfigPath(cfgFile)
 
