@@ -2886,13 +2886,16 @@ function _showZenHint(text) {
 function enterZenMode() {
   _zenMode = true;
   var s = document.getElementById('s-quiz');
-  if (s) s.classList.add('s-quiz-zen');
+  if (s) {
+    s.classList.add('s-quiz-zen');
+    if (S.mode === 'exam') s.classList.add('s-quiz-zen-exam');
+  }
   _showZenHint('⚡ 极简模式  长按再次退出');
 }
 function exitZenMode() {
   _zenMode = false;
   var s = document.getElementById('s-quiz');
-  if (s) s.classList.remove('s-quiz-zen');
+  if (s) { s.classList.remove('s-quiz-zen'); s.classList.remove('s-quiz-zen-exam'); }
   _showZenHint('已退出极简模式');
 }
 

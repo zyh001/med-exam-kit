@@ -453,6 +453,8 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
 .s-quiz-zen .q-grid-panel,
 .s-quiz-zen .q-tag-row,
 .s-quiz-zen .q-type-tag{display:none !important}
+/* 考试极简模式：单独把计时器显示回来，其余隐藏保持不变 */
+.s-quiz-zen-exam #quiz-timer{display:flex !important}
 
 /* header：透明无边 */
 .s-quiz-zen .quiz-header{border-bottom-color:transparent;background:transparent}
