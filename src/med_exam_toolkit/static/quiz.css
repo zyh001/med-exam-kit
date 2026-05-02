@@ -3207,6 +3207,19 @@ button,a,[role=button],label{touch-action:manipulation}
 }
 .pause-btn.primary:hover{opacity:.94;transform:translateY(-1px)}
 .pause-btn.primary:active{transform:none}
+/* 长按蓄力（隐藏：真正暂停切换） */
+.pause-btn.primary.charging{
+  background:linear-gradient(90deg,var(--accent) 0%,var(--accent) var(--rp-progress,0%),#6177f9 var(--rp-progress,0%),#6177f9 100%);
+  animation:rp-charge 5s linear forwards;
+}
+@keyframes rp-charge{
+  from{filter:brightness(1)}
+  to{filter:brightness(1.25)}
+}
+/* 真正暂停状态下的主按钮（提示用户当前可点击恢复） */
+.pause-btn.primary[data-real-paused="1"]{
+  background:linear-gradient(135deg,var(--warning,#f0a020),#d97706);
+}
 .pause-btn.danger{
   background:var(--surface);color:var(--danger);
   border:1.5px solid var(--danger);

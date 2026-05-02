@@ -224,6 +224,7 @@ _SHARE_ALLOWED_PATHS = frozenset({
     "/static/icon.svg",
     "/static/icon-192.png",
     "/static/icon-512.png",
+    "/api/banks",        # 分享用户首次访问需要此接口初始化 banksInfo
     "/api/info",
     "/api/exam/join",
     "/api/exam/reveal",
