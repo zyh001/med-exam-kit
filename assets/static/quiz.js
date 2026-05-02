@@ -599,9 +599,14 @@ function _deserializeAns(raw) {
 /** 保存当前考试状态到 localStorage */
 function saveExamSession() {
   if (S.mode !== 'exam' || !S.questions.length || S.examSubmitted) return;
-  // elapsed 必须用 serverNow() — S.examStart 是服务端视角毫秒，Date.now()
-  // 会被本地时钟偏移污染，导致恢复时 remaining 不准
-  const elapsedSec = Math.floor((serverNow() - S.examStart) / 1000);
+  // 真正暂停中：tick 已冻结，但 serverNow()-examStart 仍在增长。
+  // 把当前正在进行的暂停时长也纳入 offset，使 remaining 反映冻结时刻的值。
+  let pauseOffset = S.examPauseOffsetMs || 0;
+  if (S.realPauseStartMs) {
+    pauseOffset += serverNow() - S.realPauseStartMs;
+  }
+  const effectiveStart = S.examStart + pauseOffset;
+  const elapsedSec = Math.floor((serverNow() - effectiveStart) / 1000);
   const remaining  = Math.max(0, S.examLimit - elapsedSec);
   const session = {
     v: 1,
@@ -615,12 +620,12 @@ function saveExamSession() {
     modeGroups:    S.modeGroups,
     currentGroupIdx: S.currentGroupIdx,
     caseMaxReached:  S.caseMaxReached,
-    // 保存计分配置，确保刷新恢复后的分享也能带上正确的配置
     scoring:        !!CFG.scoring,
     scorePerMode:   CFG.scorePerMode   || {},
     multiScoreMode: CFG.multiScoreMode || 'strict',
-    // 分享考试的密封 exam_id：刷新后仍能向服务端取回答案
     exam_id:        S.examId || null,
+    // 保存累计暂停时长，恢复时合并进 examStart 避免计时器跳变
+    examPauseOffsetMs: pauseOffset,
   };
   try {
     localStorage.setItem(examSessionKey(), JSON.stringify(session));
@@ -788,11 +793,14 @@ function restoreSession() {
   if (s.multiScoreMode)       CFG.multiScoreMode = s.multiScoreMode;
   // 恢复密封考试的 exam_id，刷新后仍可向服务端取回答案
   S.examId = s.exam_id || null;
-  // 同步 CFG.examTime，使后续"重新考"的默认时间也一致
   if (S.examLimit) CFG.examTime = Math.round(S.examLimit / 60);
-  // examStart 先按本地记录反推，后面 resyncServerTime() 成功后会被覆盖为
-  // 服务端权威值，出现本地/服务端时间偏差时也能自愈。
-  S.examStart        = Date.now() - (S.examLimit - remaining) * 1000;
+  // 恢复累计真实暂停偏移，把它合并进 examStart，使计时器从正确位置继续
+  const savedPauseOffset = s.examPauseOffsetMs || 0;
+  S.examPauseOffsetMs = savedPauseOffset;
+  S.realPauseStartMs  = 0; // 恢复后不再处于真正暂停状态
+  // examStart 先按本地记录反推，后面 resyncServerTime() 成功后会被覆盖。
+  // 加上暂停偏移，使 serverNow()-examStart 仍反映「扣除暂停时间后的已用时」。
+  S.examStart        = Date.now() - (S.examLimit - remaining) * 1000 + savedPauseOffset;
   S._serverOffset    = 0;
 
   startQuiz(remaining);
@@ -3272,6 +3280,8 @@ function pauseExam() {
   document.body.classList.add('exam-paused');
   // 立刻把当前 rem 映射到遮罩层，避免用户看到 00:00 的初始值
   _syncPauseTimer();
+  // 落盘：用户可能在弹窗期间关闭浏览器
+  saveExamSession();
   // 隐藏长按交互：长按"继续答题"5 秒可以真正冻结计时
   _bindRealPauseLongPress();
   // ESC 快捷键 = 继续
@@ -3392,6 +3402,7 @@ function _bindRealPauseLongPress() {
         // 进入真正暂停
         S.realPauseStartMs = serverNow();
         _setRealPausedUI(true);
+        saveExamSession(); // 落盘冻结时刻的 remaining
         toast('⏸ 已真正冻结计时', false, 1800);
       }
     }, REAL_PAUSE_LONG_MS);
