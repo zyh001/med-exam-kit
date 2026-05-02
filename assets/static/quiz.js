@@ -64,7 +64,9 @@ const S = {
   // 通过 /api/exam/time 定期同步，避免用户修改系统时间作弊；
   // tick 用 wall-clock 计算 rem，避免后台标签页 setInterval 漂移。
   _serverOffset: 0,       // serverNow - Date.now()；0 表示未同步，落回本地时钟
-  examPaused: false,      // 暂停遮罩是否已显示（计时不会真的停）
+  examPaused: false,      // 暂停遮罩是否已显示（默认计时仍在跑）
+  realPauseStartMs: 0,    // 隐藏功能：真正暂停的起始时刻（serverNow），0 表示未真正暂停
+  examPauseOffsetMs: 0,   // 累计的真正暂停时长（用于在 resync 时合并到 examStart）
 };
 
 // 返回服务器视角下的当前时间（毫秒）。未同步时退回本地时间。
@@ -805,6 +807,12 @@ const SELECTED_BANK_KEY = 'quiz-selected-bank';
 
 async function init() {
   loadTheme();
+  // 分享链接：必须在调用任何受认证保护的 API 之前完成认证，
+  // 否则 /api/banks 会返回 401 触发"会话失效"横幅，并使后续 init 流产。
+  try {
+    const hasShareToken = /[#&]share=[a-f0-9]+/.test(location.hash + location.search);
+    if (hasShareToken) await _ensureShareAuthed();
+  } catch(_) { /* 失败不阻塞主流程，继续走默认 401 处理 */ }
   try {
     const banksData = await apiFetch('/api/banks').then(r => r.json());
     S.banksInfo = banksData.banks || [];
@@ -3128,6 +3136,7 @@ function startTimer(seconds) {
 
   function tick() {
     if (!S.examStart || !S.examLimit) return;
+    if (S.realPauseStartMs) return; // 真正暂停中：冻结显示与自动交卷
     const elapsed = Math.floor((serverNow() - S.examStart) / 1000);
     const rem = Math.max(0, S.examLimit - elapsed);
     updateTimerDisp(rem);
@@ -3181,13 +3190,14 @@ function updateTimerDisp(sec) {
 // 从服务器重新拉权威时间，修正 _serverOffset，也可强制刷新 rem 显示。
 async function resyncServerTime() {
   if (!S.examId) return;
+  if (S.realPauseStartMs) return; // 真正暂停中：不要让服务端覆盖本地的冻结时钟
   try {
     const r = await apiFetch('/api/exam/time?id=' + encodeURIComponent(S.examId));
     if (!r.ok) return;
     const d = await r.json();
     if (d && d.server_now && d.started_at) {
       S._serverOffset = d.server_now - Date.now();
-      S.examStart     = d.started_at;
+      S.examStart     = d.started_at + (S.examPauseOffsetMs || 0); // 加回累计真实暂停时长
       if (d.time_limit > 0) S.examLimit = d.time_limit;
     }
   } catch (_) { /* 离线或接口 404 时保持上次 offset，tick 用 wall-clock 继续 */ }
@@ -3262,6 +3272,8 @@ function pauseExam() {
   document.body.classList.add('exam-paused');
   // 立刻把当前 rem 映射到遮罩层，避免用户看到 00:00 的初始值
   _syncPauseTimer();
+  // 隐藏长按交互：长按"继续答题"5 秒可以真正冻结计时
+  _bindRealPauseLongPress();
   // ESC 快捷键 = 继续
   document.addEventListener('keydown', _pauseEscHandler);
 }
@@ -3271,6 +3283,17 @@ function resumeExam() {
   if (overlay) overlay.style.display = 'none';
   document.body.classList.remove('exam-paused');
   S.examPaused = false;
+  // 若处于真正暂停状态：把暂停期间已过去的时间累加到 examStart 上，
+  // 让 tick 的 wall-clock 计算就像没流逝过那段时间一样
+  if (S.realPauseStartMs) {
+    const dur = serverNow() - S.realPauseStartMs;
+    if (dur > 0) {
+      S.examStart += dur;
+      S.examPauseOffsetMs = (S.examPauseOffsetMs || 0) + dur;
+    }
+    S.realPauseStartMs = 0;
+    _setRealPausedUI(false);
+  }
   document.removeEventListener('keydown', _pauseEscHandler);
   // 回前台后立即重同步一次，防止挂起期间时钟漂移
   if (S.examId && S.timerInterval) resyncServerTime();
@@ -3294,6 +3317,8 @@ function submitFromPause() {
   if (overlay) overlay.style.display = 'none';
   document.body.classList.remove('exam-paused');
   S.examPaused = false;
+  S.realPauseStartMs = 0;
+  _setRealPausedUI(false);
   document.removeEventListener('keydown', _pauseEscHandler);
   submitExam();
 }
@@ -3312,6 +3337,84 @@ function _syncPauseTimer() {
   pauseDisp.textContent = mainDisp.textContent;
   const mainUrgent = document.getElementById('quiz-timer')?.classList.contains('urgent');
   pauseDisp.classList.toggle('urgent', !!mainUrgent);
+}
+
+// ── 隐藏功能：长按"继续答题"5 秒，真正冻结计时 ──────────────────────
+//   普通点击 → resumeExam()（计时不停）
+//   长按 ≥5s   → 切换"真正暂停"开关；处于真正暂停时点击不再继续，需再次长按
+let _realPauseLongTimer = null;
+let _realPauseLongFired = false;
+const REAL_PAUSE_LONG_MS = 5000;
+
+function _setRealPausedUI(on) {
+  const sub = document.querySelector('#pause-overlay .pause-sub');
+  const title = document.getElementById('pause-title');
+  const disp = document.getElementById('pause-timer-display');
+  const btnPrimary = document.querySelector('#pause-overlay .pause-btn.primary');
+  if (!sub || !title || !disp || !btnPrimary) return;
+  if (on) {
+    title.textContent = '⏸ 已真正暂停';
+    sub.textContent = '本地计时已冻结。再次长按"继续答题" 5 秒可恢复，或点击直接继续。';
+    disp.style.opacity = '0.45';
+    btnPrimary.dataset.realPaused = '1';
+  } else {
+    title.textContent = '考试已暂停';
+    sub.innerHTML = '计时仍在继续（由服务端记录）<br>可以暂时离开屏幕，准备好后点"继续"';
+    disp.style.opacity = '';
+    delete btnPrimary.dataset.realPaused;
+  }
+}
+
+function _bindRealPauseLongPress() {
+  const btn = document.querySelector('#pause-overlay .pause-btn.primary');
+  if (!btn || btn._realPauseBound) return;
+  btn._realPauseBound = true;
+  function startPress(e) {
+    _realPauseLongFired = false;
+    btn.classList.add('charging');
+    _realPauseLongTimer = setTimeout(() => {
+      _realPauseLongFired = true;
+      btn.classList.remove('charging');
+      try { navigator.vibrate && navigator.vibrate([30, 60, 30]); } catch(_) {}
+      // 切换 真正暂停 / 恢复 真正暂停
+      if (S.realPauseStartMs) {
+        // 恢复：把已过去的暂停时间合并进 examStart
+        const dur = serverNow() - S.realPauseStartMs;
+        if (dur > 0) {
+          S.examStart += dur;
+          S.examPauseOffsetMs = (S.examPauseOffsetMs || 0) + dur;
+        }
+        S.realPauseStartMs = 0;
+        _setRealPausedUI(false);
+        _syncPauseTimer();
+        toast('▶ 已恢复计时', false, 1800);
+      } else {
+        // 进入真正暂停
+        S.realPauseStartMs = serverNow();
+        _setRealPausedUI(true);
+        toast('⏸ 已真正冻结计时', false, 1800);
+      }
+    }, REAL_PAUSE_LONG_MS);
+  }
+  function cancelPress() {
+    clearTimeout(_realPauseLongTimer);
+    _realPauseLongTimer = null;
+    btn.classList.remove('charging');
+  }
+  btn.addEventListener('mousedown',   startPress);
+  btn.addEventListener('touchstart',  startPress, { passive: true });
+  btn.addEventListener('mouseup',     cancelPress);
+  btn.addEventListener('mouseleave',  cancelPress);
+  btn.addEventListener('touchend',    cancelPress, { passive: true });
+  btn.addEventListener('touchcancel', cancelPress, { passive: true });
+  // 拦截"长按完后的 click"，避免立即 resumeExam
+  btn.addEventListener('click', (e) => {
+    if (_realPauseLongFired) {
+      _realPauseLongFired = false;
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
 }
 
 // ── Exam grid ───────────────────────────────
@@ -5101,6 +5204,28 @@ function _showShareDialog(url, pin, qCount) {
     `医考练习 - 试卷分享（${qCount} 题）\n链接：${url}\n分享码：${pin}`,
     e.target, '复制链接+分享码'
   );
+}
+
+/** 在 init 期间预先完成分享码认证：仅设置 share cookie，不消费 token。
+ *  之后 _checkShareToken() 仍会运行，并因 share_token === token 跳过 PIN，
+ *  直接调用 /api/exam/join 加载试卷。 */
+async function _ensureShareAuthed() {
+  const mHash  = location.hash.match(/share=([a-f0-9]+)/);
+  const mQuery = location.search.match(/[?&]share=([a-f0-9]+)/);
+  const token = (mHash && mHash[1]) || (mQuery && mQuery[1]);
+  if (!token) return;
+  let status = { main_auth: false, share_token: '', share_only: false };
+  try {
+    const sres = await fetch('/api/exam/share/status', {
+      headers: { 'X-Session-Token': window.SESSION_TOKEN || '' },
+    });
+    if (sres.ok) status = await sres.json();
+  } catch(_) {}
+  // 已是主管理员，或已有此 token 的 share cookie → 不必再弹
+  if (status.main_auth) return;
+  if (status.share_token === token) return;
+  // 弹分享码 / 主访问码二选一
+  await _promptSharePin(token);
 }
 
 /** 检查 URL hash 或 query 是否包含分享令牌，自动加入 */
