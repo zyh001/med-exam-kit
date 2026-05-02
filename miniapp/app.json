@@ -1,0 +1,54 @@
+{
+  "pages": [
+    "pages/login/login",
+    "pages/home/home",
+    "pages/quiz/quiz",
+    "pages/results/results",
+    "pages/favorites/favorites",
+    "pages/settings/settings"
+  ],
+  "window": {
+    "backgroundTextStyle": "dark",
+    "navigationBarBackgroundColor": "#1a2332",
+    "navigationBarTitleText": "医考练习",
+    "navigationBarTextStyle": "white",
+    "backgroundColor": "#0f1923"
+  },
+  "tabBar": {
+    "color": "#8a96a8",
+    "selectedColor": "#4493f8",
+    "backgroundColor": "#141a23",
+    "borderStyle": "black",
+    "list": [
+      {
+        "pagePath": "pages/home/home",
+        "text": "练习",
+        "iconPath": "assets/icons/home.png",
+        "selectedIconPath": "assets/icons/home-active.png"
+      },
+      {
+        "pagePath": "pages/favorites/favorites",
+        "text": "收藏",
+        "iconPath": "assets/icons/star.png",
+        "selectedIconPath": "assets/icons/star-active.png"
+      },
+      {
+        "pagePath": "pages/settings/settings",
+        "text": "设置",
+        "iconPath": "assets/icons/settings.png",
+        "selectedIconPath": "assets/icons/settings-active.png"
+      }
+    ]
+  },
+  "networkTimeout": {
+    "request": 30000,
+    "connectSocket": 10000
+  },
+  "permission": {
+    "scope.userLocation": {
+      "desc": "用于定位最近的考场信息"
+    }
+  },
+  "sitemapLocation": "sitemap.json",
+  "lazyCodeLoading": "requiredComponents"
+}

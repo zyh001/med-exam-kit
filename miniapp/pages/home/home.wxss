@@ -1,0 +1,187 @@
+/* pages/home/home.wxss */
+.page {
+  padding: 24rpx 24rpx 160rpx;
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+/* ── Header ─────────────────────────────── */
+.header {
+  margin-bottom: 20rpx;
+}
+
+.bank-selector {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+  margin-bottom: 20rpx;
+}
+
+.bank-name, .bank-name-single {
+  font-size: 34rpx;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.bank-arrow { color: var(--accent); font-size: 24rpx; }
+
+.stats-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+}
+
+.stat-item {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4rpx;
+}
+
+.stat-val {
+  font-size: 40rpx;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+.stat-label { font-size: 22rpx; color: var(--muted); }
+
+.stat-sep {
+  width: 1px;
+  height: 48rpx;
+  background: var(--border);
+}
+
+/* ── Resume card ─────────────────────────── */
+.resume-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 20rpx;
+  border-color: var(--accent);
+  background: var(--accent-dim);
+}
+
+.resume-left {
+  display: flex;
+  align-items: center;
+  gap: 16rpx;
+}
+
+.resume-icon { font-size: 44rpx; }
+
+.resume-title { font-weight: 600; font-size: 28rpx; }
+.resume-sub { font-size: 22rpx; color: var(--muted); margin-top: 4rpx; }
+
+.resume-right {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.resume-discard { font-size: 24rpx; color: var(--muted); }
+.resume-continue { font-size: 28rpx; color: var(--accent); font-weight: 600; }
+
+/* ── Section title ───────────────────────── */
+.section-title {
+  font-size: 24rpx;
+  font-weight: 700;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 2rpx;
+  margin: 28rpx 4rpx 16rpx;
+}
+
+/* ── Mode grid ───────────────────────────── */
+.mode-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16rpx;
+  margin-bottom: 8rpx;
+}
+
+.mode-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32rpx 20rpx;
+  gap: 12rpx;
+}
+
+.mode-icon { font-size: 56rpx; }
+.mode-name { font-size: 28rpx; font-weight: 600; }
+.mode-desc { font-size: 22rpx; color: var(--muted); text-align: center; }
+
+/* ── Config card ─────────────────────────── */
+.config-card {
+  padding: 8rpx 0;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 24rpx;
+  border-bottom: 1px solid var(--border);
+}
+
+.config-row:last-child { border-bottom: none; }
+
+.config-label { font-size: 28rpx; color: var(--text); }
+
+.config-val-row {
+  display: flex;
+  align-items: center;
+  gap: 8rpx;
+}
+
+.config-val { font-size: 26rpx; color: var(--muted); }
+.config-arrow { color: var(--muted); font-size: 24rpx; }
+
+.count-row {
+  display: flex;
+  align-items: center;
+  gap: 24rpx;
+}
+
+.count-btn {
+  width: 56rpx;
+  height: 56rpx;
+  border-radius: 50%;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 32rpx;
+  color: var(--accent);
+}
+
+.count-val { font-size: 30rpx; font-weight: 600; min-width: 80rpx; text-align: center; }
+
+/* ── History ─────────────────────────────── */
+.history-list { display: flex; flex-direction: column; gap: 12rpx; }
+
+.history-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 20rpx 24rpx;
+}
+
+.history-main { display: flex; align-items: center; gap: 16rpx; }
+
+.history-badge {
+  font-size: 20rpx;
+  padding: 4rpx 12rpx;
+  border-radius: 20rpx;
+  font-weight: 600;
+}
+
+.badge-exam { background: var(--accent-dim); color: var(--accent); }
+.badge-practice { background: var(--success-bg); color: var(--success); }
+
+.history-title { font-size: 28rpx; font-weight: 500; }
+.history-time { font-size: 22rpx; margin-top: 4rpx; }
+.score-val { font-size: 36rpx; font-weight: 700; }

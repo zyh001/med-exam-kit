@@ -1,0 +1,142 @@
+<!-- pages/quiz/quiz.wxml -->
+<wxs src="./quiz.wxs" module="h" />
+
+<view class="quiz-page">
+
+  <!-- ── 顶部 ─────────────────────────────────────────────── -->
+  <view class="quiz-header">
+    <view class="back-btn" bindtap="onBack">‹</view>
+    <view class="progress-info">
+      <text class="progress-cur">{{cur + 1}}</text>
+      <text class="progress-sep">/</text>
+      <text class="progress-total">{{questions.length}}</text>
+    </view>
+    <view class="timer {{timerUrgent ? 'timer-urgent' : ''}}" wx:if="{{mode === 'exam'}}">
+      <text>⏱ {{timerDisplay}}</text>
+    </view>
+    <view class="fav-btn" bindtap="toggleFav" wx:else>
+      <text class="{{isFav ? 'fav-on' : 'fav-off'}}">{{isFav ? '★' : '☆'}}</text>
+    </view>
+  </view>
+
+  <view class="progress-bar">
+    <view class="progress-fill" style="width:{{progressPct}}%"></view>
+  </view>
+
+  <!-- ── 题目区 ──────────────────────────────────────────── -->
+  <scroll-view class="quiz-scroll" scroll-y enhanced show-scrollbar="{{false}}">
+
+    <view class="q-meta">
+      <view class="q-tag" wx:if="{{currentGroup.mode}}">{{currentGroup.mode}}</view>
+      <text class="q-unit" wx:if="{{currentGroup.unit}}">{{currentGroup.unit}}</text>
+      <text class="q-rate" wx:if="{{currentSq.rate}}">{{currentSq.rate}}</text>
+    </view>
+
+    <view class="q-stem-shared card" wx:if="{{currentGroup.items.length > 1 && currentGroup.stem}}">
+      <view class="stem-label">【题干】</view>
+      <text class="stem-text">{{currentGroup.stem}}</text>
+    </view>
+
+    <view class="q-stem">
+      <text class="stem-idx" wx:if="{{currentGroup.items.length > 1}}">({{currentSqGroupIdx + 1}}) </text>
+      <text class="stem-text">{{currentSq.stem}}</text>
+    </view>
+
+    <view class="opts-list">
+      <view
+        wx:for="{{currentSq.options}}"
+        wx:key="letter"
+        wx:for-item="opt"
+        class="{{h.optClass(opt.letter, userAnswerLetters, correctAnswers, revealed)}}"
+        data-letter="{{opt.letter}}"
+        bindtap="selectOpt"
+      >
+        <view class="opt-label">{{opt.letter}}</view>
+        <text class="opt-text">{{opt.text}}</text>
+      </view>
+    </view>
+
+    <view class="explain-area" wx:if="{{revealed}}">
+
+      <view class="explain-ans-cmp">
+        <view class="ans-row">
+          <text class="ans-label">你的答案</text>
+          <view class="ans-badges">
+            <text wx:for="{{userAnswerLetters}}" wx:key="*this"
+              class="ans-badge {{isCorrectAns ? 'badge-ok' : 'badge-err'}}">{{item}}</text>
+            <text class="ans-badge badge-miss" wx:if="{{!userAnswerLetters.length}}">未作答</text>
+          </view>
+        </view>
+        <view class="ans-row">
+          <text class="ans-label">正确答案</text>
+          <view class="ans-badges">
+            <text wx:for="{{correctAnswers}}" wx:key="*this" class="ans-badge badge-ok">{{item}}</text>
+          </view>
+        </view>
+      </view>
+
+      <view class="explain-body" wx:if="{{currentSq.explanation}}">
+        <view class="explain-hd">📖 解析</view>
+        <text class="explain-text">{{currentSq.explanation}}</text>
+      </view>
+
+      <view class="ai-area" wx:if="{{bankInfo.ai_enabled}}">
+        <view class="ai-btn" bindtap="askAI" wx:if="{{!aiLoading && !aiContent}}">✨ AI 深度解析</view>
+        <view class="loading-wrap" wx:if="{{aiLoading}}"><text class="text-muted">AI 分析中...</text></view>
+        <view class="ai-result" wx:if="{{aiContent}}">
+          <view class="ai-result-hd">✨ AI 解析</view>
+          <text class="ai-result-text">{{aiContent}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view style="height:220rpx"></view>
+  </scroll-view>
+
+  <!-- ── 底部 ──────────────────────────────────────────────── -->
+  <view class="quiz-footer safe-bottom">
+
+    <view class="footer-row" wx:if="{{mode !== 'exam' && !revealed}}">
+      <view class="nav-btn {{cur === 0 ? 'nav-disabled' : ''}}" bindtap="prevQ">‹ 上题</view>
+      <view class="reveal-btn" bindtap="revealAnswer">查看答案</view>
+      <view class="nav-btn" bindtap="nextQ">下题 ›</view>
+    </view>
+
+    <view class="footer-row" wx:if="{{mode !== 'exam' && revealed}}">
+      <view class="nav-btn {{cur === 0 ? 'nav-disabled' : ''}}" bindtap="prevQ">‹ 上题</view>
+      <view class="result-chip {{isCorrectAns ? 'chip-ok' : 'chip-err'}}">
+        {{isCorrectAns ? '✓ 正确' : '✗ 错误'}}
+      </view>
+      <view class="nav-btn nav-next" bindtap="nextQ">
+        {{cur < questions.length - 1 ? '下题 ›' : '完成 ✓'}}
+      </view>
+    </view>
+
+    <view class="footer-row" wx:if="{{mode === 'exam'}}">
+      <view class="nav-btn {{cur === 0 ? 'nav-disabled' : ''}}" bindtap="prevQ">‹ 上题</view>
+      <view class="mark-btn {{_markedSet && _markedSet.includes(cur) ? 'mark-active' : ''}}" bindtap="toggleMark">
+        ☆ 标记
+      </view>
+      <view class="nav-btn nav-next" bindtap="nextQ">
+        {{cur < questions.length - 1 ? '下题 ›' : '交卷'}}
+      </view>
+    </view>
+
+  </view>
+
+  <!-- ── 暂停遮罩 ────────────────────────────────────────── -->
+  <view class="pause-overlay" wx:if="{{examPaused}}">
+    <view class="pause-card">
+      <view class="pause-icon">{{realPaused ? '⏸' : '☕'}}</view>
+      <view class="pause-title">{{realPaused ? '已真正暂停' : '考试已暂停'}}</view>
+      <view class="pause-sub">{{realPaused ? '计时已冻结，长按继续答题 3 秒可恢复' : '计时仍在继续，准备好后点继续'}}</view>
+      <view class="pause-timer {{timerUrgent ? 'pause-timer-urgent' : ''}}">{{timerDisplay}}</view>
+      <view class="pause-actions">
+        <view class="pause-primary {{realPaused ? 'pause-frozen' : ''}}"
+          bindtap="onResumeTap" bindlongpress="onResumeLongPress">继续答题</view>
+        <view class="pause-danger" bindtap="submitExam">提前交卷</view>
+      </view>
+    </view>
+  </view>
+
+</view>

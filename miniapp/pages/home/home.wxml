@@ -1,0 +1,157 @@
+<!-- pages/home/home.wxml -->
+<view class="page">
+
+  <!-- 顶部题库信息 -->
+  <view class="header card">
+    <view class="bank-selector" wx:if="{{banks.length > 1}}" bindtap="showBankPicker">
+      <text class="bank-name">{{currentBank.name || '加载中...'}}</text>
+      <text class="bank-arrow">▾</text>
+    </view>
+    <view class="bank-name-single" wx:else>{{currentBank.name || '加载中...'}}</view>
+    <view class="stats-row">
+      <view class="stat-item">
+        <text class="stat-val">{{bankInfo.total_sq || '—'}}</text>
+        <text class="stat-label">小题</text>
+      </view>
+      <view class="stat-sep"></view>
+      <view class="stat-item">
+        <text class="stat-val">{{bankInfo.units.length || '—'}}</text>
+        <text class="stat-label">章节</text>
+      </view>
+      <view class="stat-sep"></view>
+      <view class="stat-item">
+        <text class="stat-val">{{todayCount}}</text>
+        <text class="stat-label">今日已答</text>
+      </view>
+    </view>
+  </view>
+
+  <!-- 恢复考试提示 -->
+  <view class="resume-card card" wx:if="{{savedSession}}" bindtap="resumeSession">
+    <view class="resume-left">
+      <text class="resume-icon">⏱</text>
+      <view>
+        <view class="resume-title">继续上次考试</view>
+        <view class="resume-sub">{{savedSession.cur + 1}}/{{savedSession.questions.length}} 题 · 剩余 {{savedSession.remainingFmt}}</view>
+      </view>
+    </view>
+    <view class="resume-right">
+      <text class="resume-discard" catchtap="discardSession">丢弃</text>
+      <text class="resume-continue">继续 ›</text>
+    </view>
+  </view>
+
+  <!-- 模式选择 -->
+  <view class="section-title">开始练习</view>
+  <view class="mode-grid">
+    <view class="mode-card card" bindtap="startPractice">
+      <view class="mode-icon">✏️</view>
+      <view class="mode-name">随机练习</view>
+      <view class="mode-desc">即时反馈，边做边学</view>
+    </view>
+    <view class="mode-card card" bindtap="startExam">
+      <view class="mode-icon">⏰</view>
+      <view class="mode-name">模拟考试</view>
+      <view class="mode-desc">限时封卷，还原真实</view>
+    </view>
+    <view class="mode-card card" bindtap="startReview">
+      <view class="mode-icon">🔁</view>
+      <view class="mode-name">智能复习</view>
+      <view class="mode-desc">SM-2 间隔记忆</view>
+    </view>
+    <view class="mode-card card" bindtap="startWrongbook">
+      <view class="mode-icon">📕</view>
+      <view class="mode-name">错题本</view>
+      <view class="mode-desc">专攻薄弱点</view>
+    </view>
+  </view>
+
+  <!-- 组卷设置 -->
+  <view class="section-title">组卷设置</view>
+  <view class="config-card card">
+
+    <!-- 题数 -->
+    <view class="config-row">
+      <text class="config-label">题数</text>
+      <view class="count-row">
+        <view class="count-btn" bindtap="decCount">−</view>
+        <text class="count-val">{{cfg.count}}</text>
+        <view class="count-btn" bindtap="incCount">+</view>
+      </view>
+    </view>
+
+    <!-- 随机顺序 -->
+    <view class="config-row">
+      <text class="config-label">随机顺序</text>
+      <switch checked="{{cfg.shuffle}}" bindchange="onShuffleChange" color="var(--accent)" />
+    </view>
+
+    <!-- 章节筛选 -->
+    <view class="config-row" bindtap="showUnitPicker">
+      <text class="config-label">章节</text>
+      <view class="config-val-row">
+        <text class="config-val">{{cfg.unitLabel}}</text>
+        <text class="config-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- 题型筛选 -->
+    <view class="config-row" bindtap="showModePicker">
+      <text class="config-label">题型</text>
+      <view class="config-val-row">
+        <text class="config-val">{{cfg.modeLabel}}</text>
+        <text class="config-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- 难度筛选 -->
+    <view class="config-row" bindtap="showDifficultyPicker">
+      <text class="config-label">难度</text>
+      <view class="config-val-row">
+        <text class="config-val">{{cfg.difficultyLabel}}</text>
+        <text class="config-arrow">›</text>
+      </view>
+    </view>
+
+    <!-- 考试时间（仅考试模式显示） -->
+    <view class="config-row">
+      <text class="config-label">考试时长</text>
+      <view class="count-row">
+        <view class="count-btn" bindtap="decExamTime">−</view>
+        <text class="count-val">{{cfg.examTime}} 分</text>
+        <view class="count-btn" bindtap="incExamTime">+</view>
+      </view>
+    </view>
+
+  </view>
+
+  <!-- 历史记录 -->
+  <view class="section-title">最近练习</view>
+  <view class="history-list" wx:if="{{history.length}}">
+    <view
+      class="history-item card"
+      wx:for="{{history}}"
+      wx:key="id"
+    >
+      <view class="history-main">
+        <view class="history-badge {{item.mode === 'exam' ? 'badge-exam' : 'badge-practice'}}">
+          {{item.mode === 'exam' ? '考试' : '练习'}}
+        </view>
+        <view class="history-info">
+          <view class="history-title">{{item.total}} 题</view>
+          <view class="history-time text-muted">{{item.dateStr}}</view>
+        </view>
+      </view>
+      <view class="history-score">
+        <text class="score-val {{item.accuracy >= 60 ? 'text-success' : 'text-danger'}}">
+          {{item.accuracy}}%
+        </text>
+      </view>
+    </view>
+  </view>
+  <view class="empty-state" wx:else>
+    <text class="empty-icon">📋</text>
+    <text>暂无练习记录</text>
+  </view>
+
+</view>

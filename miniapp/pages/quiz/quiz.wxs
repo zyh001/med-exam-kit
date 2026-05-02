@@ -1,0 +1,40 @@
+// pages/quiz/quiz.wxs  —— 模板内联逻辑（WXS 模块）
+
+/**
+ * 计算选项的 class 字符串
+ * @param letter       - 当前选项字母（'A','B',...）
+ * @param userAns      - 用户已选字母数组
+ * @param correctAns   - 正确答案字母数组
+ * @param revealed     - 是否已揭示答案
+ */
+function optClass(letter, userAns, correctAns, revealed) {
+  var classes = 'opt'
+  var isSelected = userAns.indexOf(letter) >= 0
+  var isCorrect  = correctAns.indexOf(letter) >= 0
+
+  if (revealed) {
+    if (isCorrect) {
+      classes += ' opt-correct'
+    } else if (isSelected) {
+      classes += ' opt-wrong'
+    } else {
+      classes += ' opt-dim'
+    }
+  } else {
+    if (isSelected) classes += ' opt-selected'
+  }
+  return classes
+}
+
+/**
+ * 格式化秒数 mm:ss
+ */
+function fmtSec(sec) {
+  var m = '' + Math.floor(sec / 60)
+  var s = '' + (sec % 60)
+  if (m.length < 2) m = '0' + m
+  if (s.length < 2) s = '0' + s
+  return m + ':' + s
+}
+
+module.exports = { optClass, fmtSec }

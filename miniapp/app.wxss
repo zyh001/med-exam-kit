@@ -1,0 +1,178 @@
+/* app.wxss —— 全局样式变量与基础重置 */
+
+/* ── 暗色主题（默认）─────────────────────────────── */
+page {
+  --bg:          #0f1923;
+  --surface:     #141a23;
+  --card:        #1c2635;
+  --border:      #2a3446;
+  --text:        #e2e8f0;
+  --muted:       #64748b;
+  --accent:      #4493f8;
+  --accent-dim:  rgba(68,147,248,.15);
+  --success:     #3fd27f;
+  --success-bg:  rgba(63,210,127,.14);
+  --danger:      #f26c6c;
+  --danger-bg:   rgba(242,108,108,.14);
+  --warning:     #f0a020;
+  --warn-bg:     rgba(240,160,32,.14);
+  --r-sm:        8rpx;
+  --r-md:        12rpx;
+  --r-lg:        16rpx;
+
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "PingFang SC", "Helvetica Neue", sans-serif;
+  font-size: 28rpx;
+  line-height: 1.6;
+  box-sizing: border-box;
+}
+
+/* ── 亮色主题 ────────────────────────────────────── */
+page.theme-light {
+  --bg:          #f5f7fa;
+  --surface:     #ffffff;
+  --card:        #ffffff;
+  --border:      #e2e8f0;
+  --text:        #1e293b;
+  --muted:       #94a3b8;
+  --accent:      #2563eb;
+  --accent-dim:  rgba(37,99,235,.1);
+  --success:     #1fae6b;
+  --success-bg:  rgba(31,174,107,.10);
+  --danger:      #e24c4c;
+  --danger-bg:   rgba(226,76,76,.10);
+  --warning:     #d97706;
+  --warn-bg:     rgba(217,119,6,.12);
+}
+
+/* ── 基础重置 ────────────────────────────────────── */
+view, text, image, button, input, textarea {
+  box-sizing: border-box;
+}
+
+button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font-family: inherit;
+  font-size: inherit;
+  color: inherit;
+  line-height: inherit;
+}
+
+button::after { border: none; }
+
+/* ── 通用工具类 ──────────────────────────────────── */
+.flex { display: flex; }
+.flex-col { display: flex; flex-direction: column; }
+.items-center { align-items: center; }
+.justify-center { justify-content: center; }
+.justify-between { justify-content: space-between; }
+.gap-sm { gap: 12rpx; }
+.gap-md { gap: 20rpx; }
+.gap-lg { gap: 32rpx; }
+.flex-1 { flex: 1; }
+.text-center { text-align: center; }
+.text-muted { color: var(--muted); }
+.text-accent { color: var(--accent); }
+.text-success { color: var(--success); }
+.text-danger { color: var(--danger); }
+.font-bold { font-weight: 700; }
+.font-mono { font-family: ui-monospace, "Cascadia Code", monospace; }
+
+/* ── 卡片 ──────────────────────────────────────── */
+.card {
+  background: var(--card);
+  border-radius: var(--r-md);
+  border: 1px solid var(--border);
+  padding: 24rpx;
+}
+
+/* ── 按钮 ──────────────────────────────────────── */
+.btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20rpx 32rpx;
+  border-radius: var(--r-md);
+  background: var(--card);
+  border: 1px solid var(--border);
+  color: var(--text);
+  font-size: 28rpx;
+  font-weight: 500;
+}
+
+.btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.btn-danger {
+  background: var(--danger-bg);
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.btn-sm {
+  padding: 12rpx 20rpx;
+  font-size: 24rpx;
+}
+
+.btn-lg {
+  padding: 28rpx 40rpx;
+  font-size: 32rpx;
+  font-weight: 600;
+  border-radius: var(--r-lg);
+}
+
+/* ── 安全区适配 ─────────────────────────────────── */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* ── 加载中 ─────────────────────────────────────── */
+.loading-wrap {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 24rpx;
+  padding: 80rpx 0;
+  color: var(--muted);
+}
+
+/* ── 空状态 ─────────────────────────────────────── */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 100rpx 40rpx;
+  gap: 24rpx;
+  color: var(--muted);
+  font-size: 26rpx;
+  text-align: center;
+}
+
+.empty-icon {
+  font-size: 80rpx;
+  opacity: .5;
+}
+
+/* ── Toast（自定义，用于替代 wx.showToast 样式） ─── */
+.custom-toast {
+  position: fixed;
+  bottom: 180rpx;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,.75);
+  color: #fff;
+  padding: 16rpx 32rpx;
+  border-radius: 40rpx;
+  font-size: 26rpx;
+  z-index: 9999;
+  white-space: nowrap;
+}

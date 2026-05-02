@@ -1,0 +1,17 @@
+<!-- pages/favorites/favorites.wxml -->
+<view class="page">
+  <view class="empty-state" wx:if="{{!items.length}}">
+    <text class="empty-icon">☆</text>
+    <text>暂无收藏题目</text>
+    <text class="text-muted" style="font-size:24rpx">练习时点击星号即可收藏</text>
+  </view>
+  <view class="fav-list" wx:else>
+    <view class="fav-item card" wx:for="{{items}}" wx:key="fp" bindtap="startQuizFromFav" data-idx="{{index}}">
+      <view class="fav-meta">
+        <view class="q-tag">{{item.mode}}</view>
+        <text class="text-muted" style="font-size:22rpx">{{item.unit}}</text>
+      </view>
+      <text class="fav-stem">{{item.stem}}</text>
+    </view>
+  </view>
+</view>

@@ -1,0 +1,68 @@
+/* pages/results/results.wxss */
+.page { background: var(--bg); min-height: 100vh; }
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 24rpx 24rpx;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+
+.header-title { font-size: 34rpx; font-weight: 700; }
+.back-btn { font-size: 36rpx; color: var(--muted); width: 60rpx; }
+
+.scroll { height: calc(100vh - 100rpx); }
+
+.score-card {
+  margin: 24rpx;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 48rpx 24rpx;
+  gap: 20rpx;
+}
+
+.score-ring-wrap { text-align: center; }
+.score-pct { font-size: 80rpx; font-weight: 900; }
+.pct-good { color: var(--success); }
+.pct-bad  { color: var(--danger); }
+.score-label { font-size: 24rpx; color: var(--muted); }
+
+.score-meta { text-align: center; display: flex; flex-direction: column; gap: 12rpx; }
+.verdict { font-size: 28rpx; font-weight: 700; }
+.verdict-pass { color: var(--success); }
+.verdict-fail { color: var(--danger); }
+.score-detail { font-size: 24rpx; color: var(--muted); }
+
+.stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr 1fr;
+  gap: 16rpx;
+  margin: 0 24rpx 24rpx;
+}
+
+.stat-cell { display: flex; flex-direction: column; align-items: center; padding: 24rpx 16rpx; gap: 8rpx; }
+.stat-val { font-size: 44rpx; font-weight: 700; }
+.stat-label { font-size: 22rpx; color: var(--muted); }
+
+.action-row { display: flex; gap: 16rpx; margin: 0 24rpx 32rpx; }
+.action-row .btn { flex: 1; height: 88rpx; font-size: 30rpx; }
+
+.section-title { margin: 0 24rpx 16rpx; font-size: 24rpx; font-weight: 700; color: var(--muted); }
+
+.wrong-list { display: flex; flex-direction: column; gap: 12rpx; padding: 0 24rpx; }
+
+.wrong-item { display: flex; flex-direction: column; gap: 12rpx; }
+.wrong-num { font-size: 22rpx; color: var(--muted); }
+.wrong-stem { font-size: 26rpx; line-height: 1.6; }
+.wrong-ans-row { display: flex; align-items: center; gap: 12rpx; flex-wrap: wrap; }
+.wrong-ans-label { font-size: 22rpx; color: var(--muted); }
+.wrong-ans {
+  font-size: 22rpx;
+  font-weight: 700;
+  font-family: ui-monospace, monospace;
+  padding: 2rpx 12rpx;
+  border-radius: var(--r-sm);
+}

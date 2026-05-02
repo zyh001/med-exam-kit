@@ -1,0 +1,27 @@
+<!-- pages/settings/settings.wxml -->
+<view class="page">
+  <view class="section card">
+    <view class="row">
+      <text class="row-label">服务器地址</text>
+      <input class="row-input" value="{{serverUrl}}" bindinput="onUrlInput"
+        placeholder="https://..." confirm-type="done" bindconfirm="saveServer"/>
+    </view>
+    <view class="row">
+      <text class="row-label">当前账号</text>
+      <text class="row-val text-muted">{{authStatus}}</text>
+    </view>
+    <view class="row" bindtap="logout">
+      <text class="row-label text-danger">退出登录</text>
+      <text class="row-arrow">›</text>
+    </view>
+  </view>
+
+  <view class="section card">
+    <view class="row">
+      <text class="row-label">深色模式</text>
+      <switch checked="{{darkMode}}" bindchange="onThemeChange" color="var(--accent)"/>
+    </view>
+  </view>
+
+  <view class="version text-muted">医考练习 小程序版 v1.0.0</view>
+</view>

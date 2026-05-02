@@ -1,0 +1,58 @@
+<!-- pages/login/login.wxml -->
+<view class="container">
+  <view class="hero">
+    <view class="logo">📚</view>
+    <view class="app-name">医考练习</view>
+    <view class="app-sub">临床执业医师 · 考前冲刺</view>
+  </view>
+
+  <!-- 服务器配置 -->
+  <view class="section">
+    <view class="section-label">服务器地址</view>
+    <view class="input-row">
+      <input
+        class="text-input"
+        placeholder="https://your-server.example.com"
+        value="{{serverUrl}}"
+        bindinput="onServerUrlInput"
+        type="url"
+        confirm-type="next"
+      />
+    </view>
+  </view>
+
+  <!-- 访问码 -->
+  <view class="section" wx:if="{{needPin}}">
+    <view class="section-label">访问码</view>
+    <view class="pin-row">
+      <input
+        class="pin-input"
+        placeholder="输入访问码"
+        value="{{pin}}"
+        bindinput="onPinInput"
+        password="{{!showPin}}"
+        maxlength="12"
+        confirm-type="done"
+        bindconfirm="onLogin"
+      />
+      <view class="eye-btn" bindtap="toggleShowPin">
+        <text>{{showPin ? '🙈' : '👁'}}</text>
+      </view>
+    </view>
+    <view class="err-msg" wx:if="{{errMsg}}">{{errMsg}}</view>
+  </view>
+
+  <button
+    class="btn btn-primary btn-lg login-btn"
+    bindtap="onLogin"
+    loading="{{loading}}"
+    disabled="{{loading}}"
+  >
+    {{needPin ? '验证并进入' : '连接服务器'}}
+  </button>
+
+  <view class="hint">
+    <text class="text-muted">在浏览器打开服务器地址后，</text>
+    <text class="text-muted">管理员可在设置页找到访问码</text>
+  </view>
+</view>

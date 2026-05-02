@@ -1,0 +1,70 @@
+<!-- pages/results/results.wxml -->
+<view class="page">
+  <view class="header">
+    <view class="back-btn" bindtap="onBack">✕</view>
+    <view class="header-title">本次结果</view>
+    <view style="width:60rpx"></view>
+  </view>
+
+  <scroll-view scroll-y class="scroll">
+
+    <!-- 得分卡 -->
+    <view class="score-card card">
+      <view class="score-ring-wrap">
+        <view class="score-pct {{result.accuracy >= 60 ? 'pct-good' : 'pct-bad'}}">
+          {{result.accuracy}}%
+        </view>
+        <view class="score-label">正确率</view>
+      </view>
+      <view class="score-meta">
+        <view class="verdict {{result.accuracy >= 60 ? 'verdict-pass' : 'verdict-fail'}}">
+          {{result.accuracy >= 60 ? '✓ 及格' : '✗ 不及格'}}
+        </view>
+        <view class="score-detail">
+          共 {{result.total}} 题 · 答对 {{result.correct}} · 答错 {{result.wrong}} · 未答 {{result.unanswered}}
+        </view>
+      </view>
+    </view>
+
+    <!-- 统计行 -->
+    <view class="stat-grid">
+      <view class="stat-cell card">
+        <view class="stat-val text-success">{{result.correct}}</view>
+        <view class="stat-label">正确</view>
+      </view>
+      <view class="stat-cell card">
+        <view class="stat-val text-danger">{{result.wrong}}</view>
+        <view class="stat-label">错误</view>
+      </view>
+      <view class="stat-cell card">
+        <view class="stat-val text-muted">{{result.unanswered}}</view>
+        <view class="stat-label">未答</view>
+      </view>
+    </view>
+
+    <!-- 操作按钮 -->
+    <view class="action-row">
+      <view class="btn btn-primary" bindtap="reviewAnswers">查看解析</view>
+      <view class="btn" bindtap="goHome">返回首页</view>
+    </view>
+
+    <!-- 错题列表（折叠） -->
+    <view class="section-title" wx:if="{{wrongItems.length}}">答错的题目</view>
+    <view class="wrong-list" wx:if="{{wrongItems.length}}">
+      <view class="wrong-item card" wx:for="{{wrongItems}}" wx:key="idx">
+        <view class="wrong-num">第 {{item.num}} 题</view>
+        <text class="wrong-stem">{{item.stem}}</text>
+        <view class="wrong-ans-row">
+          <text class="wrong-ans-label">你选:</text>
+          <text class="wrong-ans {{item.userEmpty ? 'badge-miss' : 'badge-err'}}">
+            {{item.userEmpty ? '未作答' : item.userAns}}
+          </text>
+          <text class="wrong-ans-label">正确:</text>
+          <text class="wrong-ans badge-ok">{{item.correctAns}}</text>
+        </view>
+      </view>
+    </view>
+
+    <view style="height:80rpx"></view>
+  </scroll-view>
+</view>
