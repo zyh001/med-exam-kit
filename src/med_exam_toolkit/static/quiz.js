@@ -20,6 +20,96 @@ function _loadQuizAI() {
 
 
 // ════════════════════════════════════════════
+// SessionDB — IndexedDB 大数据存储
+// ════════════════════════════════════════════
+// iOS Safari localStorage 仅 ~5 MB，200 题的完整 questions 数组可轻松超限。
+// SessionDB 将大型 blob（questions、答案、复盘缓存）存入 IndexedDB（50 MB+），
+// localStorage 仅保留列表所需的小元数据，彻底规避 iOS 配额问题。
+const SessionDB = (() => {
+  const DB_NAME = 'med_exam_session_store_v1';
+  const STORE   = 'blobs';
+  let _db = null;
+  let _ready = null; // Promise<IDBDatabase>
+
+  // ── Debug 日志 ─────────────────────────────────────────────────
+  const _debug = /[?&]debug=1/.test(location.search);
+  function _log(...args) { if (_debug) console.log('[SessionDB]', ...args); }
+
+  function _open() {
+    if (_ready) return _ready;
+    _ready = new Promise((resolve, reject) => {
+      try {
+        const req = indexedDB.open(DB_NAME, 1);
+        req.onupgradeneeded = e => {
+          const db = e.target.result;
+          if (!db.objectStoreNames.contains(STORE)) {
+            db.createObjectStore(STORE);
+          }
+        };
+        req.onsuccess = e => { _db = e.target.result; _log('opened'); resolve(_db); };
+        req.onerror   = e => { _log('open error', e.target.error); reject(e.target.error); };
+      } catch (e) { reject(e); }
+    });
+    return _ready;
+  }
+
+  async function save(key, value) {
+    const db = await _open();
+    return new Promise((resolve, reject) => {
+      const tx  = db.transaction(STORE, 'readwrite');
+      const req = tx.objectStore(STORE).put(value, key);
+      req.onsuccess = () => { _log('saved', key); resolve(); };
+      req.onerror   = () => { _log('save error', key, req.error); reject(req.error); };
+    });
+  }
+
+  async function load(key) {
+    const db = await _open();
+    return new Promise((resolve, reject) => {
+      const tx  = db.transaction(STORE, 'readonly');
+      const req = tx.objectStore(STORE).get(key);
+      req.onsuccess = () => { _log('loaded', key, req.result != null); resolve(req.result ?? null); };
+      req.onerror   = () => { _log('load error', key, req.error); reject(req.error); };
+    });
+  }
+
+  async function remove(key) {
+    const db = await _open();
+    return new Promise((resolve, reject) => {
+      const tx  = db.transaction(STORE, 'readwrite');
+      const req = tx.objectStore(STORE).delete(key);
+      req.onsuccess = () => { _log('removed', key); resolve(); };
+      req.onerror   = () => reject(req.error);
+    });
+  }
+
+  /** 删除所有以 prefix 开头的 key */
+  async function removeByPrefix(prefix) {
+    const db = await _open();
+    return new Promise((resolve, reject) => {
+      const tx    = db.transaction(STORE, 'readwrite');
+      const store = tx.objectStore(STORE);
+      const req   = store.openCursor();
+      req.onsuccess = e => {
+        const cursor = e.target.result;
+        if (cursor) {
+          if (typeof cursor.key === 'string' && cursor.key.startsWith(prefix)) {
+            cursor.delete();
+          }
+          cursor.continue();
+        } else { resolve(); }
+      };
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  // 预初始化（不阻塞页面加载）
+  _open().catch(e => console.warn('[SessionDB] init:', e));
+
+  return { save, load, remove, removeByPrefix, _debug };
+})();
+
+// ════════════════════════════════════════════
 // 状态
 // ════════════════════════════════════════════
 /** 返回用户本地日期字符串 YYYY-MM-DD，避免 toISOString() 的 UTC 偏差。
@@ -507,6 +597,142 @@ function _setPracticeSessions(arr) {
   try { localStorage.setItem(practiceSessionsKey(), JSON.stringify(arr)); } catch(e) {}
 }
 
+// ════════════════════════════════════════════
+// 旧数据迁移 — localStorage → IndexedDB
+// ════════════════════════════════════════════
+// 老用户升级时，localStorage 中可能有 v1 格式的大数据（含完整 questions 数组）。
+// 此函数将它们迁移到 IndexedDB 并精简 localStorage，确保旧数据不丢失。
+// 每个 bankID 只执行一次，迁移标记存在 localStorage 中。
+async function _migrateLegacyData() {
+  const migKey = 'idb_migrated' + _bankSuffix();
+  if (localStorage.getItem(migKey) === '2') return; // 已迁移，跳过
+
+  const debug = SessionDB._debug;
+  if (debug) console.log('[Migration] 开始迁移 bank', S.bankID);
+
+  let allOk = true; // 只有全部成功才标记完成
+
+  // ── 1. 练习进度 v1 → v2 ──────────────────────────────────────
+  try {
+    const sessions = _getPracticeSessions();
+    let needRewrite = false;
+    for (const s of sessions) {
+      // 检测旧 v1 条目：有 questions 数组
+      if (s.v === 2 || !Array.isArray(s.questions) || !s.questions.length) continue;
+      if (debug) console.log('[Migration] 迁移 practice session:', s.id, s.questions.length, '题');
+
+      // 写入 IndexedDB
+      const idbKey = 'practice:' + s.id + _bankSuffix();
+      try {
+        await SessionDB.save(idbKey, {
+          questions: s.questions,
+          ans:       s.ans  || {},
+          revealed:  s.revealed || [],
+          marked:    s.marked   || [],
+        });
+      } catch (e) {
+        if (debug) console.warn('[Migration] practice IDB write failed:', e);
+        allOk = false;
+        continue; // IndexedDB 写入失败 → 保留 localStorage 原数据，不精简
+      }
+
+      // IDB 写入成功 → 精简为 v2 元数据
+      s.fingerprints = s.questions.map(q => q.fingerprint);
+      s.total        = s.total || s.questions.length;
+      s.answered     = s.answered || Object.keys(s.ans || {}).length;
+      s.v            = 2;
+      delete s.questions;
+      delete s.ans;
+      delete s.revealed;
+      delete s.marked;
+      needRewrite = true;
+    }
+    if (needRewrite) {
+      _setPracticeSessions(sessions);
+    }
+  } catch (e) {
+    allOk = false;
+    if (debug) console.warn('[Migration] practice sessions error:', e);
+  }
+
+  // ── 2. 复盘缓存 [{id, qs, ans}, ...] → ID 列表 + IndexedDB ──
+  try {
+    const cacheKey = _reviewCacheKey();
+    const raw = localStorage.getItem(cacheKey);
+    if (raw) {
+      const cache = JSON.parse(raw);
+      // 仅处理旧格式（数组内是对象且含 qs）
+      if (Array.isArray(cache) && cache.length && typeof cache[0] === 'object' && cache[0] !== null && cache[0].qs) {
+        let reviewAllOk = true;
+        for (const entry of cache) {
+          if (!entry || !entry.id || !entry.qs) continue;
+          try {
+            await SessionDB.save('review:' + entry.id + _bankSuffix(), {
+              id:  entry.id,
+              qs:  entry.qs,
+              ans: entry.ans || {},
+              _answersRecovered: entry._answersRecovered || false,
+            });
+            if (debug) console.log('[Migration] 迁移 review cache:', entry.id);
+          } catch (e) {
+            if (debug) console.warn('[Migration] review IDB write failed:', e);
+            reviewAllOk = false;
+          }
+        }
+        // 仅当所有条目都成功写入 IDB 后，才将 localStorage 精简为 ID 列表
+        // 否则保留旧格式，避免数据丢失
+        if (reviewAllOk) {
+          const idList = cache
+            .filter(e => e && e.id)
+            .map(e => typeof e.id === 'object' ? String(e.id) : e.id);
+          localStorage.setItem(cacheKey, JSON.stringify(idList.slice(0, 10)));
+        } else {
+          allOk = false;
+        }
+      }
+    }
+  } catch (e) {
+    allOk = false;
+    if (debug) console.warn('[Migration] review cache error:', e);
+  }
+
+  // ── 3. 考试进度 v1 → v2 ──────────────────────────────────────
+  try {
+    const raw = localStorage.getItem(examSessionKey());
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (s && s.v !== 2 && Array.isArray(s.questions) && s.questions.length) {
+        if (debug) console.log('[Migration] 迁移 exam session:', s.questions.length, '题');
+        const idbKey = 'exam:' + examSessionKey();
+        try {
+          await SessionDB.save(idbKey, {
+            questions: s.questions,
+            ans:       s.ans || {},
+          });
+          // IDB 成功 → 精简 localStorage
+          s.totalQs = s.questions.length;
+          s.v = 2;
+          delete s.questions;
+          delete s.ans;
+          localStorage.setItem(examSessionKey(), JSON.stringify(s));
+        } catch (e) {
+          allOk = false;
+          if (debug) console.warn('[Migration] exam IDB write failed:', e);
+        }
+      }
+    }
+  } catch (e) {
+    allOk = false;
+    if (debug) console.warn('[Migration] exam session error:', e);
+  }
+
+  // 仅全部成功时标记迁移完成；部分失败则下次重试
+  if (allOk) {
+    try { localStorage.setItem(migKey, '2'); } catch(e) {}
+  }
+  if (debug) console.log('[Migration] 完成, allOk:', allOk);
+}
+
 /** 生成当前练习的可读标题 */
 function _practiceTitle() {
   const units = [...new Set(S.questions.map(q => q.unit).filter(Boolean))];
@@ -516,33 +742,42 @@ function _practiceTitle() {
   return `${unitLabel} · ${S.questions.length} 题`;
 }
 
-/** 保存当前练习进度 */
+/** 保存当前练习进度 — 元数据 → localStorage，大数据 → IndexedDB */
 function savePracticeSession() {
   if (S.mode !== 'practice' || !S.questions.length) return;
   const sessions = _getPracticeSessions();
   const existIdx = sessions.findIndex(s => s.id === S.practiceSessionId);
 
   const answered = Object.keys(S.ans).length;
-  const session = {
-    v:         1,
+
+  // 仅元数据写 localStorage（< 1 KB，不会触及 iOS 5 MB 限额）
+  const meta = {
+    v:         2,
     id:        S.practiceSessionId,
     savedAt:   Date.now(),
     mode:      'practice',
     cur:       S.cur,
-    questions: S.questions,
-    ans:       _serializeAns(S.ans),
-    revealed:  [...S.revealed],
-    marked:    [...S.marked],
     title:     _practiceTitle(),
     answered,
     total:     S.questions.length,
     startedAt: S.examStart,
+    // 保留 fingerprints 用于服务端回退加载
+    fingerprints: S.questions.map(q => q.fingerprint),
   };
 
-  if (existIdx >= 0) sessions[existIdx] = session;
-  else sessions.unshift(session);
+  if (existIdx >= 0) sessions[existIdx] = meta;
+  else sessions.unshift(meta);
 
   _setPracticeSessions(sessions.slice(0, MAX_PRACTICE_SESSIONS));
+
+  // 完整数据（含 questions 大数组）写 IndexedDB（50 MB+）
+  const idbKey = 'practice:' + S.practiceSessionId + _bankSuffix();
+  SessionDB.save(idbKey, {
+    questions: S.questions,
+    ans:       _serializeAns(S.ans),
+    revealed:  [...S.revealed],
+    marked:    [...S.marked],
+  }).catch(e => console.warn('[Quiz] practice IDB save:', e));
 }
 
 /** 练习完成时清除该进度（或标记为已完成） */
@@ -552,22 +787,63 @@ function clearPracticeSession(sessionId) {
   const sessions = _getPracticeSessions().filter(s => s.id !== targetId);
   _setPracticeSessions(sessions);
   if (targetId === S.practiceSessionId) S.practiceSessionId = null;
+  // 同步清理 IndexedDB 中的大数据
+  SessionDB.remove('practice:' + targetId + _bankSuffix()).catch(() => {});
 }
 
-/** 从存档恢复练习进度 */
-function resumePracticeSession(id) {
+/** 从存档恢复练习进度 — 先 IndexedDB，失败则按 fingerprints 从服务端重载 */
+async function resumePracticeSession(id) {
   const sessions = _getPracticeSessions();
   const s = sessions.find(s => s.id === id);
   if (!s) return;
 
+  // 1. 尝试从 IndexedDB 加载完整数据
+  let full = null;
+  try {
+    full = await SessionDB.load('practice:' + id + _bankSuffix());
+  } catch (e) { /* IndexedDB 不可用 */ }
+
+  // 2. 兼容旧版 v1 格式（questions 直接存在 localStorage 中）
+  if (!full && s.v !== 2 && Array.isArray(s.questions) && s.questions.length) {
+    full = {
+      questions: s.questions,
+      ans:       s.ans || {},
+      revealed:  s.revealed || [],
+      marked:    s.marked   || [],
+    };
+  }
+
+  // 3. IndexedDB 无数据 → 按 fingerprints 从服务端重载
+  if (!full && Array.isArray(s.fingerprints) && s.fingerprints.length) {
+    toast('正在恢复题目数据…');
+    try {
+      const fps = s.fingerprints.join(',');
+      const res = await apiFetch('/api/questions?fingerprints=' + encodeURIComponent(fps) + '&' + bankQS());
+      const data = await res.json();
+      if (data.items && data.items.length) {
+        // 服务端回退：题目可恢复，但作答记录已丢失（IDB 丢失意味着 ans 不可恢复）
+        full = { questions: data.items, ans: {}, revealed: [], marked: [] };
+      }
+    } catch (e) {
+      toast('恢复失败，请检查网络连接', true);
+      return;
+    }
+  }
+
+  if (!full || !full.questions || !full.questions.length) {
+    toast('无法恢复练习数据', true);
+    clearPracticeSession(id);
+    return;
+  }
+
   S.mode             = 'practice';
-  S.questions        = s.questions;
-  S.ans              = _deserializeAns(s.ans);
-  S.revealed         = new Set(s.revealed || []);
-  S.marked           = new Set(s.marked   || []);
+  S.questions        = full.questions;
+  S.ans              = _deserializeAns(full.ans || {});
+  S.revealed         = new Set(full.revealed || []);
+  S.marked           = new Set(full.marked   || []);
   S.cur              = s.cur ?? 0;
   S.examStart        = s.startedAt || Date.now();
-  S.modeGroups       = buildModeGroups(s.questions);
+  S.modeGroups       = buildModeGroups(full.questions);
   S.currentGroupIdx  = 0;
   S.caseMaxReached   = {};
   S.practiceSessionId= id;
@@ -596,7 +872,7 @@ function _deserializeAns(raw) {
   return out;
 }
 
-/** 保存当前考试状态到 localStorage */
+/** 保存当前考试状态 — 元数据 → localStorage，大数据 → IndexedDB */
 function saveExamSession() {
   if (S.mode !== 'exam' || !S.questions.length || S.examSubmitted) return;
   // 真正暂停中：tick 已冻结，但 serverNow()-examStart 仍在增长。
@@ -608,14 +884,14 @@ function saveExamSession() {
   const effectiveStart = S.examStart + pauseOffset;
   const elapsedSec = Math.floor((serverNow() - effectiveStart) / 1000);
   const remaining  = Math.max(0, S.examLimit - elapsedSec);
-  const session = {
-    v: 1,
+
+  // 仅元数据写 localStorage（无 questions，确保 < 5KB）
+  const meta = {
+    v: 2,
     savedAt:       Date.now(),
     remaining,
     examLimit:     S.examLimit,
     cur:           S.cur,
-    questions:     S.questions,
-    ans:           _serializeAns(S.ans),
     marked:        [...S.marked],
     modeGroups:    S.modeGroups,
     currentGroupIdx: S.currentGroupIdx,
@@ -624,29 +900,56 @@ function saveExamSession() {
     scorePerMode:   CFG.scorePerMode   || {},
     multiScoreMode: CFG.multiScoreMode || 'strict',
     exam_id:        S.examId || null,
-    // 保存累计暂停时长，恢复时合并进 examStart 避免计时器跳变
     examPauseOffsetMs: pauseOffset,
+    totalQs:       S.questions.length, // 用于 UI 展示
   };
   try {
-    localStorage.setItem(examSessionKey(), JSON.stringify(session));
+    localStorage.setItem(examSessionKey(), JSON.stringify(meta));
   } catch(e) {
-    console.warn('[Quiz] 保存考试进度失败（可能 localStorage 已满）', e);
+    console.warn('[Quiz] 保存考试元数据失败', e);
   }
+
+  // 大数据写 IndexedDB（异步，beforeunload 中可能来不及完成，
+  // 但 visibilitychange→hidden 和 20s 定时器的调用一般能成功）
+  const idbKey = 'exam:' + examSessionKey();
+  SessionDB.save(idbKey, {
+    questions: S.questions,
+    ans:       _serializeAns(S.ans),
+  }).catch(e => console.warn('[Quiz] exam IDB save:', e));
 }
 
 /** 清除已保存的考试进度 */
 function clearExamSession() {
   localStorage.removeItem(examSessionKey());
+  SessionDB.remove('exam:' + examSessionKey()).catch(() => {});
 }
 
-/** 读取已保存的考试进度，返回 session 对象或 null */
-function _loadRawSession() {
+/** 读取已保存的考试进度（async），返回 session 对象或 null */
+async function _loadRawSession() {
   try {
     const raw = localStorage.getItem(examSessionKey());
     if (!raw) return null;
     const s = JSON.parse(raw);
+    if (!s) return null;
+
+    // v2 格式：questions 在 IndexedDB 中
+    if (s.v === 2) {
+      try {
+        const full = await SessionDB.load('exam:' + examSessionKey());
+        if (full && Array.isArray(full.questions) && full.questions.length) {
+          s.questions = full.questions;
+          s.ans       = full.ans || s.ans || {};
+        } else {
+          // IndexedDB 数据丢失 → 无法恢复
+          return null;
+        }
+      } catch (e) {
+        return null;
+      }
+    }
+
     // 基本合法性校验
-    if (!s || !Array.isArray(s.questions) || !s.questions.length) return null;
+    if (!Array.isArray(s.questions) || !s.questions.length) return null;
     return s;
   } catch(e) { return null; }
 }
@@ -666,8 +969,8 @@ function _fmtSavedAt(ts) {
 }
 
 /** init 时检测是否有未完成的考试，有则弹出恢复弹窗 */
-function checkResumeSession() {
-  const s = _loadRawSession();
+async function checkResumeSession() {
+  const s = await _loadRawSession();
   if (!s) return false;
 
   // 基础字段校验：必须有 remaining 和 savedAt
@@ -714,7 +1017,7 @@ function checkResumeSession() {
 
 /** 用户选择「提交」（考试已超时，恢复会话后立即交卷） */
 async function submitTimedOutSession() {
-  const s = _loadRawSession();
+  const s = await _loadRawSession();
   document.getElementById('resume-modal').style.display = 'none';
   if (!s) return;
 
@@ -767,9 +1070,9 @@ function discardSession() {
   document.getElementById('resume-modal').style.display = 'none';
 }
 
-/** 用户选择「继续作答」——从 localStorage 恢复完整考试状态 */
-function restoreSession() {
-  const s = _loadRawSession();
+/** 用户选择「继续作答」——从 IndexedDB + localStorage 恢复完整考试状态 */
+async function restoreSession() {
+  const s = await _loadRawSession();
   document.getElementById('resume-modal').style.display = 'none';
   if (!s) return;
 
@@ -997,6 +1300,9 @@ async function selectBankAndEnter(idx) {
 
   // ── 持久化选择（刷新后自动恢复）────────────────────
   localStorage.setItem(SELECTED_BANK_KEY, String(idx));
+
+  // ── 旧数据迁移（首次升级时将 localStorage 大数据搬到 IndexedDB）──
+  await _migrateLegacyData();
 
   // ── 加载此题库的历史记录 ─────────────────────────
   S.serverHistory    = null;
@@ -3684,48 +3990,93 @@ async function _processPendingReveals() {
       const { answers } = await res.json();
       if (!answers || !Object.keys(answers).length) continue;
 
-      // 找到对应的复盘缓存条目（按 fps 集合匹配）
+      // 找到对应的复盘缓存条目（按 fps 集合匹配）— 先 IndexedDB，再 localStorage 旧格式
       const cacheKey = 'quiz-review-cache-b' + entry.bankID;
-      let cache;
-      try { cache = JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch(e) { continue; }
-
-      // 用 entry.fps（"fp:si" 数组）匹配缓存里的题目
+      const bankSuffix = '-b' + entry.bankID;
       const entryFpSet = new Set(entry.fps || []);
       let matched = false;
-      cache = cache.map(c => {
-        if (matched) return c;
-        const cFps = (c.qs || []).map(q => (q.fingerprint || '') + ':' + (q.si ?? 0));
-        const overlap = cFps.filter(f => entryFpSet.has(f)).length;
-        if (overlap < entryFpSet.size * 0.9) return c; // 不是同一场考试
-        matched = true;
-        // 将答案填入 qs 并重新统计正确率
-        let correct = 0;
-        const newQs = (c.qs || []).map((q, idx) => {
-          const key = (q.fingerprint || '') + ':' + (q.si ?? 0);
-          const a = answers[key];
-          if (a && a.answer) {
-            const newQ = Object.assign({}, q, { answer: a.answer, discuss: a.discuss || q.discuss });
-            // 判断该题是否答对，更新 correct 计数（用 idx 而非 indexOf，避免对象引用比较失效）
-            const sel = c.ans ? c.ans[idx] : undefined;
-            const selVal = (sel && sel.__set) ? new Set(sel.v) : sel;
-            if (selVal) {
-              const isMulti = (a.answer.length > 1);
-              if (isMulti) {
-                const cs = new Set(a.answer.split(''));
-                const ss = selVal instanceof Set ? selVal : new Set([selVal]);
-                if (ss.size === cs.size && [...cs].every(l => ss.has(l))) correct++;
-              } else {
-                if (selVal === a.answer) correct++;
-              }
-            }
-            return newQ;
-          }
-          return q;
-        });
-        return Object.assign({}, c, { qs: newQs, _answersRecovered: true });
-      });
 
-      try { localStorage.setItem(cacheKey, JSON.stringify(cache)); } catch(e) {}
+      // 新格式：遍历 ID 列表，从 IndexedDB 逐一加载
+      let idList = [];
+      try { idList = JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch(e) {}
+      const isNewFormat = idList.length === 0 || typeof idList[0] === 'string' || typeof idList[0] === 'number';
+
+      if (isNewFormat && idList.length) {
+        for (const rid of idList) {
+          if (matched) break;
+          try {
+            const c = await SessionDB.load('review:' + rid + bankSuffix);
+            if (!c || !c.qs) continue;
+            const cFps = c.qs.map(q => (q.fingerprint || '') + ':' + (q.si ?? 0));
+            const overlap = cFps.filter(f => entryFpSet.has(f)).length;
+            if (overlap < entryFpSet.size * 0.9) continue;
+            matched = true;
+            let correct = 0;
+            const newQs = c.qs.map((q, idx) => {
+              const key2 = (q.fingerprint || '') + ':' + (q.si ?? 0);
+              const a = answers[key2];
+              if (a && a.answer) {
+                const newQ = Object.assign({}, q, { answer: a.answer, discuss: a.discuss || q.discuss });
+                const sel = c.ans ? c.ans[idx] : undefined;
+                const selVal = (sel && sel.__set) ? new Set(sel.v) : sel;
+                if (selVal) {
+                  const isMulti = (a.answer.length > 1);
+                  if (isMulti) {
+                    const cs = new Set(a.answer.split(''));
+                    const ss = selVal instanceof Set ? selVal : new Set([selVal]);
+                    if (ss.size === cs.size && [...cs].every(l => ss.has(l))) correct++;
+                  } else {
+                    if (selVal === a.answer) correct++;
+                  }
+                }
+                return newQ;
+              }
+              return q;
+            });
+            await SessionDB.save('review:' + rid + bankSuffix, Object.assign({}, c, { qs: newQs, _answersRecovered: true }));
+          } catch(e2) { /* skip */ }
+        }
+      }
+
+      // Fallback: 旧格式 localStorage 完整缓存（数组内含 qs 对象）
+      if (!matched) {
+        let cache;
+        try { cache = JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch(e) { cache = []; }
+        if (cache.length && typeof cache[0] === 'object' && cache[0] !== null) {
+          cache = cache.map(c => {
+            if (matched) return c;
+            const cFps = (c.qs || []).map(q => (q.fingerprint || '') + ':' + (q.si ?? 0));
+            const overlap = cFps.filter(f => entryFpSet.has(f)).length;
+            if (overlap < entryFpSet.size * 0.9) return c;
+            matched = true;
+            let correct = 0;
+            const newQs = (c.qs || []).map((q, idx) => {
+              const key2 = (q.fingerprint || '') + ':' + (q.si ?? 0);
+              const a = answers[key2];
+              if (a && a.answer) {
+                const newQ = Object.assign({}, q, { answer: a.answer, discuss: a.discuss || q.discuss });
+                const sel = c.ans ? c.ans[idx] : undefined;
+                const selVal = (sel && sel.__set) ? new Set(sel.v) : sel;
+                if (selVal) {
+                  const isMulti = (a.answer.length > 1);
+                  if (isMulti) {
+                    const cs = new Set(a.answer.split(''));
+                    const ss = selVal instanceof Set ? selVal : new Set([selVal]);
+                    if (ss.size === cs.size && [...cs].every(l => ss.has(l))) correct++;
+                  } else {
+                    if (selVal === a.answer) correct++;
+                  }
+                }
+                return newQ;
+              }
+              return q;
+            });
+            return Object.assign({}, c, { qs: newQs, _answersRecovered: true });
+          });
+          try { localStorage.setItem(cacheKey, JSON.stringify(cache)); } catch(e) {}
+        }
+      }
+
       recovered++;
     } catch(e) {
       // 网络仍不通，保留在队列里下次重试
@@ -4140,6 +4491,11 @@ function calculateResults(origMode, submitAt) {
 
     S.results.totalScore  = Math.round(totalScore  * 10) / 10;
     S.results.earnedScore = Math.round(earnedScore * 10) / 10;
+    // 将 scoreByMode 中累积的浮点噪声消除（宽松模式下 0.3+0.3+0.3 可能不精确为 0.9）
+    for (const mode of Object.keys(scoreByMode)) {
+      scoreByMode[mode].earned = Math.round(scoreByMode[mode].earned * 10) / 10;
+      scoreByMode[mode].total  = Math.round(scoreByMode[mode].total  * 10) / 10;
+    }
     S.results.scoreByMode = scoreByMode;
   }
 
@@ -4158,17 +4514,43 @@ function calculateResults(origMode, submitAt) {
     date: _localDate(),
     units: [...new Set(qs.map(q => q.unit).filter(Boolean))].slice(0,2).join('、'),
   };
+  // 计分数据（仅考试模式启用计分时存在）
+  if (S.results.scoring) {
+    record.scoring        = true;
+    record.earnedScore    = S.results.earnedScore;
+    record.totalScore     = S.results.totalScore;
+    record.scoreByMode    = S.results.scoreByMode;
+    record.scorePerMode   = S.results.scorePerMode;
+    record.multiScoreMode = S.results.multiScoreMode;
+  }
   S.history.unshift(record);
   S.history = S.history.slice(0, 10);
   localStorage.setItem(historyKey(), JSON.stringify(S.history));
 
   // 复盘缓存：保存题目列表和答案，供历史记录"查看解析"使用
+  // 大数据 → IndexedDB（解决 iOS 5MB localStorage 限额问题）
   try {
+    const cacheEntry = { id: sessionId, qs: S.questions, ans: _serializeAns(S.ans) };
+    // 附带计分数据，以便从历史记录恢复时能显示得分详情
+    if (S.results.scoring) {
+      cacheEntry.scoring        = true;
+      cacheEntry.earnedScore    = S.results.earnedScore;
+      cacheEntry.totalScore     = S.results.totalScore;
+      cacheEntry.scoreByMode    = S.results.scoreByMode;
+      cacheEntry.scorePerMode   = S.results.scorePerMode;
+      cacheEntry.multiScoreMode = S.results.multiScoreMode;
+    }
+    SessionDB.save('review:' + sessionId + _bankSuffix(), cacheEntry).catch(() => {});
+    // localStorage 仅存 ID 索引列表（几十字节）
     const cacheKey = _reviewCacheKey();
-    const cache = JSON.parse(localStorage.getItem(cacheKey) || '[]');
-    cache.unshift({ id: sessionId, qs: S.questions, ans: _serializeAns(S.ans) });
-    localStorage.setItem(cacheKey, JSON.stringify(cache.slice(0, 10)));
-  } catch (e) { /* localStorage 满时静默忽略 */ }
+    let idList = [];
+    try { idList = JSON.parse(localStorage.getItem(cacheKey) || '[]'); } catch(_) {}
+    // 兼容旧格式：若列表内有 object（旧版完整缓存），提取 id 后迁移
+    idList = idList.map(item => typeof item === 'object' && item !== null ? item.id : item).filter(Boolean);
+    idList.unshift(sessionId);
+    idList = idList.slice(0, 10);
+    localStorage.setItem(cacheKey, JSON.stringify(idList));
+  } catch (e) { /* 静默忽略 */ }
 
   // 持久化到服务端（错题本 + SM-2 + 统计均由此驱动）
   _recordSessionToServer(S.results, S.questions, S.ans, sessionId).then(async () => {
@@ -4183,6 +4565,12 @@ function calculateResults(origMode, submitAt) {
 }
 
 function renderResults() {
+  /** 格式化分数：整数直接显示，小数最多1位，防止浮点循环小数 */
+  function _fmtScore(v) {
+    if (typeof v !== 'number' || !isFinite(v)) return '0';
+    const r = Math.round(v * 10) / 10;
+    return r % 1 === 0 ? String(r) : r.toFixed(1);
+  }
   const R = S.results;
   // 防御：无结果数据时不渲染（避免 NaN / 崩溃）
   if (!R) { console.warn('renderResults: S.results is null, skipping'); return; }
@@ -4249,7 +4637,7 @@ function renderResults() {
         <div class="score-mode-bar-wrap">
           <div class="score-mode-bar" style="width:${barPct}%"></div>
         </div>
-        <span class="score-mode-val">${d.earned}/${d.total}</span>
+        <span class="score-mode-val">${_fmtScore(d.earned)}/${_fmtScore(d.total)}</span>
       </div>`;
     }).join('');
     sb.innerHTML = `
@@ -4259,7 +4647,7 @@ function renderResults() {
             ${R.multiScoreMode === 'loose' ? '宽松计分' : '严格计分'}
           </span>
         </span>
-        <span class="score-block-total">${R.earnedScore}<span>/ ${R.totalScore} 分（${pctScore}%）</span></span>
+        <span class="score-block-total">${_fmtScore(R.earnedScore)}<span>/ ${_fmtScore(R.totalScore)} 分（${pctScore}%）</span></span>
       </div>
       ${modeRows}`;
     sb.style.display = '';
@@ -6685,7 +7073,7 @@ function _fmtAgo(ts) {
 }
 
 /** 点击已完成记录 → 查看结果摘要页 */
-function openHistoryResult(id, idx) {
+async function openHistoryResult(id, idx) {
   // 用与 renderHistorySection 完全一致的数据源和排序，避免 idx 错位
   const serverH    = S.serverHistory    || [];
   const localOnlyH = S.localOnlyHistory || [];
@@ -6707,12 +7095,23 @@ function openHistoryResult(id, idx) {
   if (!h) { toast('记录不存在或已删除', true); return; }
 
   // 尝试从复盘缓存恢复题目和答案（按真实 id 查找）
-  let cachedQs = null, cachedAns = null;
+  // 优先 IndexedDB，再 fallback 到 localStorage 旧格式
+  let cachedQs = null, cachedAns = null, cachedEntry = null;
   try {
-    const cache = JSON.parse(localStorage.getItem(_reviewCacheKey()) || '[]');
-    const entry = cache.find(e => String(e.id) === String(h.id));
-    if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; }
-  } catch (e) { /* 缓存读取失败静默忽略 */ }
+    const entry = await SessionDB.load('review:' + String(h.id) + _bankSuffix());
+    if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; cachedEntry = entry; }
+  } catch (e) { /* IndexedDB 不可用 */ }
+  // fallback: 旧版 localStorage 完整缓存（v1 格式，数组内含 qs 对象）
+  if (!cachedQs) {
+    try {
+      const cache = JSON.parse(localStorage.getItem(_reviewCacheKey()) || '[]');
+      // 旧格式: [{id, qs, ans}, ...]  新格式: [id1, id2, ...]
+      if (cache.length && typeof cache[0] === 'object') {
+        const entry = cache.find(e => String(e.id) === String(h.id));
+        if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; cachedEntry = entry; }
+      }
+    } catch (e) { /* 缓存读取失败静默忽略 */ }
+  }
 
   // 恢复 S.questions 和 S.mode，让"再练一次"能复用同一批题目
   if (cachedQs) {
@@ -6736,6 +7135,19 @@ function openHistoryResult(id, idx) {
     qs:      cachedQs,
     ans:     cachedAns,
   };
+
+  // ── 恢复计分数据 ─────────────────────────────────────────────
+  // 优先从 history record 读取（最新版本会保存），fallback 从 review cache 读
+  const scoreSrc = (h.scoring ? h : null)
+      || (cachedEntry && cachedEntry.scoring ? cachedEntry : null);
+  if (scoreSrc) {
+    S.results.scoring        = true;
+    S.results.earnedScore    = scoreSrc.earnedScore;
+    S.results.totalScore     = scoreSrc.totalScore;
+    S.results.scoreByMode    = scoreSrc.scoreByMode;
+    S.results.scorePerMode   = scoreSrc.scorePerMode;
+    S.results.multiScoreMode = scoreSrc.multiScoreMode;
+  }
 
   // 查看解析按钮：有缓存才可用，否则置灰提示
   const reviewBtn = document.getElementById('res-review-detail-btn');
@@ -7994,6 +8406,19 @@ window.addEventListener('beforeunload', () => {
   saveExamSession();
 });
 
+// iOS Safari 中 beforeunload 不可靠且 IDB 异步写入可能来不及完成。
+// visibilitychange → hidden 在切后台/关标签页时触发更早且更可靠，
+// 此时 IDB 写入有更充裕的时间完成。
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden') {
+    if (S.mode === 'exam' && S.questions.length && !S.examSubmitted) {
+      saveExamSession();
+    } else if (S.mode === 'practice' && S.questions.length) {
+      savePracticeSession();
+    }
+  }
+});
+
 // 每 20 秒自动保存一次（防止仅修改标记/位置未及时保存）
 setInterval(() => {
   if (S.mode === 'exam' && S.questions.length) saveExamSession();
@@ -8146,19 +8571,12 @@ init();
         savePracticeSession();
         saveMsg = '练习进度已自动保存，';
       } else if (S.mode === 'exam' && S.questions.length && !S.examSubmitted) {
-        // 考试模式：把当前状态写入 examSession key，刷新后 checkResumeSession 会弹恢复提示
+        // 考试模式：调用 saveExamSession 写 meta → localStorage + data → IndexedDB
         try {
           const key = examSessionKey();
-          const existing = JSON.parse(localStorage.getItem(key) || 'null');
+          const existing = localStorage.getItem(key);
           if (!existing) {
-            // 仅在尚未有存档时写入，避免覆盖更完整的存档
-            localStorage.setItem(key, JSON.stringify({
-              v: 1, savedAt: Date.now(),
-              cur: S.cur, questions: S.questions,
-              ans: _serializeAns(S.ans),
-              revealed: [...S.revealed], marked: [...S.marked],
-              examStart: S.examStart, examLimit: S.examLimit,
-            }));
+            saveExamSession();
           }
           saveMsg = '考试进度已自动保存，';
         } catch (e) { /* 存储失败时静默 */ }

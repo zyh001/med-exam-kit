@@ -1281,7 +1281,17 @@ def api_questions():
                 continue
         grp = [_sq_flat(q, sq, qi, si) for si, sq in enumerate(q.sub_questions)]
         if grp:
-            groups.append(grp)
+            # ── 合并共用题干 ─────────────────────────────────────────
+            # 某些数据源将 A3/A4 共用题干拆为独立 Question（相同 stem），
+            # 若直接按 Question 建组，shuffle 后子题会被打散。
+            # 将连续相同 stem 的 Question 合并为同一 group。
+            stem = getattr(q, "stem", "") or ""
+            if (stem and groups
+                    and groups[-1][0].get("stem") == stem
+                    and groups[-1][0]["mode"] == q.mode):
+                groups[-1].extend(grp)
+            else:
+                groups.append(grp)
 
     # ── 按题型分组 ──
     mode_order: list[str] = []
