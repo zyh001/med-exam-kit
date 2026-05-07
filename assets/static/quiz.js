@@ -4491,6 +4491,11 @@ function calculateResults(origMode, submitAt) {
 
     S.results.totalScore  = Math.round(totalScore  * 10) / 10;
     S.results.earnedScore = Math.round(earnedScore * 10) / 10;
+    // 将 scoreByMode 中累积的浮点噪声消除（宽松模式下 0.3+0.3+0.3 可能不精确为 0.9）
+    for (const mode of Object.keys(scoreByMode)) {
+      scoreByMode[mode].earned = Math.round(scoreByMode[mode].earned * 10) / 10;
+      scoreByMode[mode].total  = Math.round(scoreByMode[mode].total  * 10) / 10;
+    }
     S.results.scoreByMode = scoreByMode;
   }
 
@@ -4509,6 +4514,15 @@ function calculateResults(origMode, submitAt) {
     date: _localDate(),
     units: [...new Set(qs.map(q => q.unit).filter(Boolean))].slice(0,2).join('、'),
   };
+  // 计分数据（仅考试模式启用计分时存在）
+  if (S.results.scoring) {
+    record.scoring        = true;
+    record.earnedScore    = S.results.earnedScore;
+    record.totalScore     = S.results.totalScore;
+    record.scoreByMode    = S.results.scoreByMode;
+    record.scorePerMode   = S.results.scorePerMode;
+    record.multiScoreMode = S.results.multiScoreMode;
+  }
   S.history.unshift(record);
   S.history = S.history.slice(0, 10);
   localStorage.setItem(historyKey(), JSON.stringify(S.history));
@@ -4517,6 +4531,15 @@ function calculateResults(origMode, submitAt) {
   // 大数据 → IndexedDB（解决 iOS 5MB localStorage 限额问题）
   try {
     const cacheEntry = { id: sessionId, qs: S.questions, ans: _serializeAns(S.ans) };
+    // 附带计分数据，以便从历史记录恢复时能显示得分详情
+    if (S.results.scoring) {
+      cacheEntry.scoring        = true;
+      cacheEntry.earnedScore    = S.results.earnedScore;
+      cacheEntry.totalScore     = S.results.totalScore;
+      cacheEntry.scoreByMode    = S.results.scoreByMode;
+      cacheEntry.scorePerMode   = S.results.scorePerMode;
+      cacheEntry.multiScoreMode = S.results.multiScoreMode;
+    }
     SessionDB.save('review:' + sessionId + _bankSuffix(), cacheEntry).catch(() => {});
     // localStorage 仅存 ID 索引列表（几十字节）
     const cacheKey = _reviewCacheKey();
@@ -4542,6 +4565,12 @@ function calculateResults(origMode, submitAt) {
 }
 
 function renderResults() {
+  /** 格式化分数：整数直接显示，小数最多1位，防止浮点循环小数 */
+  function _fmtScore(v) {
+    if (typeof v !== 'number' || !isFinite(v)) return '0';
+    const r = Math.round(v * 10) / 10;
+    return r % 1 === 0 ? String(r) : r.toFixed(1);
+  }
   const R = S.results;
   // 防御：无结果数据时不渲染（避免 NaN / 崩溃）
   if (!R) { console.warn('renderResults: S.results is null, skipping'); return; }
@@ -4608,7 +4637,7 @@ function renderResults() {
         <div class="score-mode-bar-wrap">
           <div class="score-mode-bar" style="width:${barPct}%"></div>
         </div>
-        <span class="score-mode-val">${d.earned}/${d.total}</span>
+        <span class="score-mode-val">${_fmtScore(d.earned)}/${_fmtScore(d.total)}</span>
       </div>`;
     }).join('');
     sb.innerHTML = `
@@ -4618,7 +4647,7 @@ function renderResults() {
             ${R.multiScoreMode === 'loose' ? '宽松计分' : '严格计分'}
           </span>
         </span>
-        <span class="score-block-total">${R.earnedScore}<span>/ ${R.totalScore} 分（${pctScore}%）</span></span>
+        <span class="score-block-total">${_fmtScore(R.earnedScore)}<span>/ ${_fmtScore(R.totalScore)} 分（${pctScore}%）</span></span>
       </div>
       ${modeRows}`;
     sb.style.display = '';
@@ -7067,10 +7096,10 @@ async function openHistoryResult(id, idx) {
 
   // 尝试从复盘缓存恢复题目和答案（按真实 id 查找）
   // 优先 IndexedDB，再 fallback 到 localStorage 旧格式
-  let cachedQs = null, cachedAns = null;
+  let cachedQs = null, cachedAns = null, cachedEntry = null;
   try {
     const entry = await SessionDB.load('review:' + String(h.id) + _bankSuffix());
-    if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; }
+    if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; cachedEntry = entry; }
   } catch (e) { /* IndexedDB 不可用 */ }
   // fallback: 旧版 localStorage 完整缓存（v1 格式，数组内含 qs 对象）
   if (!cachedQs) {
@@ -7079,7 +7108,7 @@ async function openHistoryResult(id, idx) {
       // 旧格式: [{id, qs, ans}, ...]  新格式: [id1, id2, ...]
       if (cache.length && typeof cache[0] === 'object') {
         const entry = cache.find(e => String(e.id) === String(h.id));
-        if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; }
+        if (entry) { cachedQs = entry.qs; cachedAns = entry.ans; cachedEntry = entry; }
       }
     } catch (e) { /* 缓存读取失败静默忽略 */ }
   }
@@ -7106,6 +7135,19 @@ async function openHistoryResult(id, idx) {
     qs:      cachedQs,
     ans:     cachedAns,
   };
+
+  // ── 恢复计分数据 ─────────────────────────────────────────────
+  // 优先从 history record 读取（最新版本会保存），fallback 从 review cache 读
+  const scoreSrc = (h.scoring ? h : null)
+      || (cachedEntry && cachedEntry.scoring ? cachedEntry : null);
+  if (scoreSrc) {
+    S.results.scoring        = true;
+    S.results.earnedScore    = scoreSrc.earnedScore;
+    S.results.totalScore     = scoreSrc.totalScore;
+    S.results.scoreByMode    = scoreSrc.scoreByMode;
+    S.results.scorePerMode   = scoreSrc.scorePerMode;
+    S.results.multiScoreMode = scoreSrc.multiScoreMode;
+  }
 
   // 查看解析按钮：有缓存才可用，否则置灰提示
   const reviewBtn = document.getElementById('res-review-detail-btn');

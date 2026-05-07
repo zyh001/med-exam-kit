@@ -3041,12 +3041,43 @@ func selectQuestions(questions []*models.Question, opts selectOpts) ([]sqFlat, i
 		if len(grp) == 0 {
 			continue
 		}
+
+		// ── 合并共用题干 ─────────────────────────────────────────
+		// 某些数据源（如 ahuyikao、yikaobang）将 A3/A4 共用题干题
+		// 拆为多个独立 Question（相同 stem），而非一个 Question 含多个
+		// SubQuestion。若直接按 Question 建组，shuffle 后子题会被打散。
+		// 修复：将连续相同 stem 的 Question 合并为同一 group，
+		// 使 shuffle 仅在"大题"级别打乱，子题保持原序。
+		if q.Stem != "" && len(groups) > 0 {
+			prev := groups[len(groups)-1]
+			if len(prev) > 0 && prev[0].Stem == q.Stem && prev[0].Mode == q.Mode {
+				groups[len(groups)-1] = append(prev, grp...)
+				continue // 已合并，不再新建 group / modeMap entry
+			}
+		}
+
 		groups = append(groups, grp)
 		mk := q.Mode
 		if _, ok := modeMap[mk]; !ok {
 			modeOrder = append(modeOrder, mk)
 		}
 		modeMap[mk] = append(modeMap[mk], grp)
+	}
+
+	// ── 重建 modeMap（groups 中已合并共用题干，需保持一致）──
+	// 只在有合并发生时需要重建：当 groups 总数 < modeMap 条目总数
+	{
+		mmTotal := 0
+		for _, gs := range modeMap {
+			mmTotal += len(gs)
+		}
+		if mmTotal != len(groups) {
+			modeMap = map[string][]group{}
+			for _, grp := range groups {
+				mk := grp[0].Mode
+				modeMap[mk] = append(modeMap[mk], grp)
+			}
+		}
 	}
 
 	// 按医学考试标准题型顺序排列：A1 → A2 → A3/A4 → B → 案例分析 → 其他
