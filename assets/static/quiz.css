@@ -1127,10 +1127,10 @@ input[type=range]::-webkit-slider-thumb:active{transform:scale(1.2)}
   padding:10px 20px;border-bottom:1px solid var(--border);
 }
 .score-mode-row:last-child{border-bottom:none}
-.score-mode-name{flex:1;font-size:13px;color:var(--text);min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.score-mode-bar-wrap{flex:1.5;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
+.score-mode-name{flex:0 1 auto;font-size:13px;color:var(--text);min-width:60px;max-width:40%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.score-mode-bar-wrap{flex:1;height:6px;background:var(--border);border-radius:3px;overflow:hidden}
 .score-mode-bar{height:100%;border-radius:3px;background:var(--accent);transition:width .6s cubic-bezier(.4,0,.2,1)}
-.score-mode-val{font-size:12px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0}
+.score-mode-val{font-size:12px;font-weight:700;color:var(--accent);font-variant-numeric:tabular-nums;white-space:nowrap;flex-shrink:0;min-width:48px;text-align:right}
 
 /* ── 计分配置面板（config 页）── */
 .scoring-panel{display:flex;flex-direction:column;gap:12px;margin-top:12px}
