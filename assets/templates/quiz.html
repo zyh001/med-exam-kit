@@ -40,6 +40,22 @@
   <script>window.ASSET_VER = "{{ASSET_VER}}";</script>
   <script src="/static/common.js"></script>
   <script>
+    // ── iOS 视口高度修复 ────────────────────────────────────────
+    // iOS Safari 的 100vh/100%/inset:0 都无法可靠覆盖 home indicator 区域。
+    // 用 window.innerHeight（实际视口像素高度）设置 CSS 变量 --app-h，
+    // 由 #app { height: var(--app-h, 100%) } 使用。
+    (function() {
+      function setAppH() {
+        document.documentElement.style.setProperty('--app-h', window.innerHeight + 'px');
+      }
+      setAppH();
+      window.addEventListener('resize', setAppH);
+      // iOS Safari 旋转屏幕后 innerHeight 可能延迟更新
+      window.addEventListener('orientationchange', function() {
+        setTimeout(setAppH, 120);
+      });
+    })();
+
     // ── PWA 更新横幅 ──────────────────────────────────────────────
     // 新版本 SW 安装完成（waiting 状态）时弹出，用户点击才切换，
     // 避免新 SW 接管时旧 JS 与新缓存文件版本不一致造成白屏/错误。
