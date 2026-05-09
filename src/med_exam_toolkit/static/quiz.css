@@ -34,8 +34,17 @@
  * body 的 overflow:hidden 在 iOS Safari 里对有 transform 的子元素不可靠；
  * position:fixed 的元素会创建独立的视口容器，Safari 不会把其子元素
  * 纳入文档滚动区域的计算。
+ *
+ * iOS Safari 中 inset:0 可能无法铺满 home indicator 以下的区域，
+ * 使用 height: var(--app-h, 100%) 由 JS 动态注入实际视口高度兜底。
  */
-#app{position:fixed;inset:0;overflow:hidden;background:var(--bg)}
+#app{
+  position:fixed;top:0;left:0;right:0;
+  height:100%;
+  height:-webkit-fill-available;
+  height:var(--app-h, 100%);
+  overflow:hidden;background:var(--bg);
+}
 button{cursor:pointer;font-family:var(--font-sans);border:none;outline:none}
 input,select{font-family:var(--font-sans);outline:none}
 
@@ -1919,7 +1928,7 @@ button,a,[role=button],label{touch-action:manipulation}
 /* ════ 统计页面 ════ */
 #s-stats{overflow-y:auto;display:flex;flex-direction:column}
 .stats-header{
-  display:flex;align-items:center;gap:12px;padding:16px 20px;
+  display:flex;align-items:center;gap:12px;padding:max(calc(env(safe-area-inset-top) + 12px), 16px) 20px 12px;
   border-bottom:1px solid var(--border);flex-shrink:0;background:var(--surface);
 }
 .stats-header h2{font-size:17px;font-weight:700}
