@@ -44,15 +44,25 @@ function getTabYRange() {
 }
 
 // ==================== 滑动操作 ====================
+function swipeNext(hRatio) {
+    var sw = device.width;
+    var sh = device.height;
 
-function swipeNextSub() {
-    swipe(1000, 2200, 200, 2200, 150);
+    var centerY = Math.floor(sh * hRatio);
+    var startX = Math.floor(sw * 0.9);
+    var endX = Math.floor(sw * 0.1);
+
+    swipe(startX, centerY, endX, centerY, 150);
+
     sleep(300);
 }
 
+function swipeNextSub() {
+    swipeNext(0.8);
+}
+
 function swipeNextMain() {
-    swipe(1000, 600, 200, 600, 250);
-    sleep(300);
+    swipeNext(0.5);
 }
 
 // ==================== 工具函数 ====================
@@ -73,7 +83,8 @@ function hasNullValue(obj) {
 
 function validateMultiSub(test) {
     if (test == null) return false;
-    if (!test.cls || !test.numb || !test.mode || !test.test) return false;
+    // 有些单选题是以子题形式出现的，这种题缺少 test.test，因此不能用 !test.test 判断
+    if (!test.cls || !test.numb || !test.mode) return false;
     if (!test.sub_questions || test.sub_questions.length === 0) return false;
     for (var i = 0; i < test.sub_questions.length; i++) {
         var sq = test.sub_questions[i];
@@ -396,14 +407,21 @@ function validateQuestion(test) {
 // ==================== 保存 ====================
 
 function savejson(test) {
-    var name = OUTPUT_DIR + test.cls + "/" + (test.unit || "") + "/" + test.name + ".json";
+    test.timestamp = getFormattedTimestamp()
+
+    // var name = OUTPUT_DIR + test.cls + "/" + (test.unit || "") + "/" + test.name + ".json";
+
+    // readable filename such as "200-1.json", "200-2.json"
+    var name = OUTPUT_DIR + test.cls + "/" + (test.unit || "") + "/" + test.numb.split('/').reverse().join('-') + ".json";
+
     record = test;
     lastNumb = test.numb;
     lastUnit = test.unit || "";
     var jsonData = JSON.stringify(test, null, 2);
     files.createWithDirs(name);
-    files.write(name, jsonData);
+    files.write(name, jsonData, "utf-8");
     console.log("  ✔ 保存成功 " + test.numb);
+
     return jsonData;
 }
 
@@ -556,58 +574,73 @@ function getVisibleQuestionRange(items) {
 
 /**
  * 尝试点击题号并验证是否成功进入题目页
- * @param {string} targetNum 目标题号
+ * @param {string} targetNumInt 目标题号
  * @param {Object} element 元素对象
  * @returns {boolean} true 表示成功进入题目页
  */
-function clickQuestionAndVerify(targetNum, element) {
+function clickQuestionAndVerify(targetNumInt, element) {
     var parent = element.parent();
-    var grandParent = parent ? parent.parent() : null;
+    var gParent = parent ? parent.parent() : null;
+    var ggParent = gParent ? gParent.parent() : null;
 
-    console.log("  找到题号 " + targetNum + "，尝试点击策略");
+    console.log("  找到题号 " + targetNumInt + "，尝试点击策略");
 
-    // 策略1: 尝试点击 grandParent
-    if (grandParent && grandParent.clickable()) {
-        console.log("  策略1: 尝试点击 grandParent");
-        grandParent.click();
+    // 策略: 尝试点击 ggParent
+    if (ggParent && ggParent.clickable()) {
+        console.log("  策略1: 尝试点击 ggParent");
+        ggParent.click();
         sleep(3000);
-        if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+        if (!id("com.yikaobang.yixue:id/questionList_sort").exists()) {
             console.log("  策略1 成功");
             return true;
         }
     }
 
-    // 策略2: 尝试点击 parent
-    if (parent && parent.clickable()) {
-        console.log("  策略2: 尝试点击 parent");
-        parent.click();
+    // 策略2: 尝试点击 gParent
+    if (gParent && gParent.clickable()) {
+        console.log("  策略2: 尝试点击 gParent");
+        gParent.click();
         sleep(3000);
-        if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+        if (!id("com.yikaobang.yixue:id/questionList_sort").exists()) {
             console.log("  策略2 成功");
             return true;
         }
     }
 
-    // 策略3: 尝试点击 X/Y 坐标
-    var bounds = element.bounds();
-    var x = bounds.centerX();
-    var y = bounds.centerY();
-    console.log("  策略3: 尝试点击坐标 (" + x + ", " + y + ")");
-    click(x, y);
-    sleep(3000);
-    if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
-        console.log("  策略3 成功");
-        return true;
+    // 策略3: 尝试点击 parent
+    if (parent && parent.clickable()) {
+        console.log("  策略3: 尝试点击 parent");
+        parent.click();
+        sleep(3000);
+        if (!id("com.yikaobang.yixue:id/questionList_sort").exists()) {
+            console.log("  策略3 成功");
+            return true;
+        }
     }
 
-    // 策略4: 尝试点击 id("img_conunite")
+    // 策略4: 尝试点击 X/Y 坐标
+    brothers = parent.children()
+    for (var i = 0; i < brothers.length; i++) {
+        var bounds = brothers[i].bounds();
+        var x = bounds.centerX();
+        var y = bounds.centerY();
+        console.log("  策略4: 尝试点击 X/Y 坐标 (" + x + ", " + y + ")");
+        click(x, y)
+        sleep(3000);
+        if (!id("com.yikaobang.yixue:id/questionList_sort").exists()) {
+            console.log("  策略4 成功");
+            return true;
+        }
+    }
+
+    // 策略5: 尝试点击 id("img_conunite")
     var imgConunite = id("com.yikaobang.yixue:id/img_conunite").findOne(1000);
     if (imgConunite) {
-        console.log("  策略4: 尝试点击 id('img_conunite')");
+        console.log("  策略5: 尝试点击 id('img_conunite')");
         imgConunite.click();
         sleep(3000);
-        if (!id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
-            console.log("  策略4 成功");
+        if (!id("com.yikaobang.yixue:id/questionList_sort").exists()) {
+            console.log("  策略5 成功");
             return true;
         }
     }
@@ -654,39 +687,38 @@ function determineScrollDirectionByPosition(bounds) {
 
 /**
  * 根据目标题号和可视区范围判断滚动方向
- * @param {number} targetNum 目标题号
+ * @param {number} targetNumInt 目标题号
  * @param {object} range 可视区范围 {min, max}
  * @returns {string} "backward" 或 "forward"
  *          - "backward": 手指向下滑动，显示更小的题号
  *          - "forward": 手指向上滑动，显示更大的题号
  */
-function determineScrollDirection(targetNum, range) {
+function determineScrollDirection(targetNumInt, range) {
     console.log("  当前可视区题号范围: [" + range.min + ", " + range.max + "]");
 
-    if (targetNum < range.min) {
-        console.log("  题号 " + targetNum + " < 最小题号 " + range.min + "，需要更小的题号，scrollBackward（手指向下滑动）");
+    if (targetNumInt < range.min) {
+        console.log("  题号 " + targetNumInt + " < 最小题号 " + range.min + "，需要更小的题号，scrollBackward（手指向下滑动）");
         return "backward";
     }
-    if (targetNum > range.max) {
-        console.log("  题号 " + targetNum + " > 最大题号 " + range.max + "，需要更大的题号，scrollForward（手指向上滑动）");
+    if (targetNumInt > range.max) {
+        console.log("  题号 " + targetNumInt + " > 最大题号 " + range.max + "，需要更大的题号，scrollForward（手指向上滑动）");
         return "forward";
     }
-    console.log("  题号 " + targetNum + " 在可视区范围内但未找到，默认 scrollForward");
+    console.log("  题号 " + targetNumInt + " 在可视区范围内但未找到，默认 scrollForward");
     return "forward";
 }
 
 /**
  * 在列表中查找并点击目标题号
- * @param {string} targetNum 目标题号（如 "1" 或 "123/456"）
+ * @param {number} targetNumInt 目标题号（如 "1"）
  * @returns {object} {success: boolean, needScroll: boolean, scrollDirection: string}
  */
-function findAndClickQuestion(targetNum) {
-    var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
-    var targetNumInt = parseInt(targetNum.split("/")[0]);
+function findAndClickQuestion(targetNumInt) {
+    var items = id("com.yikaobang.yixue:id/questionList_sort").find();
 
     // 查找目标题号
     for (var i = 0; i < items.length; i++) {
-        if (items[i].text() !== targetNum) continue;
+        if (parseInt(items[i].text()) !== targetNumInt) continue;
 
         var element = items[i];
         var bounds = element.bounds();
@@ -694,12 +726,12 @@ function findAndClickQuestion(targetNum) {
         // 检查位置是否安全（内部会获取实时可视区域）
         if (!isInSafeVisibleArea(bounds)) {
             var direction = determineScrollDirectionByPosition(bounds);
-            console.log("  题号 " + targetNum + " 贴近边界，" + direction + " 让其移到中间");
+            console.log("  题号 " + targetNumInt + " 贴近边界，" + direction + " 让其移到中间");
             return {success: false, needScroll: true, scrollDirection: direction};
         }
 
         // 尝试点击
-        if (clickQuestionAndVerify(targetNum, element)) {
+        if (clickQuestionAndVerify(targetNumInt, element)) {
             return {success: true, needScroll: false, scrollDirection: null};
         }
 
@@ -766,16 +798,16 @@ function performScroll(direction) {
 
 /**
  * 滚动查找并点击目标题号
- * @param {string} targetNum 目标题号
+ * @param {number} targetNumInt 目标题号
  * @returns {boolean} true 表示成功
  */
-function scrollToQuestion(targetNum) {
+function scrollToQuestion(targetNumInt) {
     var scrollCount = 0;
     var lastRange = {min: 0, max: 0};
     var state = {stuckCount: 0};
 
     while (true) {
-        var result = findAndClickQuestion(targetNum);
+        var result = findAndClickQuestion(targetNumInt);
 
         if (result.success) {
             console.log("========== 恢复完成，继续爬取 ==========");
@@ -784,12 +816,12 @@ function scrollToQuestion(targetNum) {
 
         if (!result.needScroll) return false;
 
-        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+        var items = id("com.yikaobang.yixue:id/questionList_sort").find();
         var currentRange = getVisibleQuestionRange(items);
 
         // 检查是否卡住
         if (isScrollStuck(currentRange, lastRange, state)) {
-            console.log("  失败，可视区未变化（" + currentRange.min + "-" + currentRange.max + "），未找到题号 " + targetNum);
+            console.log("  失败，可视区未变化（" + currentRange.min + "-" + currentRange.max + "），未找到题号 " + targetNumInt);
             console.log("  总共滚动: " + scrollCount + " 次");
             return false;
         }
@@ -820,12 +852,12 @@ function returnToQuestionList() {
 
     // 等待进入题目列表页
     var waitCount = 0;
-    while (!id("com.yikaobang.yixue:id/questionList_item_tv").exists() && waitCount < 10) {
+    while (!id("com.yikaobang.yixue:id/questionList_sort").exists() && waitCount < 10) {
         sleep(1000);
         waitCount++;
     }
 
-    return id("com.yikaobang.yixue:id/questionList_item_tv").exists();
+    return id("com.yikaobang.yixue:id/questionList_sort").exists();
 }
 
 /**
@@ -853,10 +885,10 @@ function handlePeriodicReturn(savedCount) {
         return false;
     }
 
-    var targetNum = lastNumb.split("/")[0];
-    console.log("  恢复到题号: " + targetNum);
+    var targetNumInt = parseInt(lastNumb.split("/")[0]);
+    console.log("  恢复到题号: " + targetNumInt);
 
-    return scrollToQuestion(targetNum);
+    return scrollToQuestion(targetNumInt);
 }
 
 // ==================== 翻页与等待 ====================
@@ -939,7 +971,7 @@ function handleNextChapter() {
     }
 
     // 场景2: 已经在题目列表页（比如从其他地方进入）
-    if (id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+    if (id("com.yikaobang.yixue:id/questionList_sort").exists()) {
         console.log("★ 检测到题目列表页 ★");
         return enterFromQuestionList();
     }
@@ -977,7 +1009,7 @@ function enterFromQuestionList() {
     // 等待题目列表加载完成，任意题号出现即可
     var maxWait = 10;  // 最多等待 10 秒
     for (var w = 0; w < maxWait; w++) {
-        var items = id("com.yikaobang.yixue:id/questionList_item_tv").find();
+        var items = id("com.yikaobang.yixue:id/questionList_sort").find();
         if (items.length > 0) {
             console.log("  题目列表已加载完成，共 " + items.length + " 个题号");
             break;
@@ -987,7 +1019,7 @@ function enterFromQuestionList() {
     }
 
     // 查找并点击题号"1"，使用统一的滚动查找逻辑
-    if (scrollToQuestion("1")) {
+    if (scrollToQuestion(1)) {
         lastNumb = "";
         lastUnit = "";
         updateChapter();
@@ -1055,7 +1087,7 @@ function main() {
 
         closeAd();
 
-        if (id("com.yikaobang.yixue:id/questionList_item_tv").exists()) {
+        if (id("com.yikaobang.yixue:id/questionList_sort").exists()) {
             console.log("检测到题目列表页，尝试进入");
             if (enterFromQuestionList()) {
                 continue;
