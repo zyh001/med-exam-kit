@@ -1,12 +1,13 @@
 package server
 
 import (
-	"github.com/zyh001/med-exam-kit/internal/logger"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
+
+	"github.com/zyh001/med-exam-kit/internal/logger"
 
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
@@ -17,9 +18,9 @@ var wsUpgrader = websocket.Upgrader{
 }
 
 const (
-	dashscopeWSURL     = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/"
-	defaultASRModel    = "qwen3-asr-flash"
-	defaultSampleRate  = 16000
+	dashscopeWSURL    = "wss://dashscope.aliyuncs.com/api-ws/v1/inference/"
+	defaultASRModel   = "qwen3-asr-flash"
+	defaultSampleRate = 16000
 )
 
 // DashScope WebSocket protocol structures
@@ -47,9 +48,9 @@ type dsOutput struct {
 }
 
 type dsSentence struct {
-	Text     string `json:"text"`
-	EndTime  int    `json:"end_time"`
-	BeginTime int   `json:"begin_time"`
+	Text      string `json:"text"`
+	EndTime   int    `json:"end_time"`
+	BeginTime int    `json:"begin_time"`
 }
 
 type dsMessage struct {
@@ -165,8 +166,8 @@ func (s *Server) handleASRWebSocket(w http.ResponseWriter, r *http.Request) {
 					// Send finish-task
 					finishMsg := dsMessage{
 						Header: dsHeader{
-							Action:    "finish-task",
-							TaskID:    taskID,
+							Action: "finish-task",
+							TaskID: taskID,
 						},
 						Payload: dsPayload{Input: map[string]any{}},
 					}

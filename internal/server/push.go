@@ -8,7 +8,6 @@ package server
 //   RFC 8291 – Message Encryption for Web Push
 
 import (
-	"github.com/zyh001/med-exam-kit/internal/logger"
 	"bytes"
 	"crypto/aes"
 	"crypto/cipher"
@@ -27,13 +26,15 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/zyh001/med-exam-kit/internal/logger"
 )
 
 // ── VAPID 密钥对 ─────────────────────────────────────────────────────────
 
 // VAPIDKeys holds the server's VAPID key pair (one per server instance).
 type VAPIDKeys struct {
-	PrivateKey *ecdsa.PrivateKey
+	PrivateKey   *ecdsa.PrivateKey
 	PublicKeyB64 string // URL-safe base64 uncompressed public key (for clients)
 }
 
@@ -239,9 +240,9 @@ type pushEntry struct {
 }
 
 type pushStore struct {
-	mu      sync.RWMutex
-	byEP    map[string]*pushEntry // endpoint → entry
-	byUID   map[string]*pushEntry // uid → entry（每个用户保留最新一条）
+	mu    sync.RWMutex
+	byEP  map[string]*pushEntry // endpoint → entry
+	byUID map[string]*pushEntry // uid → entry（每个用户保留最新一条）
 }
 
 func newPushStore() *pushStore {
@@ -357,4 +358,3 @@ func (s *Server) vapidPublicKey() string {
 	}
 	return s.vapidKeys.PublicKeyB64
 }
-

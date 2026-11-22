@@ -20,7 +20,7 @@ import (
 // ── S3 私有上传 / 下载（AWS Signature V4，兼容 MinIO / RustFS）──────
 
 const s3UploadPrefix = "images/uploads/"
-const s3Region       = "us-east-1"
+const s3Region = "us-east-1"
 
 // s3Put 上传 data 到 S3，key 为对象路径（含 prefix）
 func s3Put(ctx context.Context, endpoint, bucket, ak, sk, key, contentType string, data []byte) error {
@@ -138,7 +138,9 @@ func s3Get(ctx context.Context, endpoint, bucket, ak, sk, key string) (io.ReadCl
 
 func s3sha256(data []byte) []byte { h := sha256.Sum256(data); return h[:] }
 func s3hmac(key, data []byte) []byte {
-	mac := hmac.New(sha256.New, key); mac.Write(data); return mac.Sum(nil)
+	mac := hmac.New(sha256.New, key)
+	mac.Write(data)
+	return mac.Sum(nil)
 }
 
 // ── HTTP 处理器 ───────────────────────────────────────────────────────
@@ -254,11 +256,16 @@ func (s *Server) handleImgLocal(w http.ResponseWriter, r *http.Request) {
 
 func imgExtFromContentType(ct string) string {
 	switch {
-	case strings.Contains(ct, "png"):  return ".png"
-	case strings.Contains(ct, "gif"):  return ".gif"
-	case strings.Contains(ct, "webp"): return ".webp"
-	case strings.Contains(ct, "svg"):  return ".svg"
-	default:                           return ".jpg"
+	case strings.Contains(ct, "png"):
+		return ".png"
+	case strings.Contains(ct, "gif"):
+		return ".gif"
+	case strings.Contains(ct, "webp"):
+		return ".webp"
+	case strings.Contains(ct, "svg"):
+		return ".svg"
+	default:
+		return ".jpg"
 	}
 }
 

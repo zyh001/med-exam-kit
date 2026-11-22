@@ -72,17 +72,17 @@ var imgExts = map[string]bool{
 
 func runImgMigrate(cmd *cobra.Command, args []string) error {
 	bankPaths, _ := cmd.Flags().GetStringArray("bank")
-	endpoint, _  := cmd.Flags().GetString("endpoint")
-	bucket, _    := cmd.Flags().GetString("bucket")
-	ak, _        := cmd.Flags().GetString("access-key")
-	sk, _        := cmd.Flags().GetString("secret-key")
-	region, _    := cmd.Flags().GetString("region")
-	prefix, _    := cmd.Flags().GetString("prefix")
-	outPath, _   := cmd.Flags().GetString("out")
-	publicBase, _:= cmd.Flags().GetString("public-base")
-	dryRun, _    := cmd.Flags().GetBool("dry-run")
-	password, _  := cmd.Flags().GetString("password")
-	skipExisting,_:= cmd.Flags().GetBool("skip-existing")
+	endpoint, _ := cmd.Flags().GetString("endpoint")
+	bucket, _ := cmd.Flags().GetString("bucket")
+	ak, _ := cmd.Flags().GetString("access-key")
+	sk, _ := cmd.Flags().GetString("secret-key")
+	region, _ := cmd.Flags().GetString("region")
+	prefix, _ := cmd.Flags().GetString("prefix")
+	outPath, _ := cmd.Flags().GetString("out")
+	publicBase, _ := cmd.Flags().GetString("public-base")
+	dryRun, _ := cmd.Flags().GetBool("dry-run")
+	password, _ := cmd.Flags().GetString("password")
+	skipExisting, _ := cmd.Flags().GetBool("skip-existing")
 
 	if len(bankPaths) == 0 {
 		return fmt.Errorf("请用 -b 指定至少一个题库路径")
@@ -142,7 +142,9 @@ func runImgMigrate(cmd *cobra.Command, args []string) error {
 		fmt.Println("\n── 预览（--dry-run，不执行上传）──")
 		for i, u := range imgURLs {
 			tag := ""
-			if urlMap[u] != "" { tag = " [已迁移]" }
+			if urlMap[u] != "" {
+				tag = " [已迁移]"
+			}
 			fmt.Printf("  [%d] %s%s\n", i+1, u, tag)
 		}
 		return nil
@@ -156,7 +158,9 @@ func runImgMigrate(cmd *cobra.Command, args []string) error {
 	client := &http.Client{
 		Timeout: 30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= 5 { return fmt.Errorf("too many redirects") }
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
 			return nil
 		},
 	}
@@ -220,7 +224,9 @@ func imgExtMatch(u string) bool {
 	// 匹配扩展名
 	for ext := range imgExts {
 		idx := strings.Index(lower, ext)
-		if idx < 0 { continue }
+		if idx < 0 {
+			continue
+		}
 		after := lower[idx+len(ext):]
 		// 扩展名后面跟 ? / # / 空白 / 结尾 都算图片 URL
 		if after == "" || after[0] == '?' || after[0] == '#' {
@@ -234,14 +240,18 @@ func imgExtMatch(u string) bool {
 
 func downloadImage(client *http.Client, imgURL string) ([]byte, string, error) {
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodGet, imgURL, nil)
-	if err != nil { return nil, "", err }
+	if err != nil {
+		return nil, "", err
+	}
 	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; med-exam-kit-migrate/1.0)")
 	parsed, _ := url.Parse(imgURL)
 	if parsed != nil {
 		req.Header.Set("Referer", parsed.Scheme+"://"+parsed.Host+"/")
 	}
 	resp, err := client.Do(req)
-	if err != nil { return nil, "", err }
+	if err != nil {
+		return nil, "", err
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 400 {
 		return nil, "", fmt.Errorf("HTTP %d", resp.StatusCode)
@@ -259,12 +269,18 @@ func hashKey(u string) string {
 func extFromContentType(ct, fallbackURL string) string {
 	ct = strings.ToLower(ct)
 	switch {
-	case strings.Contains(ct, "png"):         return ".png"
-	case strings.Contains(ct, "gif"):         return ".gif"
-	case strings.Contains(ct, "webp"):        return ".webp"
-	case strings.Contains(ct, "svg"):         return ".svg"
-	case strings.Contains(ct, "avif"):        return ".avif"
-	case strings.Contains(ct, "jpeg"), strings.Contains(ct, "jpg"): return ".jpg"
+	case strings.Contains(ct, "png"):
+		return ".png"
+	case strings.Contains(ct, "gif"):
+		return ".gif"
+	case strings.Contains(ct, "webp"):
+		return ".webp"
+	case strings.Contains(ct, "svg"):
+		return ".svg"
+	case strings.Contains(ct, "avif"):
+		return ".avif"
+	case strings.Contains(ct, "jpeg"), strings.Contains(ct, "jpg"):
+		return ".jpg"
 	}
 	// 从 URL 推断
 	lower := strings.ToLower(fallbackURL)
@@ -278,12 +294,16 @@ func extFromContentType(ct, fallbackURL string) string {
 
 func saveURLMap(path string, m map[string]string) error {
 	out, err := json.MarshalIndent(m, "", "  ")
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return os.WriteFile(path, out, 0644)
 }
 
 func truncateStr(s string, n int) string {
-	if len(s) <= n { return s }
+	if len(s) <= n {
+		return s
+	}
 	return s[:n-3] + "..."
 }
 
@@ -342,7 +362,9 @@ func putObjectS3(client *http.Client, endpoint, bucket, key, ak, sk, region stri
 
 	req, err := http.NewRequestWithContext(context.Background(), http.MethodPut, reqURL,
 		strings.NewReader(string(data)))
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	req.ContentLength = int64(len(data))
 	req.Header.Set("Content-Type", ct)
 	req.Header.Set("x-amz-date", timeStr)
@@ -350,7 +372,9 @@ func putObjectS3(client *http.Client, endpoint, bucket, key, ak, sk, region stri
 	req.Header.Set("Authorization", authHeader)
 
 	resp, err := client.Do(req)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))

@@ -347,7 +347,8 @@ func shuntingYard(tokens []token, deg bool) (float64, error) {
 
 func evaluate(raw string, deg bool) string {
 	defer func() {
-		if r := recover(); r != nil {}
+		if r := recover(); r != nil {
+		}
 	}()
 
 	s := raw

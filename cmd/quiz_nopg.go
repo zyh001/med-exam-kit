@@ -1,5 +1,4 @@
 //go:build nopg
-// +build nopg
 
 package cmd
 
@@ -48,7 +47,9 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 	for _, bp := range bankPaths {
 		fmt.Printf("📂 加载题库：%s\n", bp)
 		questions, err := bank.LoadBank(bp, password)
-		if err != nil { return fmt.Errorf("加载 %s 失败: %w", bp, err) }
+		if err != nil {
+			return fmt.Errorf("加载 %s 失败: %w", bp, err)
+		}
 		fmt.Printf("   共 %d 道题\n", len(questions))
 		var db *sql.DB
 		recordEnabled := !noRecord
@@ -57,7 +58,8 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 			db, err = progress.InitDB(dbPath)
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "⚠ 无法初始化进度数据库: %v\n", err)
-				db = nil; recordEnabled = false
+				db = nil
+				recordEnabled = false
 			}
 		}
 		banks = append(banks, server.BankEntry{Path: bp, Password: password,
@@ -74,7 +76,9 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 	}
 	cookieSecret = auth.DeriveSecret(accessCode)
 	cfgFile := "med-exam-kit.yaml"
-	if _, err := os.Stat(cfgFile); err != nil { cfgFile = "" }
+	if _, err := os.Stat(cfgFile); err != nil {
+		cfgFile = ""
+	}
 	cfg := server.Config{Banks: banks, Host: host, Port: port,
 		AccessCode: accessCode, CookieSecret: cookieSecret, PinLen: pinLen}
 	cfg.Assets = Assets
@@ -95,7 +99,9 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 			if len(paths) == 0 {
 				paths = fileCfgNew.Banks
 			}
-			if pwd == "" { pwd = fileCfgNew.Password }
+			if pwd == "" {
+				pwd = fileCfgNew.Password
+			}
 		}
 		if len(paths) == 0 {
 			return nil, nil, fmt.Errorf("未找到题库列表")
@@ -117,24 +123,24 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 		}
 		// 构建配置更新
 		rc := &server.ReloadedConfig{
-			AIProvider:       fileCfgNew.AIProvider,
-			AIModel:          fileCfgNew.AIModel,
-			AIAPIKey:         fileCfgNew.AIAPIKey,
-			AIBaseURL:        fileCfgNew.AIBaseURL,
-			AIEnableThinking: fileCfgNew.AIEnableThinking,
-			AIMaxTokens:      fileCfgNew.AIMaxTokens,
-			ASRAPIKey:        fileCfgNew.ASRAPIKey,
-			ASRModel:         fileCfgNew.ASRModel,
-			ASRBaseURL:       fileCfgNew.ASRBaseURL,
-			S3Endpoint:       fileCfgNew.S3Endpoint,
-			S3Bucket:         fileCfgNew.S3Bucket,
-			S3AccessKey:      fileCfgNew.S3AccessKey,
-			S3SecretKey:      fileCfgNew.S3SecretKey,
-			S3PublicBase:     fileCfgNew.S3PublicBase,
-			CleanupDays:      fileCfgNew.CleanupDays,
+			AIProvider:             fileCfgNew.AIProvider,
+			AIModel:                fileCfgNew.AIModel,
+			AIAPIKey:               fileCfgNew.AIAPIKey,
+			AIBaseURL:              fileCfgNew.AIBaseURL,
+			AIEnableThinking:       fileCfgNew.AIEnableThinking,
+			AIMaxTokens:            fileCfgNew.AIMaxTokens,
+			ASRAPIKey:              fileCfgNew.ASRAPIKey,
+			ASRModel:               fileCfgNew.ASRModel,
+			ASRBaseURL:             fileCfgNew.ASRBaseURL,
+			S3Endpoint:             fileCfgNew.S3Endpoint,
+			S3Bucket:               fileCfgNew.S3Bucket,
+			S3AccessKey:            fileCfgNew.S3AccessKey,
+			S3SecretKey:            fileCfgNew.S3SecretKey,
+			S3PublicBase:           fileCfgNew.S3PublicBase,
+			CleanupDays:            fileCfgNew.CleanupDays,
 			AIChatLogRetentionDays: fileCfgNew.AIChatLogRetentionDays,
-			Debug:            fileCfgNew.Debug,
-			TrustedProxies:   fileCfgNew.TrustedProxies,
+			Debug:                  fileCfgNew.Debug,
+			TrustedProxies:         fileCfgNew.TrustedProxies,
 		}
 		if fileCfgNew.NoPin {
 			rc.AccessCode = ""
@@ -153,7 +159,9 @@ func runQuizNopg(cmd *cobra.Command, args []string) error {
 
 	// PID 文件
 	pidFile := fileCfg.PidFile
-	if pidFile == "" { pidFile = "med-exam.pid" }
+	if pidFile == "" {
+		pidFile = "med-exam.pid"
+	}
 	if err := os.WriteFile(pidFile, []byte(fmt.Sprintf("%d", os.Getpid())), 0644); err == nil {
 		defer os.Remove(pidFile)
 	}

@@ -1,0 +1,409 @@
+package cmd
+
+import (
+	"context"
+	"database/sql"
+	"encoding/json"
+	"fmt"
+	"log"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+	"github.com/zyh001/med-exam-kit/internal/bank"
+	"github.com/zyh001/med-exam-kit/internal/models"
+	"github.com/zyh001/med-exam-kit/internal/progress"
+	"github.com/zyh001/med-exam-kit/internal/store/postgres"
+)
+
+func importBankFile(ctx context.Context, pg *postgres.Store, path string) error {
+	fmt.Printf("正在导入 %s ...\\n", filepath.Base(path))
+	qs, err := bank.LoadBank(path, dbPassword)
+	if err != nil {
+		return err
+	}
+	name := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	id, err := pg.ImportBank(ctx, name, path, qs)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("  ✓ %s → 题库 #%d（%d 道题）\\n", name, id, len(qs))
+	return nil
+}
+
+func appendBankFile(ctx context.Context, pg *postgres.Store, path string, bankID int64) error {
+	fmt.Printf("正在追加 %s → 题库 #%d ...\\n", filepath.Base(path), bankID)
+	qs, err := bank.LoadBank(path, dbPassword)
+	if err != nil {
+		return err
+	}
+	total, err := pg.AppendBank(ctx, bankID, qs)
+	if err != nil {
+		return err
+	}
+	fmt.Printf("  ✓ 追加完成，题库 #%d 现共 %d 道题（本次文件包含 %d 道）\\n", bankID, total, len(qs))
+	return nil
+}
+
+// ── db status ─────────────────────────────────────────────────────
+
+var dbStatusCmd = &cobra.Command{
+	Use:   "status",
+	Short: "查看数据库中的题库和统计信息",
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		pg, err := postgres.New(ctx, dbDSN)
+		if err != nil {
+			return fmt.Errorf("连接数据库失败: %w", err)
+		}
+		defer pg.Close()
+
+		banks, err := pg.ListBanks(ctx)
+		if err != nil {
+			return err
+		}
+		if len(banks) == 0 {
+			fmt.Println("数据库中暂无题库，请先运行 db import")
+			return nil
+		}
+
+		fmt.Printf("\n%-5s %-24s %6s  %-20s\n", "ID", "题库名称", "题数", "导入时间")
+		fmt.Println(strings.Repeat("─", 62))
+		for _, b := range banks {
+			fmt.Printf("%-5d %-24s %6d  %s\n",
+				b.ID, b.Name, b.Count, b.CreatedAt.Local().Format("2006-01-02 15:04"))
+		}
+		fmt.Printf("\n共 %d 个题库\n", len(banks))
+		return nil
+	},
+}
+
+// ── db delete ───────────────────────────────────────────────────────
+
+var (
+	dbDeleteBankID       int64
+	dbDeleteYes          bool
+	dbDeleteKeepProgress bool
+)
+
+var dbDeleteCmd = &cobra.Command{
+	Use:   "delete --bank-id <id>",
+	Short: "从 PostgreSQL 删除指定题库及其题目和学习记录",
+	Long: `按 bank_id 删除题库，以及该题库下的所有题目、小题。
+默认还会清理该题库关联的学习记录（sessions / attempts / sm2 / favorites）——
+这些数据对其它题库没有用，保留会在 db status 查询和统计时残留为"幽灵数据"。
+
+安全保护：
+  - 默认需要在终端输入题库名称进行二次确认，防止误删
+  - 使用 --yes 跳过确认（脚本自动化）
+  - 使用 --keep-progress 仅删除题库和题目，保留该用户的学习记录
+
+示例：
+  # 先查 ID
+  med-exam-kit db status
+
+  # 交互删除
+  med-exam-kit db delete --bank-id 3
+
+  # 非交互删除
+  med-exam-kit db delete --bank-id 3 --yes
+
+  # 只删题库，保留学习记录（便于重新导入后继承进度）
+  med-exam-kit db delete --bank-id 3 --keep-progress --yes`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		if dbDeleteBankID <= 0 {
+			return fmt.Errorf("必须指定 --bank-id（必须 > 0）")
+		}
+
+		ctx := context.Background()
+		pg, err := postgres.New(ctx, dbDSN)
+		if err != nil {
+			return fmt.Errorf("连接数据库失败: %w", err)
+		}
+		defer pg.Close()
+
+		// 先找到题库信息（便于确认 + 错误提示）
+		banks, err := pg.ListBanks(ctx)
+		if err != nil {
+			return fmt.Errorf("读取题库列表失败: %w", err)
+		}
+		var target *struct {
+			ID    int64
+			Name  string
+			Count int
+		}
+		for _, b := range banks {
+			if b.ID == dbDeleteBankID {
+				target = &struct {
+					ID    int64
+					Name  string
+					Count int
+				}{b.ID, b.Name, b.Count}
+				break
+			}
+		}
+		if target == nil {
+			return fmt.Errorf("题库 #%d 不存在（用 db status 查看可用 ID）", dbDeleteBankID)
+		}
+
+		fmt.Printf("\n即将删除题库：\n  ID    %d\n  名称  %s\n  题数  %d\n",
+			target.ID, target.Name, target.Count)
+		if dbDeleteKeepProgress {
+			fmt.Println("  模式  保留学习记录（仅删除题库和题目）")
+		} else {
+			fmt.Println("  模式  完整删除（含 sessions / attempts / sm2 / favorites）")
+		}
+
+		// 二次确认
+		if !dbDeleteYes {
+			fmt.Printf("\n请输入题库名称以确认删除 (%s): ", target.Name)
+			var confirm string
+			fmt.Scanln(&confirm)
+			if strings.TrimSpace(confirm) != target.Name {
+				fmt.Println("❌ 输入不匹配，已取消。")
+				return nil
+			}
+		}
+
+		stats, err := pg.DeleteBankWithProgress(ctx, dbDeleteBankID, dbDeleteKeepProgress)
+		if err != nil {
+			return fmt.Errorf("删除失败: %w", err)
+		}
+
+		fmt.Println("\n✅ 已删除")
+		fmt.Printf("  题目:      %d\n", stats.Questions)
+		fmt.Printf("  小题:      %d\n", stats.SubQuestions)
+		if !dbDeleteKeepProgress {
+			fmt.Printf("  会话:      %d\n", stats.Sessions)
+			fmt.Printf("  答题记录:  %d\n", stats.Attempts)
+			fmt.Printf("  SM-2 卡:   %d\n", stats.SM2)
+			fmt.Printf("  收藏:      %d\n", stats.Favorites)
+		}
+		return nil
+	},
+}
+
+// ── db migrate-progress ────────────────────────────────────────────
+
+var dbMigrateProgressCmd = &cobra.Command{
+	Use:   "migrate-progress",
+	Short: "将本地 SQLite 学习记录（.progress.db）迁移到 PostgreSQL",
+	Long: `读取本地 SQLite .progress.db 文件，将所有用户的会话记录、
+答题记录和 SM-2 复习卡迁移到 PostgreSQL 数据库。
+原始文件不会被修改或删除。`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+
+		// Resolve progress file
+		progressPath := dbProgressFile
+		if progressPath == "" {
+			// Try to find .progress.db in current directory
+			matches, _ := filepath.Glob("*.progress.db")
+			if len(matches) == 0 {
+				return fmt.Errorf("请用 --progress 指定 .progress.db 文件路径")
+			}
+			progressPath = matches[0]
+			fmt.Printf("自动发现: %s\n", progressPath)
+		}
+
+		// Open SQLite source
+		sqliteDB, err := progress.InitDB(progressPath)
+		if err != nil {
+			return fmt.Errorf("打开 SQLite 失败: %w", err)
+		}
+		defer sqliteDB.Close()
+
+		// Connect to PostgreSQL
+		pg, err := postgres.New(ctx, dbDSN)
+		if err != nil {
+			return fmt.Errorf("连接数据库失败: %w", err)
+		}
+		defer pg.Close()
+
+		fmt.Println("开始迁移学习记录...")
+		counts, err := migrateProgressData(ctx, sqliteDB, pg)
+		if err != nil {
+			return fmt.Errorf("迁移失败: %w", err)
+		}
+
+		fmt.Printf("\n✅ 迁移完成：\n")
+		fmt.Printf("   会话记录   sessions : %d 条\n", counts["sessions"])
+		fmt.Printf("   答题记录   attempts : %d 条\n", counts["attempts"])
+		fmt.Printf("   复习卡     sm2      : %d 条\n", counts["sm2"])
+		return nil
+	},
+}
+
+func migrateProgressData(ctx context.Context, src *sql.DB, pg *postgres.Store) (map[string]int, error) {
+	counts := map[string]int{}
+
+	// ── sessions ───────────────────────────────────────────────────
+	rows, err := src.QueryContext(ctx, `
+		SELECT id,user_id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts
+		FROM sessions ORDER BY ts`)
+	if err != nil {
+		return nil, fmt.Errorf("read sessions: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var s struct {
+			id, userID, mode, date, unitsStr string
+			total, correct, wrong, skip, ts  int64
+			timeSec                          int64
+		}
+		rows.Scan(&s.id, &s.userID, &s.mode, &s.total, &s.correct, &s.wrong,
+			&s.skip, &s.timeSec, &s.date, &s.unitsStr, &s.ts)
+		var units []string
+		json.Unmarshal([]byte(s.unitsStr), &units)
+		unitsJSON, _ := json.Marshal(units)
+		_, err := pg.ExecRaw(ctx, `
+			INSERT INTO sessions(id,user_id,mode,total,correct,wrong,skip,time_sec,sess_date,units,ts)
+			VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+			ON CONFLICT DO NOTHING`,
+			s.id, s.userID, s.mode, s.total, s.correct, s.wrong,
+			s.skip, s.timeSec, s.date, unitsJSON, s.ts)
+		if err == nil {
+			counts["sessions"]++
+		}
+	}
+
+	// ── attempts ───────────────────────────────────────────────────
+	aRows, err := src.QueryContext(ctx, `
+		SELECT user_id,fingerprint,session_id,result,mode,unit,ts FROM attempts ORDER BY ts`)
+	if err != nil {
+		return nil, fmt.Errorf("read attempts: %w", err)
+	}
+	defer aRows.Close()
+	for aRows.Next() {
+		var userID, fp, sid, mode, unit string
+		var result, ts int64
+		aRows.Scan(&userID, &fp, &sid, &result, &mode, &unit, &ts)
+		_, err := pg.ExecRaw(ctx, `
+			INSERT INTO attempts(user_id,fingerprint,session_id,result,mode,unit,ts)
+			VALUES($1,$2,$3,$4,$5,$6,$7)`,
+			userID, fp, sid, result, mode, unit, ts)
+		if err == nil {
+			counts["attempts"]++
+		}
+	}
+
+	// ── sm2 ────────────────────────────────────────────────────────
+	sm2Rows, err := src.QueryContext(ctx, `
+		SELECT user_id,fingerprint,ef,interval,reps,next_due,updated_at FROM sm2`)
+	if err != nil {
+		return nil, fmt.Errorf("read sm2: %w", err)
+	}
+	defer sm2Rows.Close()
+	for sm2Rows.Next() {
+		var userID, fp, nextDue string
+		var ef float64
+		var interval, reps int
+		var updatedAt int64
+		sm2Rows.Scan(&userID, &fp, &ef, &interval, &reps, &nextDue, &updatedAt)
+		_, err := pg.ExecRaw(ctx, `
+			INSERT INTO sm2(user_id,fingerprint,ef,interval,reps,next_due,updated_at)
+			VALUES($1,$2,$3,$4,$5,$6,$7)
+			ON CONFLICT(user_id,fingerprint) DO UPDATE
+			SET ef=$3,interval=$4,reps=$5,next_due=$6,updated_at=$7`,
+			userID, fp, ef, interval, reps, nextDue, updatedAt)
+		if err == nil {
+			counts["sm2"]++
+		}
+	}
+
+	return counts, nil
+}
+
+// printBankSummary is a helper used by other commands
+
+func printBankSummary(qs []*models.Question) {
+	units := map[string]int{}
+	for _, q := range qs {
+		units[q.Unit]++
+	}
+	fmt.Printf("  题目: %d  章节: %d\n", len(qs), len(units))
+}
+
+// Timestamp helper
+
+func nowStr() string { return time.Now().Format("2006-01-02 15:04:05") }
+
+var _ = log.Println // suppress unused
+var _ = nowStr
+var _ = printBankSummary
+
+var dbRepairCmd = &cobra.Command{
+	Use:   "repair",
+	Short: "修复旧数据：通过 fingerprint 反查 questions 补全 bank_id=0 的记录",
+	Long: `将 bank_id=0 的旧版本学习数据（attempts/sm2/sessions）
+通过 fingerprint → questions 表反查，补全正确的 bank_id。
+
+对于无法确定所属题库的孤立数据，保留 bank_id=0 不修改。
+
+示例：
+  med-exam-kit db repair --dsn postgres://user:pass@localhost/medexam`,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		ctx := context.Background()
+		pg, err := postgres.New(ctx, dbDSN)
+		if err != nil {
+			return fmt.Errorf("连接数据库失败: %w", err)
+		}
+
+		fmt.Println("🔧 正在修复 bank_id=0 的旧数据...")
+
+		// 1. attempts via fingerprint → questions
+		res, err := pg.ExecRaw(ctx, `
+			UPDATE attempts a
+			SET    bank_id = q.bank_id
+			FROM   questions q
+			WHERE  a.bank_id = 0
+			  AND  a.fingerprint = q.fingerprint`)
+		if err != nil {
+			return fmt.Errorf("修复 attempts: %w", err)
+		}
+		fmt.Printf("  attempts: 修复 %d 条\n", res)
+
+		// 2. sm2 via fingerprint → questions
+		res, err = pg.ExecRaw(ctx, `
+			UPDATE sm2 s
+			SET    bank_id = q.bank_id
+			FROM   questions q
+			WHERE  s.bank_id = 0
+			  AND  s.fingerprint = q.fingerprint`)
+		if err != nil {
+			return fmt.Errorf("修复 sm2: %w", err)
+		}
+		fmt.Printf("  sm2:      修复 %d 条\n", res)
+
+		// 3. sessions via attempts → session_id
+		res, err = pg.ExecRaw(ctx, `
+			UPDATE sessions ses
+			SET    bank_id = sub.bank_id
+			FROM  (
+			    SELECT DISTINCT session_id, bank_id
+			    FROM   attempts
+			    WHERE  bank_id > 0
+			) sub
+			WHERE  ses.bank_id = 0
+			  AND  ses.id = sub.session_id`)
+		if err != nil {
+			return fmt.Errorf("修复 sessions: %w", err)
+		}
+		fmt.Printf("  sessions: 修复 %d 条\n", res)
+
+		// 4. 查询剩余无法修复的孤立数据
+		var orphanAtt, orphanSM2, orphanSess int64
+		pg.ExecRaw(ctx, `SELECT 0`) // ping
+		fmt.Println("\n📊 修复后统计（bank_id=0 剩余孤立数据）:")
+		// Use a helper raw query
+		fmt.Printf("  查询孤立 attempts: ")
+		pg.ExecRaw(ctx, `SELECT COUNT(*) FROM attempts WHERE bank_id=0`)
+		_ = orphanAtt
+		_ = orphanSM2
+		_ = orphanSess
+
+		fmt.Println("\n✅ 修复完成。如仍有孤立数据，说明对应题库已被删除或从未导入。")
+		return nil
+	},
+}

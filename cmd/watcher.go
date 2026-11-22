@@ -1,5 +1,4 @@
 //go:build !nopg
-// +build !nopg
 
 package cmd
 

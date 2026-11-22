@@ -88,11 +88,11 @@ var (
 // installGroupedCommands 是 CLI 重组的入口。
 //
 // 工作顺序：
-//   1. 先 snapshot 所有由各子命令 init() 注入到 rootCmd 上的顶层命令
-//   2. 依次把这些顶层命令搬到 serve / bank / admin 下（db 已经是分组，保留原样）
-//   3. 在 rootCmd 挂一个 Hidden=true 的同名别名（浅拷贝 Command 即可，
-//      flag/RunE 共享同一份实现），保证老脚本 `med-exam quiz -b ...`、
-//      `med-exam config init` 等继续能跑
+//  1. 先 snapshot 所有由各子命令 init() 注入到 rootCmd 上的顶层命令
+//  2. 依次把这些顶层命令搬到 serve / bank / admin 下（db 已经是分组，保留原样）
+//  3. 在 rootCmd 挂一个 Hidden=true 的同名别名（浅拷贝 Command 即可，
+//     flag/RunE 共享同一份实现），保证老脚本 `med-exam quiz -b ...`、
+//     `med-exam config init` 等继续能跑
 //
 // 注意：该函数由 Execute() 调用，此时所有 init() 都已执行完，rootCmd 上
 // 所有子命令都挂载好了，可以安全地读取 rootCmd.Commands() 做 snapshot。

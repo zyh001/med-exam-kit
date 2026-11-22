@@ -62,7 +62,9 @@ func doGet(s *Server, path string, cookie string) *httptest.ResponseRecorder {
 func syncSession(t *testing.T, s *Server, cookie, sid string, correct bool) {
 	t.Helper()
 	result := 0
-	if correct { result = 1 }
+	if correct {
+		result = 1
+	}
 	w := doPost(s, "/api/sync?bank=0", cookie, map[string]any{
 		"sessions": []map[string]any{{
 			"id": sid, "mode": "practice", "total": 1,
@@ -128,7 +130,7 @@ func TestSync_XUserIDHeaderFix(t *testing.T) {
 	t.Logf("legacy overall (should be 1): %v", overallLeg)
 
 	// 如果 total_attempts 读出来是 0 (real user) 但 legacy 是 1，说明用户 ID 不一致
-	realAttempts  := overall["total_attempts"].(float64)
+	realAttempts := overall["total_attempts"].(float64)
 	legacyAttempts := overallLeg["total_attempts"].(float64)
 	if realAttempts == 0 && legacyAttempts > 0 {
 		t.Errorf("BUG: uid mismatch: sync 写入 _legacy, stats 读取 %s → 数据不可见!\n"+

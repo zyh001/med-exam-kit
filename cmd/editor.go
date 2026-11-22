@@ -1,5 +1,4 @@
 //go:build !nopg
-// +build !nopg
 
 package cmd
 
@@ -56,7 +55,10 @@ func runEditor(cmd *cobra.Command, args []string) error {
 		meta, _ := pg.ListBanks(ctx)
 		name := fmt.Sprintf("bank_%d", bankID)
 		for _, m := range meta {
-			if m.ID == bankID { name = m.Name; break }
+			if m.ID == bankID {
+				name = m.Name
+				break
+			}
 		}
 		fmt.Printf("🗄  从数据库加载题库 #%d (%s)：%d 道题\n", bankID, name, len(qs))
 		entry = server.BankEntry{
@@ -69,7 +71,9 @@ func runEditor(cmd *cobra.Command, args []string) error {
 		}
 		fmt.Printf("📂 加载题库：%s\n", bankPath)
 		questions, err := bank.LoadBank(bankPath, password)
-		if err != nil { return err }
+		if err != nil {
+			return err
+		}
 		fmt.Printf("   共 %d 道题\n", len(questions))
 		entry = server.BankEntry{Path: bankPath, Password: password, Questions: questions}
 	}
@@ -79,7 +83,9 @@ func runEditor(cmd *cobra.Command, args []string) error {
 
 	addr := net.JoinHostPort(host, fmt.Sprint(port))
 	fmt.Printf("🌐 编辑器地址：http://%s/editor\n", addr)
-	if pgDSN != "" { fmt.Println("🗄  保存时将写回 PostgreSQL") }
+	if pgDSN != "" {
+		fmt.Println("🗄  保存时将写回 PostgreSQL")
+	}
 	fmt.Println("   按 Ctrl+C 停止服务")
 	openBrowser(fmt.Sprintf("http://%s/editor", addr))
 
@@ -88,8 +94,11 @@ func runEditor(cmd *cobra.Command, args []string) error {
 
 func openBrowser(url string) {
 	switch runtime.GOOS {
-	case "darwin": exec.Command("open", url).Run()
-	case "linux":  exec.Command("xdg-open", url).Run()
-	case "windows": exec.Command("cmd", "/c", "start", url).Run()
+	case "darwin":
+		exec.Command("open", url).Run()
+	case "linux":
+		exec.Command("xdg-open", url).Run()
+	case "windows":
+		exec.Command("cmd", "/c", "start", url).Run()
 	}
 }

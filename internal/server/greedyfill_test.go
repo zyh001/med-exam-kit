@@ -65,8 +65,8 @@ func TestGreedyFillPass3RandomisesTruncation(t *testing.T) {
 			t.Fatalf("expected single 3-item group, got %v", got)
 		}
 		firstID := got[0][0].ID
-		prefix := firstID[:1]   // e.g. "A"
-		start := firstID[2:]    // e.g. "0" from "A-0"
+		prefix := firstID[:1] // e.g. "A"
+		start := firstID[2:]  // e.g. "0" from "A-0"
 		pickedIDs[prefix]++
 		windowStarts[start]++
 	}

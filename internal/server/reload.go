@@ -11,23 +11,23 @@ import (
 // ReloadedConfig carries the mutable runtime configuration fields that
 // may change between hot-reloads (everything except Host/Port/Assets).
 type ReloadedConfig struct {
-	AccessCode   string
-	CookieSecret string
-	PinLen       int
-	AIProvider       string
-	AIModel          string
-	AIAPIKey         string
-	AIBaseURL        string
-	AIEnableThinking *bool
-	AIMaxTokens      int
-	ASRAPIKey  string
-	ASRModel   string
-	ASRBaseURL string
-	S3Endpoint   string
-	S3Bucket     string
-	S3AccessKey  string
-	S3SecretKey  string
-	S3PublicBase string
+	AccessCode             string
+	CookieSecret           string
+	PinLen                 int
+	AIProvider             string
+	AIModel                string
+	AIAPIKey               string
+	AIBaseURL              string
+	AIEnableThinking       *bool
+	AIMaxTokens            int
+	ASRAPIKey              string
+	ASRModel               string
+	ASRBaseURL             string
+	S3Endpoint             string
+	S3Bucket               string
+	S3AccessKey            string
+	S3SecretKey            string
+	S3PublicBase           string
 	CleanupDays            int
 	AIChatLogRetentionDays int
 	Debug                  bool

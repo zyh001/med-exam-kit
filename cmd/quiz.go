@@ -1,5 +1,4 @@
 //go:build !nopg
-// +build !nopg
 
 package cmd
 
@@ -102,48 +101,82 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 
 	// CLI 标志若未显式设置则使用配置文件的值
 	password, _ := cmd.Root().PersistentFlags().GetString("password")
-	if password == "" { password = fileCfg.Password }
+	if password == "" {
+		password = fileCfg.Password
+	}
 
 	port, _ := cmd.Flags().GetInt("port")
-	if !cmd.Flags().Changed("port") { port = fileCfg.Port }
+	if !cmd.Flags().Changed("port") {
+		port = fileCfg.Port
+	}
 
 	host, _ := cmd.Flags().GetString("host")
-	if !cmd.Flags().Changed("host") { host = fileCfg.Host }
+	if !cmd.Flags().Changed("host") {
+		host = fileCfg.Host
+	}
 
 	noRecord, _ := cmd.Flags().GetBool("no-record")
-	if !cmd.Flags().Changed("no-record") { noRecord = fileCfg.NoRecord }
+	if !cmd.Flags().Changed("no-record") {
+		noRecord = fileCfg.NoRecord
+	}
 
 	noPin, _ := cmd.Flags().GetBool("no-pin")
-	if !cmd.Flags().Changed("no-pin") { noPin = fileCfg.NoPin }
+	if !cmd.Flags().Changed("no-pin") {
+		noPin = fileCfg.NoPin
+	}
 
 	customPin, _ := cmd.Flags().GetString("pin")
-	if !cmd.Flags().Changed("pin") { customPin = fileCfg.Pin }
+	if !cmd.Flags().Changed("pin") {
+		customPin = fileCfg.Pin
+	}
 
 	cleanupDays, _ := cmd.Flags().GetInt("cleanup-days")
-	if !cmd.Flags().Changed("cleanup-days") { cleanupDays = fileCfg.CleanupDays }
-	if cleanupDays <= 0 { cleanupDays = 7 } // 默认 7 天
+	if !cmd.Flags().Changed("cleanup-days") {
+		cleanupDays = fileCfg.CleanupDays
+	}
+	if cleanupDays <= 0 {
+		cleanupDays = 7
+	} // 默认 7 天
 
 	aiMaxTokens, _ := cmd.Flags().GetInt("ai-max-tokens")
-	if !cmd.Flags().Changed("ai-max-tokens") { aiMaxTokens = fileCfg.AIMaxTokens }
-	if aiMaxTokens <= 0 { aiMaxTokens = 2048 } // 默认 2048
+	if !cmd.Flags().Changed("ai-max-tokens") {
+		aiMaxTokens = fileCfg.AIMaxTokens
+	}
+	if aiMaxTokens <= 0 {
+		aiMaxTokens = 2048
+	} // 默认 2048
 
 	debug, _ := cmd.Flags().GetBool("debug")
-	if !cmd.Flags().Changed("debug") { debug = fileCfg.Debug }
+	if !cmd.Flags().Changed("debug") {
+		debug = fileCfg.Debug
+	}
 
 	autoReload, _ := cmd.Flags().GetBool("auto-reload")
-	if !cmd.Flags().Changed("auto-reload") { autoReload = fileCfg.AutoReloadWatch }
+	if !cmd.Flags().Changed("auto-reload") {
+		autoReload = fileCfg.AutoReloadWatch
+	}
 	autoReloadInterval, _ := cmd.Flags().GetInt("auto-reload-interval")
-	if !cmd.Flags().Changed("auto-reload-interval") { autoReloadInterval = fileCfg.AutoReloadInterval }
-	if autoReloadInterval <= 0 { autoReloadInterval = 10 }
+	if !cmd.Flags().Changed("auto-reload-interval") {
+		autoReloadInterval = fileCfg.AutoReloadInterval
+	}
+	if autoReloadInterval <= 0 {
+		autoReloadInterval = 10
+	}
 
 	pgDSN, _ := cmd.Flags().GetString("db")
-	if !cmd.Flags().Changed("db") { pgDSN = fileCfg.DB }
+	if !cmd.Flags().Changed("db") {
+		pgDSN = fileCfg.DB
+	}
 
 	bankIDs, _ := cmd.Flags().GetInt64Slice("bank-id")
-	if !cmd.Flags().Changed("bank-id") && len(fileCfg.BankIDs) > 0 { bankIDs = fileCfg.BankIDs }
+	if !cmd.Flags().Changed("bank-id") && len(fileCfg.BankIDs) > 0 {
+		bankIDs = fileCfg.BankIDs
+	}
 
 	bankPaths, _ := cmd.Flags().GetStringArray("bank")
-	if !cmd.Flags().Changed("bank") && len(fileCfg.Banks) > 0 { bankPaths = fileCfg.Banks }
+	if !cmd.Flags().Changed("bank") && len(fileCfg.Banks) > 0 {
+		bankPaths = fileCfg.Banks
+	}
 
 	if len(bankPaths) == 0 && len(bankIDs) == 0 {
 		return fmt.Errorf("请用 -b 指定题库路径，或用 --db + --bank-id 从数据库加载")
@@ -192,30 +225,30 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 	cookieSecret = auth.DeriveSecret(accessCode)
 
 	cfg := server.Config{
-		Banks:        banks,
-		Host:         host,
-		Port:         port,
-		AccessCode:   accessCode,
-		CookieSecret: cookieSecret,
-		PinLen:       pinLen,
-		AIProvider:      fileCfg.AIProvider,
-		AIModel:         fileCfg.AIModel,
-		AIAPIKey:        fileCfg.AIAPIKey,
-		AIBaseURL:       fileCfg.AIBaseURL,
-		AIEnableThinking: fileCfg.AIEnableThinking,
-		AIMaxTokens:     aiMaxTokens,
-		ASRAPIKey:        fileCfg.ASRAPIKey,
-		ASRModel:         fileCfg.ASRModel,
-		ASRBaseURL:       fileCfg.ASRBaseURL,
-		S3Endpoint:      fileCfg.S3Endpoint,
-		S3Bucket:        fileCfg.S3Bucket,
-		S3AccessKey:     fileCfg.S3AccessKey,
-		S3SecretKey:     fileCfg.S3SecretKey,
-		S3PublicBase:    fileCfg.S3PublicBase,
-		CleanupDays:     cleanupDays,
+		Banks:                  banks,
+		Host:                   host,
+		Port:                   port,
+		AccessCode:             accessCode,
+		CookieSecret:           cookieSecret,
+		PinLen:                 pinLen,
+		AIProvider:             fileCfg.AIProvider,
+		AIModel:                fileCfg.AIModel,
+		AIAPIKey:               fileCfg.AIAPIKey,
+		AIBaseURL:              fileCfg.AIBaseURL,
+		AIEnableThinking:       fileCfg.AIEnableThinking,
+		AIMaxTokens:            aiMaxTokens,
+		ASRAPIKey:              fileCfg.ASRAPIKey,
+		ASRModel:               fileCfg.ASRModel,
+		ASRBaseURL:             fileCfg.ASRBaseURL,
+		S3Endpoint:             fileCfg.S3Endpoint,
+		S3Bucket:               fileCfg.S3Bucket,
+		S3AccessKey:            fileCfg.S3AccessKey,
+		S3SecretKey:            fileCfg.S3SecretKey,
+		S3PublicBase:           fileCfg.S3PublicBase,
+		CleanupDays:            cleanupDays,
 		AIChatLogRetentionDays: fileCfg.AIChatLogRetentionDays,
-		Debug:           debug,
-		TrustedProxies:  fileCfg.TrustedProxies,
+		Debug:                  debug,
+		TrustedProxies:         fileCfg.TrustedProxies,
 	}
 	cfg.Assets = Assets
 
@@ -278,20 +311,20 @@ func runQuiz(cmd *cobra.Command, args []string) error {
 
 		// 构建完整配置更新
 		rc := &server.ReloadedConfig{
-			AIProvider:       fileCfgNew.AIProvider,
-			AIModel:          fileCfgNew.AIModel,
-			AIAPIKey:         fileCfgNew.AIAPIKey,
-			AIBaseURL:        fileCfgNew.AIBaseURL,
-			AIEnableThinking: fileCfgNew.AIEnableThinking,
-			AIMaxTokens:      fileCfgNew.AIMaxTokens,
-			ASRAPIKey:        fileCfgNew.ASRAPIKey,
-			ASRModel:         fileCfgNew.ASRModel,
-			ASRBaseURL:       fileCfgNew.ASRBaseURL,
-			S3Endpoint:       fileCfgNew.S3Endpoint,
-			S3Bucket:         fileCfgNew.S3Bucket,
-			S3AccessKey:      fileCfgNew.S3AccessKey,
-			S3SecretKey:      fileCfgNew.S3SecretKey,
-			S3PublicBase:     fileCfgNew.S3PublicBase,
+			AIProvider:             fileCfgNew.AIProvider,
+			AIModel:                fileCfgNew.AIModel,
+			AIAPIKey:               fileCfgNew.AIAPIKey,
+			AIBaseURL:              fileCfgNew.AIBaseURL,
+			AIEnableThinking:       fileCfgNew.AIEnableThinking,
+			AIMaxTokens:            fileCfgNew.AIMaxTokens,
+			ASRAPIKey:              fileCfgNew.ASRAPIKey,
+			ASRModel:               fileCfgNew.ASRModel,
+			ASRBaseURL:             fileCfgNew.ASRBaseURL,
+			S3Endpoint:             fileCfgNew.S3Endpoint,
+			S3Bucket:               fileCfgNew.S3Bucket,
+			S3AccessKey:            fileCfgNew.S3AccessKey,
+			S3SecretKey:            fileCfgNew.S3SecretKey,
+			S3PublicBase:           fileCfgNew.S3PublicBase,
 			CleanupDays:            fileCfgNew.CleanupDays,
 			AIChatLogRetentionDays: fileCfgNew.AIChatLogRetentionDays,
 			Debug:                  fileCfgNew.Debug,
@@ -360,7 +393,10 @@ func loadBankEntries(ctx context.Context, paths []string, password string, pg *p
 			meta, _ := pg.ListBanks(ctx)
 			name := fmt.Sprintf("bank_%d", bankID)
 			for _, m := range meta {
-				if m.ID == bankID { name = m.Name; break }
+				if m.ID == bankID {
+					name = m.Name
+					break
+				}
 			}
 			entry = server.BankEntry{
 				Path: bp, Name: name, BankID: int(bankID),
@@ -381,18 +417,19 @@ func loadBankEntries(ctx context.Context, paths []string, password string, pg *p
 				db, err = progress.InitDB(dbPath)
 				if err != nil {
 					logger.Warnf("[reload] 无法初始化进度数据库 (%s): %v", bp, err)
-					db = nil; recordEnabled = false
+					db = nil
+					recordEnabled = false
 				}
 			}
 			entry = server.BankEntry{
 				Path: bp, Password: password, Questions: qs,
 				DB: db, RecordEnabled: recordEnabled,
 			}
-			if pg != nil { entry.PgStore = pg }
+			if pg != nil {
+				entry.PgStore = pg
+			}
 		}
 		entries = append(entries, entry)
 	}
 	return entries, nil
 }
-
-

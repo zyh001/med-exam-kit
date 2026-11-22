@@ -1,5 +1,4 @@
 //go:build nopg
-// +build nopg
 
 package cmd
 
@@ -32,10 +31,14 @@ func runEditor(cmd *cobra.Command, args []string) error {
 	host, _ := cmd.Flags().GetString("host")
 	port, _ := cmd.Flags().GetInt("port")
 
-	if bankPath == "" { return fmt.Errorf("请用 -b 指定题库路径") }
+	if bankPath == "" {
+		return fmt.Errorf("请用 -b 指定题库路径")
+	}
 	fmt.Printf("📂 加载题库：%s\n", bankPath)
 	questions, err := bank.LoadBank(bankPath, password)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	fmt.Printf("   共 %d 道题\n", len(questions))
 
 	cfg := server.Config{Banks: []server.BankEntry{{Path: bankPath, Password: password, Questions: questions}}, Host: host, Port: port}
@@ -45,9 +48,12 @@ func runEditor(cmd *cobra.Command, args []string) error {
 	fmt.Printf("🌐 编辑器地址：http://%s/editor\n", addr)
 	fmt.Println("   按 Ctrl+C 停止服务")
 	switch runtime.GOOS {
-	case "darwin": exec.Command("open", "http://"+addr+"/editor").Run()
-	case "linux":  exec.Command("xdg-open", "http://"+addr+"/editor").Run()
-	case "windows": exec.Command("cmd", "/c", "start", "http://"+addr+"/editor").Run()
+	case "darwin":
+		exec.Command("open", "http://"+addr+"/editor").Run()
+	case "linux":
+		exec.Command("xdg-open", "http://"+addr+"/editor").Run()
+	case "windows":
+		exec.Command("cmd", "/c", "start", "http://"+addr+"/editor").Run()
 	}
 	return server.New(cfg).ListenAndServe()
 }

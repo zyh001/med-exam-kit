@@ -26,7 +26,7 @@ import (
 func makeSecurityServer(t *testing.T) *Server {
 	t.Helper()
 	s := New(Config{
-		AccessCode:    "",     // 无访问码，简化测试（只关注 token + 限流路径）
+		AccessCode:    "", // 无访问码，简化测试（只关注 token + 限流路径）
 		Host:          "127.0.0.1",
 		Port:          5174,
 		RecordEnabled: false,
